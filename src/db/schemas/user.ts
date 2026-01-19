@@ -1,20 +1,38 @@
-import { pgTable, text, timestamp, boolean, pgEnum } from "drizzle-orm/pg-core";
+import {
+  pgTable,
+  text,
+  timestamp,
+  boolean,
+  pgEnum,
+  integer,
+  index,
+} from "drizzle-orm/pg-core";
+import { company } from "@/db/schemas/company";
 
-export const user = pgTable("user", {
-  id: text("id").primaryKey(),
-  name: text("name").notNull(),
-  email: text("email").notNull().unique(),
-  emailVerified: boolean("email_verified")
-    .$defaultFn(() => false)
-    .notNull(),
-  image: text("image"),
-  createdAt: timestamp("created_at")
-    .$defaultFn(() => /* @__PURE__ */ new Date())
-    .notNull(),
-  updatedAt: timestamp("updated_at")
-    .$defaultFn(() => /* @__PURE__ */ new Date())
-    .notNull(),
-});
+export const user = pgTable(
+  "user",
+  {
+    id: text("id").primaryKey(),
+    name: text("name").notNull(),
+    email: text("email").notNull().unique(),
+    companyId: text("company_id")
+      .notNull()
+      .references(() => company.id, { onDelete: "cascade" }),
+    emailVerified: boolean("email_verified")
+      .$defaultFn(() => false)
+      .notNull(),
+    image: text("image"),
+    createdAt: timestamp("created_at")
+      .$defaultFn(() => /* @__PURE__ */ new Date())
+      .notNull(),
+    updatedAt: timestamp("updated_at")
+      .$defaultFn(() => /* @__PURE__ */ new Date())
+      .notNull(),
+  },
+  (table) => [
+     {companyIdx: index("idx_user_hotel_company").on(table.companyId)}
+  ]
+);
 
 export const session = pgTable("session", {
   id: text("id").primaryKey(),
@@ -59,3 +77,5 @@ export const verification = pgTable("verification", {
     () => /* @__PURE__ */ new Date()
   ),
 });
+
+export const userRole = pgEnum("user_role", ["ADMIN", "AGENT"]);

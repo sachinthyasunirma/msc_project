@@ -1,118 +1,224 @@
 "use client";
-import { usePathname } from "next/navigation";
-import Image from "next/image";
-import Link from "next/link";
-import { BotIcon, StarIcon, VideoIcon } from "lucide-react";
 
-import { Separator } from "@/components/ui/separator";
+import * as React from "react";
+import {
+  BookOpen,
+  Bot,
+  Command,
+  Frame,
+  LifeBuoy,
+  Map,
+  PieChart,
+  Send,
+  Settings2,
+  SquareTerminal,
+} from "lucide-react";
+
 import {
   Sidebar,
   SidebarContent,
   SidebarFooter,
-  SidebarGroup,
-  SidebarGroupContent,
   SidebarHeader,
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
 } from "@/components/ui/sidebar";
-import { cn } from "@/lib/utils";
-import { DashboardUserButton } from "./dashboard-user-button";
+import { NavUser } from "@/modules/dashboard/ui/components/nav-user";
+import { DashboardSidebarSecondary } from "@/modules/dashboard/ui/components/dashboard-sidebar-secondary";
+import { DashboardSidebarMaster } from "./dashboard-sidebar-master";
+import { DashboardSidebarMain } from "./dashboard-sidebar-main";
 
-const firstSection = [
-  {
-    icon: VideoIcon,
-    label: "Meetings",
-    href: "/meetings",
+const data = {
+  user: {
+    name: "shadcn",
+    email: "m@example.com",
+    avatar: "/avatars/shadcn.jpg",
   },
-  {
-    icon: BotIcon,
-    label: "Agents",
-    href: "/agents",
-  },
-];
+  navMain: [
+    {
+      title: "Dashoboard",
+      url: "#",
+      icon: SquareTerminal,
+      isActive: true,
+      items: [
+        {
+          title: "Overview",
+          url: "#",
+        },
+        {
+          title: "Recent Activity",
+          url: "#",
+        },
+        {
+          title: "Performance Metrics",
+          url: "#",
+        },
+      ],
+    },
+    {
+      title: "Incoming Requests",
+      url: "#",
+      icon: Bot,
+      items: [
+        {
+          title: "New Requests",
+          url: "#",
+        },
+        {
+          title: "Pending Review",
+          url: "#",
+        },
+        {
+          title: "In Negotiation",
+          url: "#",
+        },
+        {
+          title: "Sent to Partner",
+          url: "#",
+        },
+      ],
+    },
+    {
+      title: "Itinerary Management",
+      url: "#",
+      icon: BookOpen,
+      items: [
+        {
+          title: "Edit Itinerary",
+          url: "#",
+        },
+        {
+          title: "Approve/Reject",
+          url: "#",
+        },
+        {
+          title: "Version Control",
+          url: "#",
+        },
+        {
+          title: "Send to Partner",
+          url: "#",
+        },
+      ],
+    },
+    {
+      title: "Master Data",
+      url: "#",
+      icon: Settings2,
+      items: [
+        {
+          title: "Accommodations",
+          url: "#",
+        },
+        {
+          title: "Activities",
+          url: "#",
+        },
+        {
+          title: "Transport",
+          url: "#",
+        },
+      ],
+    },
+    {
+      title: "Communication",
+      url: "#",
+      icon: Settings2,
+      items: [
+        {
+          title: "Chat with Overseas Agent",
+          url: "#",
+        },
+        {
+          title: "Email Logs",
+          url: "#",
+        },
+        {
+          title: "Attachments",
+          url: "#",
+        },
+      ],
+    },
+    {
+      title: "Reports",
+      url: "#",
+      icon: Settings2,
+      items: [
+        {
+          title: "Monthly Summary",
+          url: "#",
+        },
+        {
+          title: "Revenue by Partner",
+          url: "#",
+        },
+      ],
+    },
+  ],
+  navSecondary: [
+    {
+      title: "Settings",
+      url: "#",
+      icon: LifeBuoy,
+    },
+    {
+      title: "Feedback",
+      url: "#",
+      icon: Send,
+    },
+  ],
+  projects: [
+    // {
+    //   name: "Design Engineering",
+    //   url: "#",
+    //   icon: Frame,
+    // },
+    // {
+    //   name: "Sales & Marketing",
+    //   url: "#",
+    //   icon: PieChart,
+    // },
+    // {
+    //   name: "Travel",
+    //   url: "#",
+    //   icon: Map,
+    // },
+  ],
+};
 
-const secondSection = [
-  {
-    icon: StarIcon,
-    label: "Upgrade",
-    href: "/upgrade",
-  },
-];
-
-export const DashboardSidebar = () => {
-  const pathname = usePathname();
+export function DashboardSidebar({
+  ...props
+}: React.ComponentProps<typeof Sidebar>) {
   return (
-    <Sidebar>
-      <SidebarHeader className="text-sidebar-accent-foreground">
-        <Link href={"/"} className="flex items-center gap-2 px-2 pt-2">
-          <Image src={"/logo.svg"} height={36} width={36} alt="AgentAi" />
-          <p className="text-2xl font-semibold">Agent AI</p>
-        </Link>
+    <Sidebar variant="inset" {...props}>
+      <SidebarHeader>
+        <SidebarMenu>
+          <SidebarMenuItem>
+            <SidebarMenuButton size="lg" asChild>
+              <a href="#">
+                <div className="bg-sidebar-primary text-sidebar-primary-foreground flex aspect-square size-8 items-center justify-center rounded-lg">
+                  <Command className="size-4" />
+                </div>
+                <div className="grid flex-1 text-left text-sm leading-tight">
+                  <span className="truncate font-medium">Acme Inc</span>
+                  <span className="truncate text-xs">Enterprise</span>
+                </div>
+              </a>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        </SidebarMenu>
       </SidebarHeader>
-      <div className="px-4 py-2">
-        <Separator className="opacity-10 text-[#5D6B68]" />
-      </div>
       <SidebarContent>
-        <SidebarGroup>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              {firstSection.map((item) => (
-                <SidebarMenuItem key={item.href}>
-                  <SidebarMenuButton
-                    asChild
-                    className={cn(
-                      "h-10 hover:bg-linear-to-r/oklch border border-transparent hover:border-[#5D6B68]/10 from-sidebar-accent from-5% via-30% via-sidebar/50 to-sidebar/50",
-                      pathname === item.href &&
-                        "bg-linear-to-r/oklch border-[#5D6B68]/10"
-                    )}
-                    isActive={pathname === item.href}
-                  >
-                    <Link href={item.href}>
-                      <item.icon className="size-5" />
-                      <span className="text-sm font-medium tracking-tight">
-                        {item.label}
-                      </span>
-                    </Link>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              ))}
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
-        <div className="px-4 py-2">
-          <Separator className="opacity-10 text-[#5D6B68]" />
-        </div>
-        <SidebarGroup>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              {secondSection.map((item) => (
-                <SidebarMenuItem key={item.href}>
-                  <SidebarMenuButton
-                    asChild
-                    className={cn(
-                      "h-10 hover:bg-linear-to-r/oklch border border-transparent hover:border-[#5D6B68]/10 from-sidebar-accent from-5% via-30% via-sidebar/50 to-sidebar/50",
-                      pathname === item.href &&
-                        "bg-linear-to-r/oklch border-[#5D6B68]/10"
-                    )}
-                    isActive={pathname === item.href}
-                  >
-                    <Link href={item.href}>
-                      <item.icon className="size-5" />
-                      <span className="text-sm font-medium tracking-tight">
-                        {item.label}
-                      </span>
-                    </Link>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              ))}
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
+        <DashboardSidebarMain items={data.navMain} />
+        <DashboardSidebarMaster projects={data.projects} />
+        <DashboardSidebarSecondary
+          items={data.navSecondary}
+          className="mt-auto"
+        />
       </SidebarContent>
-      <SidebarFooter className="text-white">
-        <DashboardUserButton />
+      <SidebarFooter>
+        <NavUser user={data.user} />
       </SidebarFooter>
     </Sidebar>
   );
-};
+}
