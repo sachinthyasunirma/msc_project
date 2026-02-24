@@ -1,10 +1,10 @@
 import { AccommodationManagementView } from "@/modules/accommodation/ui/views/accommodation-management-view";
 
-type HotelPageProps = {
+type PageProps = {
   params: Promise<{ hotelId: string }>;
 };
 
-const HotelDetailsPage = async ({ params }: HotelPageProps) => {
+const AccommodationHotelDetailsPage = async ({ params }: PageProps) => {
   const { hotelId } = await params;
 
   return (
@@ -14,4 +14,4 @@ const HotelDetailsPage = async ({ params }: HotelPageProps) => {
   );
 };
 
-export default HotelDetailsPage;
+export default AccommodationHotelDetailsPage;

@@ -3,7 +3,6 @@ import {
   text,
   timestamp,
   boolean,
-  pgEnum,
   integer,
   index,
   decimal,

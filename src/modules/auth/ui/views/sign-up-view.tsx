@@ -25,6 +25,7 @@ import { Button } from "@/components/ui/button";
 const formSchema = z
   .object({
     name: z.string().min(1, { message: "Name is required" }),
+    companyName: z.string().min(2, { message: "Company name is required" }),
     email: z.string().email(),
     password: z.string().min(1, { message: "Password is required" }),
     confirmPassword: z.string().min(1, { message: "Password is required" }),
@@ -42,6 +43,7 @@ export const SignUpView = () => {
     resolver: zodResolver(formSchema),
     defaultValues: {
       name: "",
+      companyName: "",
       email: "",
       password: "",
       confirmPassword: "",
@@ -51,12 +53,47 @@ export const SignUpView = () => {
   const onSubmit = async (data: z.infer<typeof formSchema>) => {
     setError(null);
     setPending(true);
+
+    let companyId: string;
+    try {
+      const companyResponse = await fetch("/api/companies", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: data.companyName,
+          email: data.email,
+        }),
+      });
+
+      const companyBody = (await companyResponse.json()) as {
+        id?: string;
+        message?: string;
+      };
+
+      if (!companyResponse.ok || !companyBody.id) {
+        throw new Error(companyBody.message || "Failed to create company.");
+      }
+
+      companyId = companyBody.id;
+    } catch (error) {
+      setPending(false);
+      setError(error instanceof Error ? error.message : "Failed to create company.");
+      return;
+    }
+
     await authClient.signUp.email(
       {
         name: data.name,
         email: data.email,
         password: data.password,
+        companyId,
         callbackURL: "/",
+      } as {
+        name: string;
+        email: string;
+        password: string;
+        companyId: string;
+        callbackURL: string;
       },
       {
         onSuccess: () => {
@@ -64,6 +101,7 @@ export const SignUpView = () => {
           router.push("/");
         },
         onError: ({ error }) => {
+          setPending(false);
           setError(error.message);
         },
       }
@@ -97,6 +135,25 @@ export const SignUpView = () => {
                             {...field}
                             type="text"
                             placeholder="john david"
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
+                <div className="grid gap-3">
+                  <FormField
+                    control={form.control}
+                    name="companyName"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Company Name</FormLabel>
+                        <FormControl>
+                          <Input
+                            {...field}
+                            type="text"
+                            placeholder="Acme Travels"
                           />
                         </FormControl>
                         <FormMessage />
@@ -178,30 +235,18 @@ export const SignUpView = () => {
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                   <Button
-                    disabled={pending}
+                    disabled
                     type="button"
                     variant={"outline"}
                     className="w-full"
-                    onClick={() => {
-                      authClient.signIn.social({
-                        provider: "google",
-                        callbackURL: "/",
-                      });
-                    }}
                   >
                     <FaGoogle />
                   </Button>
                   <Button
-                    disabled={pending}
+                    disabled
                     type="button"
                     variant={"outline"}
                     className="w-full"
-                    onClick={() => {
-                      authClient.signIn.social({
-                        provider: "github",
-                        callbackURL: "/",
-                      });
-                    }}
                   >
                     <FaGithub />
                   </Button>

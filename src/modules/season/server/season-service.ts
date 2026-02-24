@@ -1,0 +1,214 @@
+import { and, desc, eq, ilike, lt, or, sql, SQL } from "drizzle-orm";
+import { z } from "zod";
+import { db } from "@/db";
+import * as schema from "@/db/schema";
+import { auth } from "@/lib/auth";
+import {
+  createSeasonSchema,
+  cursorSchema,
+  seasonListQuerySchema,
+  updateSeasonSchema,
+} from "@/modules/season/shared/season-schemas";
+
+class SeasonError extends Error {
+  constructor(
+    public status: number,
+    public code: string,
+    message: string
+  ) {
+    super(message);
+  }
+}
+
+function normalizeZodError(error: z.ZodError) {
+  return error.issues[0]?.message || "Validation failed.";
+}
+
+function parseCursor(cursor?: string) {
+  if (!cursor) return null;
+  try {
+    const decoded = cursorSchema.parse(
+      JSON.parse(Buffer.from(cursor, "base64url").toString("utf8"))
+    );
+    return {
+      createdAt: new Date(decoded.createdAt),
+      id: decoded.id,
+    };
+  } catch {
+    throw new SeasonError(400, "INVALID_CURSOR", "Invalid pagination cursor.");
+  }
+}
+
+function buildCursor(row: { createdAt: Date; id: string }) {
+  return Buffer.from(
+    JSON.stringify({
+      createdAt: row.createdAt.toISOString(),
+      id: row.id,
+    }),
+    "utf8"
+  ).toString("base64url");
+}
+
+async function getCompanyId(requestHeaders: Headers) {
+  const session = await auth.api.getSession({
+    headers: requestHeaders,
+  });
+  if (!session?.user) {
+    throw new SeasonError(401, "UNAUTHORIZED", "You are not authenticated.");
+  }
+
+  const companyId = (session.user as { companyId?: string }).companyId;
+  if (!companyId) {
+    throw new SeasonError(403, "COMPANY_REQUIRED", "User is not linked to a company.");
+  }
+  return companyId;
+}
+
+export async function listSeasons(searchParams: URLSearchParams, headers: Headers) {
+  const parsed = seasonListQuerySchema.safeParse(Object.fromEntries(searchParams));
+  if (!parsed.success) {
+    throw new SeasonError(400, "VALIDATION_ERROR", normalizeZodError(parsed.error));
+  }
+
+  const query = parsed.data;
+  const companyId = await getCompanyId(headers);
+  const cursor = parseCursor(query.cursor);
+  const clauses: SQL[] = [eq(schema.season.companyId, companyId)];
+
+  if (query.q) {
+    const term = `%${query.q}%`;
+    clauses.push(or(ilike(schema.season.name, term), ilike(schema.season.description, term))!);
+  }
+  if (query.startDateFrom) {
+    clauses.push(sql`${schema.season.startDate} >= ${query.startDateFrom}`);
+  }
+  if (query.startDateTo) {
+    clauses.push(sql`${schema.season.startDate} <= ${query.startDateTo}`);
+  }
+  if (cursor) {
+    clauses.push(
+      or(
+        lt(schema.season.createdAt, cursor.createdAt),
+        and(eq(schema.season.createdAt, cursor.createdAt), lt(schema.season.id, cursor.id))
+      )!
+    );
+  }
+
+  const rows = await db
+    .select({
+      id: schema.season.id,
+      name: schema.season.name,
+      description: schema.season.description,
+      startDate: schema.season.startDate,
+      endDate: schema.season.endDate,
+      createdAt: schema.season.createdAt,
+      updatedAt: schema.season.updatedAt,
+    })
+    .from(schema.season)
+    .where(and(...clauses))
+    .orderBy(desc(schema.season.createdAt), desc(schema.season.id))
+    .limit(query.limit + 1);
+
+  const hasNext = rows.length > query.limit;
+  const items = hasNext ? rows.slice(0, query.limit) : rows;
+  const last = items[items.length - 1];
+
+  return {
+    items,
+    nextCursor: hasNext && last ? buildCursor(last) : null,
+    hasNext,
+    limit: query.limit,
+  };
+}
+
+export async function createSeason(payload: unknown, headers: Headers) {
+  const parsed = createSeasonSchema.safeParse(payload);
+  if (!parsed.success) {
+    throw new SeasonError(400, "VALIDATION_ERROR", normalizeZodError(parsed.error));
+  }
+
+  const companyId = await getCompanyId(headers);
+  const [created] = await db
+    .insert(schema.season)
+    .values({
+      ...parsed.data,
+      companyId,
+    })
+    .returning();
+
+  return created;
+}
+
+export async function updateSeason(seasonId: string, payload: unknown, headers: Headers) {
+  const parsed = updateSeasonSchema.safeParse(payload);
+  if (!parsed.success) {
+    throw new SeasonError(400, "VALIDATION_ERROR", normalizeZodError(parsed.error));
+  }
+
+  const companyId = await getCompanyId(headers);
+  const [updated] = await db
+    .update(schema.season)
+    .set({
+      ...parsed.data,
+      updatedAt: new Date(),
+    })
+    .where(and(eq(schema.season.id, seasonId), eq(schema.season.companyId, companyId)))
+    .returning();
+
+  if (!updated) {
+    throw new SeasonError(404, "SEASON_NOT_FOUND", "Season not found.");
+  }
+
+  return updated;
+}
+
+export async function deleteSeason(seasonId: string, headers: Headers) {
+  const companyId = await getCompanyId(headers);
+  const [deleted] = await db
+    .delete(schema.season)
+    .where(and(eq(schema.season.id, seasonId), eq(schema.season.companyId, companyId)))
+    .returning({ id: schema.season.id });
+
+  if (!deleted) {
+    throw new SeasonError(404, "SEASON_NOT_FOUND", "Season not found.");
+  }
+}
+
+export function toSeasonErrorResponse(error: unknown) {
+  if (error instanceof SeasonError) {
+    return {
+      status: error.status,
+      body: { code: error.code, message: error.message },
+    };
+  }
+
+  if (error instanceof Error) {
+    const message = error.message.toLowerCase();
+    if (message.includes("duplicate key")) {
+      return {
+        status: 409,
+        body: {
+          code: "DUPLICATE_RECORD",
+          message: "Record already exists for given unique fields.",
+        },
+      };
+    }
+    if (message.includes("violates foreign key")) {
+      return {
+        status: 400,
+        body: {
+          code: "FOREIGN_KEY_ERROR",
+          message: "Invalid relation provided.",
+        },
+      };
+    }
+  }
+
+  return {
+    status: 500,
+    body: {
+      code: "INTERNAL_SERVER_ERROR",
+      message: "Something went wrong. Please try again.",
+    },
+  };
+}

@@ -51,6 +51,7 @@ export const SignInView = () => {
           router.push("/");
         },
         onError: ({ error }) => {
+          setPending(false);
           setError(error.message);
         },
       }
@@ -125,30 +126,18 @@ export const SignInView = () => {
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                   <Button
-                    disabled={pending}
+                    disabled
                     type="button"
                     variant={"outline"}
                     className="w-full"
-                    onClick={() => {
-                      authClient.signIn.social({
-                        provider: "google",
-                        callbackURL: "/",
-                      });
-                    }}
                   >
                     <FaGoogle />
                   </Button>
                   <Button
-                    disabled={pending}
+                    disabled
                     type="button"
                     variant={"outline"}
                     className="w-full"
-                    onClick={() => {
-                      authClient.signIn.social({
-                        provider: "github",
-                        callbackURL: "/",
-                      });
-                    }}
                   >
                     <FaGithub />
                   </Button>

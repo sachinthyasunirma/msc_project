@@ -4,6 +4,15 @@ import { db } from "@/db";
 import * as schema from "@/db/schema";
 
 export const auth = betterAuth({
+  user: {
+    additionalFields: {
+      companyId: {
+        type: "string",
+        required: true,
+        input: true,
+      },
+    },
+  },
   socialProviders: {
     github: {
       clientId: process.env.GITHUB_CLIENT_ID as string,
