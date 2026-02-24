@@ -83,6 +83,23 @@ async function getCompanyId(requestHeaders: Headers) {
   return companyId;
 }
 
+async function ensureWritable(requestHeaders: Headers) {
+  const session = await auth.api.getSession({
+    headers: requestHeaders,
+  });
+  if (!session?.user) {
+    throw new AccommodationError(401, "UNAUTHORIZED", "You are not authenticated.");
+  }
+  const readOnly = Boolean((session.user as { readOnly?: boolean }).readOnly);
+  if (readOnly) {
+    throw new AccommodationError(
+      403,
+      "READ_ONLY_MODE",
+      "You are in read-only mode. Contact a manager for edit access."
+    );
+  }
+}
+
 async function ensureHotelOwned(companyId: string, hotelId: string) {
   const [hotel] = await db
     .select({ id: schema.hotel.id })
@@ -209,6 +226,7 @@ export async function listHotels(searchParams: URLSearchParams, headers: Headers
 }
 
 export async function createHotel(payload: unknown, headers: Headers) {
+  await ensureWritable(headers);
   const parsed = createHotelSchema.safeParse(payload);
   if (!parsed.success) {
     throw new AccommodationError(400, "VALIDATION_ERROR", normalizeZodError(parsed.error));
@@ -226,6 +244,7 @@ export async function createHotel(payload: unknown, headers: Headers) {
 }
 
 export async function updateHotel(hotelId: string, payload: unknown, headers: Headers) {
+  await ensureWritable(headers);
   const parsed = updateHotelSchema.safeParse(payload);
   if (!parsed.success) {
     throw new AccommodationError(400, "VALIDATION_ERROR", normalizeZodError(parsed.error));
@@ -262,6 +281,7 @@ export async function getHotelById(hotelId: string, headers: Headers) {
 }
 
 export async function deleteHotel(hotelId: string, headers: Headers) {
+  await ensureWritable(headers);
   const companyId = await getCompanyId(headers);
   const [deleted] = await db
     .delete(schema.hotel)
@@ -310,6 +330,7 @@ export async function createRoomType(
   payload: unknown,
   headers: Headers
 ) {
+  await ensureWritable(headers);
   const parsed = createRoomTypeSchema.safeParse(payload);
   if (!parsed.success) {
     throw new AccommodationError(400, "VALIDATION_ERROR", normalizeZodError(parsed.error));
@@ -333,6 +354,7 @@ export async function updateRoomType(
   payload: unknown,
   headers: Headers
 ) {
+  await ensureWritable(headers);
   const parsed = updateRoomTypeSchema.safeParse(payload);
   if (!parsed.success) {
     throw new AccommodationError(400, "VALIDATION_ERROR", normalizeZodError(parsed.error));
@@ -360,6 +382,7 @@ export async function deleteRoomType(
   roomTypeId: string,
   headers: Headers
 ) {
+  await ensureWritable(headers);
   const companyId = await getCompanyId(headers);
   await ensureHotelOwned(companyId, hotelId);
   const [deleted] = await db
@@ -423,6 +446,7 @@ export async function createRoomRateHeader(
   payload: unknown,
   headers: Headers
 ) {
+  await ensureWritable(headers);
   const parsed = createRoomRateHeaderSchema.safeParse(payload);
   if (!parsed.success) {
     throw new AccommodationError(400, "VALIDATION_ERROR", normalizeZodError(parsed.error));
@@ -463,6 +487,7 @@ export async function updateRoomRateHeader(
   payload: unknown,
   headers: Headers
 ) {
+  await ensureWritable(headers);
   const parsed = updateRoomRateHeaderSchema.safeParse(payload);
   if (!parsed.success) {
     throw new AccommodationError(400, "VALIDATION_ERROR", normalizeZodError(parsed.error));
@@ -549,6 +574,7 @@ export async function deleteRoomRateHeader(
   roomRateHeaderId: string,
   headers: Headers
 ) {
+  await ensureWritable(headers);
   const companyId = await getCompanyId(headers);
   await ensureHotelOwned(companyId, hotelId);
   const [deleted] = await db
@@ -636,6 +662,7 @@ export async function createRoomRate(
   payload: unknown,
   headers: Headers
 ) {
+  await ensureWritable(headers);
   const parsed = createRoomRateSchema.safeParse(payload);
   if (!parsed.success) {
     throw new AccommodationError(400, "VALIDATION_ERROR", normalizeZodError(parsed.error));
@@ -689,6 +716,7 @@ export async function updateRoomRate(
   payload: unknown,
   headers: Headers
 ) {
+  await ensureWritable(headers);
   const parsed = updateRoomRateSchema.safeParse(payload);
   if (!parsed.success) {
     throw new AccommodationError(400, "VALIDATION_ERROR", normalizeZodError(parsed.error));
@@ -768,6 +796,7 @@ export async function deleteRoomRate(
   roomRateId: string,
   headers: Headers
 ) {
+  await ensureWritable(headers);
   const companyId = await getCompanyId(headers);
   await ensureHotelOwned(companyId, hotelId);
   const [deleted] = await db
@@ -824,6 +853,7 @@ export async function createAvailability(
   payload: unknown,
   headers: Headers
 ) {
+  await ensureWritable(headers);
   const parsed = createAvailabilitySchema.safeParse(payload);
   if (!parsed.success) {
     throw new AccommodationError(400, "VALIDATION_ERROR", normalizeZodError(parsed.error));
@@ -848,6 +878,7 @@ export async function updateAvailability(
   payload: unknown,
   headers: Headers
 ) {
+  await ensureWritable(headers);
   const parsed = updateAvailabilitySchema.safeParse(payload);
   if (!parsed.success) {
     throw new AccommodationError(400, "VALIDATION_ERROR", normalizeZodError(parsed.error));
@@ -886,6 +917,7 @@ export async function deleteAvailability(
   availabilityId: string,
   headers: Headers
 ) {
+  await ensureWritable(headers);
   const companyId = await getCompanyId(headers);
   await ensureHotelOwned(companyId, hotelId);
   const [deleted] = await db
@@ -938,6 +970,7 @@ export async function createHotelImage(
   payload: unknown,
   headers: Headers
 ) {
+  await ensureWritable(headers);
   const parsed = createHotelImageSchema.safeParse(payload);
   if (!parsed.success) {
     throw new AccommodationError(400, "VALIDATION_ERROR", normalizeZodError(parsed.error));
@@ -969,6 +1002,7 @@ export async function updateHotelImage(
   payload: unknown,
   headers: Headers
 ) {
+  await ensureWritable(headers);
   const parsed = updateHotelImageSchema.safeParse(payload);
   if (!parsed.success) {
     throw new AccommodationError(400, "VALIDATION_ERROR", normalizeZodError(parsed.error));
@@ -1001,6 +1035,7 @@ export async function deleteHotelImage(
   imageId: string,
   headers: Headers
 ) {
+  await ensureWritable(headers);
   const companyId = await getCompanyId(headers);
   await ensureHotelOwned(companyId, hotelId);
   const [deleted] = await db

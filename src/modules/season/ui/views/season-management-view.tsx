@@ -31,11 +31,16 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { authClient } from "@/lib/auth-client";
 
 type Mode = "create" | "edit";
 const PAGE_SIZE = 20;
 
 export const SeasonManagementView = () => {
+  const { data: session } = authClient.useSession();
+  const isReadOnly = Boolean(
+    (session?.user as { readOnly?: boolean } | undefined)?.readOnly
+  );
   const [seasons, setSeasons] = useState<SeasonOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -96,6 +101,10 @@ export const SeasonManagementView = () => {
   }, [load]);
 
   const openDialog = (mode: Mode, row: SeasonOption | null = null) => {
+    if (mode === "create" && isReadOnly) {
+      toast.error("View only mode: adding records is disabled.");
+      return;
+    }
     setDialog({ open: true, mode, row });
     setForm({
       code: row?.code ?? "",
@@ -107,6 +116,10 @@ export const SeasonManagementView = () => {
   };
 
   const submit = async () => {
+    if (dialog.mode === "create" && isReadOnly) {
+      toast.error("View only mode: adding records is disabled.");
+      return;
+    }
     const parsed = createSeasonSchema.safeParse({
       ...form,
       description: form.description || null,
@@ -178,7 +191,11 @@ export const SeasonManagementView = () => {
             <RefreshCw className="mr-2 size-4" />
             Refresh
           </Button>
-          <Button onClick={() => openDialog("create")}>
+          <Button
+            onClick={() => openDialog("create")}
+            disabled={isReadOnly}
+            title={isReadOnly ? "View only mode" : undefined}
+          >
             <Plus className="mr-2 size-4" />
             Add Season
           </Button>
@@ -309,7 +326,10 @@ export const SeasonManagementView = () => {
             <Button variant="outline" onClick={() => setDialog({ open: false, mode: "create", row: null })}>
               Cancel
             </Button>
-            <Button onClick={() => void submit()} disabled={saving}>
+            <Button
+              onClick={() => void submit()}
+              disabled={saving || (isReadOnly && dialog.mode === "create")}
+            >
               {saving ? "Saving..." : "Save"}
             </Button>
           </DialogFooter>

@@ -11,6 +11,21 @@ export const auth = betterAuth({
         required: false,
         input: true,
       },
+      role: {
+        type: "string",
+        required: false,
+        input: true,
+      },
+      readOnly: {
+        type: "boolean",
+        required: false,
+        input: true,
+      },
+      isActive: {
+        type: "boolean",
+        required: false,
+        input: true,
+      },
     },
   },
   socialProviders: {

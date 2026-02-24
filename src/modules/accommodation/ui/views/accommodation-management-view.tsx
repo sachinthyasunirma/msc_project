@@ -83,6 +83,7 @@ import {
   createRoomTypeSchema,
 } from "@/modules/accommodation/shared/accommodation-schemas";
 import { createSeasonSchema } from "@/modules/season/shared/season-schemas";
+import { authClient } from "@/lib/auth-client";
 
 type DialogMode = "create" | "edit";
 
@@ -95,6 +96,10 @@ export const AccommodationManagementView = ({
   hotelId,
   showHotelList = true,
 }: Props) => {
+  const { data: session } = authClient.useSession();
+  const isReadOnly = Boolean(
+    (session?.user as { readOnly?: boolean } | undefined)?.readOnly
+  );
   const [loadingHotels, setLoadingHotels] = useState(true);
   const [saving, setSaving] = useState(false);
   const [hotelSearch, setHotelSearch] = useState("");
@@ -428,6 +433,10 @@ export const AccommodationManagementView = ({
   }, [roomRateLinePage, roomRateLineTotalPages]);
 
   const openHotelDialog = (mode: DialogMode, row: Hotel | null = null) => {
+    if (mode === "create" && isReadOnly) {
+      toast.error("View only mode: adding records is disabled.");
+      return;
+    }
     setHotelDialog({ open: true, mode, row });
     setHotelForm({
       code: row?.code ?? "",
@@ -444,6 +453,10 @@ export const AccommodationManagementView = ({
   };
 
   const openRoomTypeDialog = (mode: DialogMode, row: RoomType | null = null) => {
+    if (mode === "create" && isReadOnly) {
+      toast.error("View only mode: adding records is disabled.");
+      return;
+    }
     setRoomTypeDialog({ open: true, mode, row });
     setRoomTypeForm({
       code: row?.code ?? "",
@@ -460,6 +473,10 @@ export const AccommodationManagementView = ({
   };
 
   const openRoomRateDialog = (mode: DialogMode, row: RoomRate | null = null) => {
+    if (mode === "create" && isReadOnly) {
+      toast.error("View only mode: adding records is disabled.");
+      return;
+    }
     setRoomRateDialog({ open: true, mode, row });
     setRoomRateForm({
       code: row?.code ?? "",
@@ -476,6 +493,10 @@ export const AccommodationManagementView = ({
     mode: DialogMode,
     row: RoomRateHeader | null = null
   ) => {
+    if (mode === "create" && isReadOnly) {
+      toast.error("View only mode: adding records is disabled.");
+      return;
+    }
     try {
       await loadSeasonsForRoomRates();
     } catch {
@@ -503,6 +524,10 @@ export const AccommodationManagementView = ({
   };
 
   const openAvailabilityDialog = (mode: DialogMode, row: Availability | null = null) => {
+    if (mode === "create" && isReadOnly) {
+      toast.error("View only mode: adding records is disabled.");
+      return;
+    }
     setAvailabilityDialog({ open: true, mode, row });
     setAvailabilityForm({
       code: row?.code ?? "",
@@ -516,6 +541,10 @@ export const AccommodationManagementView = ({
   };
 
   const openImageDialog = (mode: DialogMode, row: HotelImage | null = null) => {
+    if (mode === "create" && isReadOnly) {
+      toast.error("View only mode: adding records is disabled.");
+      return;
+    }
     setImageDialog({ open: true, mode, row });
     setImageForm({
       code: row?.code ?? "",
@@ -527,6 +556,10 @@ export const AccommodationManagementView = ({
   };
 
   const openSeasonDialog = (mode: DialogMode, row: SeasonOption | null = null) => {
+    if (mode === "create" && isReadOnly) {
+      toast.error("View only mode: adding records is disabled.");
+      return;
+    }
     setSeasonDialog({ open: true, mode, row });
     setSeasonForm({
       code: row?.code ?? "",
@@ -547,6 +580,10 @@ export const AccommodationManagementView = ({
   };
 
   const submitHotel = async () => {
+    if (hotelDialog.mode === "create" && isReadOnly) {
+      toast.error("View only mode: adding records is disabled.");
+      return;
+    }
     const parsed = createHotelSchema.safeParse({
       ...hotelForm,
       description: hotelForm.description || null,
@@ -572,6 +609,10 @@ export const AccommodationManagementView = ({
 
   const submitRoomType = async () => {
     if (!selectedHotelId) return;
+    if (roomTypeDialog.mode === "create" && isReadOnly) {
+      toast.error("View only mode: adding records is disabled.");
+      return;
+    }
     const parsed = createRoomTypeSchema.safeParse({
       ...roomTypeForm,
       description: roomTypeForm.description || null,
@@ -600,6 +641,10 @@ export const AccommodationManagementView = ({
 
   const submitRoomRate = async () => {
     if (!selectedHotelId) return;
+    if (roomRateDialog.mode === "create" && isReadOnly) {
+      toast.error("View only mode: adding records is disabled.");
+      return;
+    }
     const parsed = createRoomRateSchema.safeParse(roomRateForm);
     if (!parsed.success) {
       toast.error(parsed.error.issues[0]?.message || "Invalid room rate data.");
@@ -620,6 +665,10 @@ export const AccommodationManagementView = ({
 
   const submitRoomRateHeader = async () => {
     if (!selectedHotelId) return;
+    if (roomRateHeaderDialog.mode === "create" && isReadOnly) {
+      toast.error("View only mode: adding records is disabled.");
+      return;
+    }
     const parsed = createRoomRateHeaderSchema.safeParse({
       ...roomRateHeaderForm,
       seasonId: roomRateHeaderForm.seasonId || null,
@@ -644,6 +693,10 @@ export const AccommodationManagementView = ({
 
   const submitAvailability = async () => {
     if (!selectedHotelId) return;
+    if (availabilityDialog.mode === "create" && isReadOnly) {
+      toast.error("View only mode: adding records is disabled.");
+      return;
+    }
     const parsed = createAvailabilitySchema.safeParse({
       ...availabilityForm,
       blockReason: availabilityForm.blockReason || null,
@@ -667,6 +720,10 @@ export const AccommodationManagementView = ({
 
   const submitImage = async () => {
     if (!selectedHotelId) return;
+    if (imageDialog.mode === "create" && isReadOnly) {
+      toast.error("View only mode: adding records is disabled.");
+      return;
+    }
     const parsed = createHotelImageSchema.safeParse({
       ...imageForm,
       caption: imageForm.caption || null,
@@ -689,6 +746,10 @@ export const AccommodationManagementView = ({
   };
 
   const submitSeason = async () => {
+    if (seasonDialog.mode === "create" && isReadOnly) {
+      toast.error("View only mode: adding records is disabled.");
+      return;
+    }
     const parsed = createSeasonSchema.safeParse({
       ...seasonForm,
       description: seasonForm.description || null,
@@ -743,7 +804,11 @@ export const AccommodationManagementView = ({
               <RefreshCw className="mr-2 size-4" />
               Refresh
             </Button>
-            <Button onClick={() => openHotelDialog("create")}>
+            <Button
+              onClick={() => openHotelDialog("create")}
+              disabled={isReadOnly}
+              title={isReadOnly ? "View only mode" : undefined}
+            >
               <Plus className="mr-2 size-4" />
               Add Hotel
             </Button>
@@ -914,7 +979,11 @@ export const AccommodationManagementView = ({
 
               <TabsContent value="room-types" className="mt-4 space-y-3">
                 <div className="flex justify-end">
-                  <Button onClick={() => openRoomTypeDialog("create")}>
+                  <Button
+                    onClick={() => openRoomTypeDialog("create")}
+                    disabled={isReadOnly}
+                    title={isReadOnly ? "View only mode" : undefined}
+                  >
                     <Plus className="mr-2 size-4" />
                     Add Room Type
                   </Button>
@@ -983,7 +1052,11 @@ export const AccommodationManagementView = ({
 
               <TabsContent value="room-rates" className="mt-4 space-y-3">
                 <div className="flex justify-end gap-2">
-                  <Button onClick={() => void openRoomRateHeaderDialog("create")}>
+                  <Button
+                    onClick={() => void openRoomRateHeaderDialog("create")}
+                    disabled={isReadOnly}
+                    title={isReadOnly ? "View only mode" : undefined}
+                  >
                     <Plus className="mr-2 size-4" />
                     Add Header
                   </Button>
@@ -1075,7 +1148,11 @@ export const AccommodationManagementView = ({
 
               <TabsContent value="availability" className="mt-4 space-y-3">
                 <div className="flex justify-end">
-                  <Button onClick={() => openAvailabilityDialog("create")} disabled={roomTypes.length === 0}>
+                  <Button
+                    onClick={() => openAvailabilityDialog("create")}
+                    disabled={isReadOnly || roomTypes.length === 0}
+                    title={isReadOnly ? "View only mode" : undefined}
+                  >
                     <Plus className="mr-2 size-4" />
                     Add Availability
                   </Button>
@@ -1144,7 +1221,11 @@ export const AccommodationManagementView = ({
 
               <TabsContent value="images" className="mt-4 space-y-3">
                 <div className="flex justify-end">
-                  <Button onClick={() => openImageDialog("create")}>
+                  <Button
+                    onClick={() => openImageDialog("create")}
+                    disabled={isReadOnly}
+                    title={isReadOnly ? "View only mode" : undefined}
+                  >
                     <Plus className="mr-2 size-4" />
                     Add Image
                   </Button>
@@ -1235,7 +1316,12 @@ export const AccommodationManagementView = ({
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={()=>setHotelDialog({open:false,mode:"create",row:null})}>Cancel</Button>
-            <Button disabled={saving} onClick={() => void submitHotel()}>{saving ? "Saving..." : "Save"}</Button>
+            <Button
+              disabled={saving || (isReadOnly && hotelDialog.mode === "create")}
+              onClick={() => void submitHotel()}
+            >
+              {saving ? "Saving..." : "Save"}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -1257,7 +1343,12 @@ export const AccommodationManagementView = ({
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={()=>setRoomTypeDialog({open:false,mode:"create",row:null})}>Cancel</Button>
-            <Button disabled={saving} onClick={() => void submitRoomType()}>{saving ? "Saving..." : "Save"}</Button>
+            <Button
+              disabled={saving || (isReadOnly && roomTypeDialog.mode === "create")}
+              onClick={() => void submitRoomType()}
+            >
+              {saving ? "Saving..." : "Save"}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -1370,7 +1461,10 @@ export const AccommodationManagementView = ({
             >
               Cancel
             </Button>
-            <Button disabled={saving} onClick={() => void submitRoomRateHeader()}>
+            <Button
+              disabled={saving || (isReadOnly && roomRateHeaderDialog.mode === "create")}
+              onClick={() => void submitRoomRateHeader()}
+            >
               {saving ? "Saving..." : "Save"}
             </Button>
           </DialogFooter>
@@ -1455,7 +1549,8 @@ export const AccommodationManagementView = ({
               </Select>
               <Button
                 onClick={() => openRoomRateDialog("create")}
-                disabled={roomTypes.length === 0 || !selectedRoomRateHeaderId}
+                disabled={isReadOnly || roomTypes.length === 0 || !selectedRoomRateHeaderId}
+                title={isReadOnly ? "View only mode" : undefined}
               >
                 <Plus className="mr-2 size-4" />
                 Add Rate Line
@@ -1603,7 +1698,12 @@ export const AccommodationManagementView = ({
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={()=>setRoomRateDialog({open:false,mode:"create",row:null})}>Cancel</Button>
-            <Button disabled={saving} onClick={() => void submitRoomRate()}>{saving ? "Saving..." : "Save"}</Button>
+            <Button
+              disabled={saving || (isReadOnly && roomRateDialog.mode === "create")}
+              onClick={() => void submitRoomRate()}
+            >
+              {saving ? "Saving..." : "Save"}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -1628,7 +1728,12 @@ export const AccommodationManagementView = ({
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={()=>setAvailabilityDialog({open:false,mode:"create",row:null})}>Cancel</Button>
-            <Button disabled={saving} onClick={() => void submitAvailability()}>{saving ? "Saving..." : "Save"}</Button>
+            <Button
+              disabled={saving || (isReadOnly && availabilityDialog.mode === "create")}
+              onClick={() => void submitAvailability()}
+            >
+              {saving ? "Saving..." : "Save"}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -1645,7 +1750,12 @@ export const AccommodationManagementView = ({
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={()=>setImageDialog({open:false,mode:"create",row:null})}>Cancel</Button>
-            <Button disabled={saving} onClick={() => void submitImage()}>{saving ? "Saving..." : "Save"}</Button>
+            <Button
+              disabled={saving || (isReadOnly && imageDialog.mode === "create")}
+              onClick={() => void submitImage()}
+            >
+              {saving ? "Saving..." : "Save"}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -1665,7 +1775,12 @@ export const AccommodationManagementView = ({
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={()=>setSeasonDialog({open:false,mode:"create",row:null})}>Cancel</Button>
-            <Button disabled={saving} onClick={() => void submitSeason()}>{saving ? "Saving..." : "Save"}</Button>
+            <Button
+              disabled={saving || (isReadOnly && seasonDialog.mode === "create")}
+              onClick={() => void submitSeason()}
+            >
+              {saving ? "Saving..." : "Save"}
+            </Button>
           </DialogFooter>
           <div className="mt-4">
             <Table>

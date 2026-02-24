@@ -9,6 +9,8 @@ import {
 } from "drizzle-orm/pg-core";
 import { company } from "@/db/schemas/company";
 
+export const userRole = pgEnum("user_role", ["ADMIN", "MANAGER", "USER"]);
+
 export const user = pgTable(
   "user",
   {
@@ -16,6 +18,9 @@ export const user = pgTable(
     name: text("name").notNull(),
     email: text("email").notNull().unique(),
     companyId: text("company_id").references(() => company.id, { onDelete: "cascade" }),
+    role: userRole("role").notNull().default("USER"),
+    readOnly: boolean("read_only").notNull().default(true),
+    isActive: boolean("is_active").notNull().default(true),
     emailVerified: boolean("email_verified")
       .$defaultFn(() => false)
       .notNull(),
@@ -75,5 +80,3 @@ export const verification = pgTable("verification", {
     () => /* @__PURE__ */ new Date()
   ),
 });
-
-export const userRole = pgEnum("user_role", ["ADMIN", "AGENT"]);

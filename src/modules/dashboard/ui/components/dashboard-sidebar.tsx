@@ -1,7 +1,14 @@
 "use client";
 
 import * as React from "react";
-import { Command, LifeBuoy, Send, Settings2, SquareTerminal } from "lucide-react";
+import {
+  Command,
+  LifeBuoy,
+  Send,
+  Settings2,
+  ShieldCheck,
+  SquareTerminal,
+} from "lucide-react";
 import {
   Sidebar,
   SidebarContent,
@@ -49,6 +56,17 @@ const data = {
         {
           title: "Transport",
           url: "/master-data/transports",
+        },
+      ],
+    },
+    {
+      title: "Configuration",
+      url: "/configuration/company",
+      icon: ShieldCheck,
+      items: [
+        {
+          title: "Company & Users",
+          url: "/configuration/company",
         },
       ],
     },

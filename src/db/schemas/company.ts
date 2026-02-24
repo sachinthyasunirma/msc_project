@@ -6,6 +6,8 @@ export const company = pgTable("company", {
     .primaryKey()
     .$defaultFn(() => nanoid()),
   code: text("code").notNull().unique(),
+  joinSecretCode: text("join_secret_code").unique(),
+  managerPrivilegeCode: text("manager_privilege_code"),
   name: text("name").notNull(),
   email: text("email").notNull().unique(),
   country: text("country"),

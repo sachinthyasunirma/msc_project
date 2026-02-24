@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ChevronsUpDown, Building2, LogOut } from "lucide-react";
+import { ChevronsUpDown, Building2, LogOut, ShieldCheck } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { GeneratedAvatar } from "@/components/generated-avatar";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -34,6 +34,8 @@ import { authClient } from "@/lib/auth-client";
 type CompanyProfile = {
   id: string;
   code: string;
+  joinSecretCode: string | null;
+  managerPrivilegeCode: string | null;
   name: string;
   email: string;
   country: string | null;
@@ -50,6 +52,8 @@ export function NavUser() {
   const [companyError, setCompanyError] = useState<string | null>(null);
   const [companyForm, setCompanyForm] = useState({
     code: "",
+    secretCode: "",
+    privilegeCode: "",
     name: "",
     email: "",
     country: "",
@@ -83,6 +87,8 @@ export function NavUser() {
       if (details) {
         setCompanyForm({
           code: details.code || "",
+          secretCode: details.joinSecretCode || "",
+          privilegeCode: details.managerPrivilegeCode || "",
           name: details.name || "",
           email: details.email || "",
           country: details.country || "",
@@ -126,6 +132,8 @@ export function NavUser() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           code: companyForm.code.toUpperCase().trim(),
+          secretCode: companyForm.secretCode.toUpperCase().trim(),
+          privilegeCode: companyForm.privilegeCode.toUpperCase().trim() || null,
           name: companyForm.name.trim(),
           email: companyForm.email.trim(),
           country: companyForm.country.trim() || null,
@@ -182,7 +190,9 @@ export function NavUser() {
   }
 
   const user = data.user;
+  const accessUser = user as typeof user & { role?: string | null };
   const displayName = user.name || user.email?.split("@")[0] || "User";
+  const isManager = accessUser.role === "ADMIN" || accessUser.role === "MANAGER";
 
   return (
     <SidebarMenu>
@@ -244,7 +254,11 @@ export function NavUser() {
             <DropdownMenuSeparator />
             <DropdownMenuItem onClick={() => setCompanyOpen(true)}>
               <Building2 />
-              Edit Company
+              {isManager ? "Edit Company" : "View Company"}
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => router.push("/configuration/company")}>
+              <ShieldCheck />
+              Company Configuration
             </DropdownMenuItem>
             <DropdownMenuItem onClick={() => void onLogout()}>
               <LogOut />
@@ -263,8 +277,29 @@ export function NavUser() {
               <Label>Company Code</Label>
               <Input
                 value={companyForm.code}
+                disabled={!isManager}
                 onChange={(e) =>
                   setCompanyForm((prev) => ({ ...prev, code: e.target.value.toUpperCase() }))
+                }
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Secret Code</Label>
+              <Input
+                value={companyForm.secretCode}
+                disabled={!isManager}
+                onChange={(e) =>
+                  setCompanyForm((prev) => ({ ...prev, secretCode: e.target.value.toUpperCase() }))
+                }
+              />
+            </div>
+            <div className="space-y-2 md:col-span-2">
+              <Label>Manager Privilege Code</Label>
+              <Input
+                value={companyForm.privilegeCode}
+                disabled={!isManager}
+                onChange={(e) =>
+                  setCompanyForm((prev) => ({ ...prev, privilegeCode: e.target.value.toUpperCase() }))
                 }
               />
             </div>
@@ -272,6 +307,7 @@ export function NavUser() {
               <Label>Company Name</Label>
               <Input
                 value={companyForm.name}
+                disabled={!isManager}
                 onChange={(e) => setCompanyForm((prev) => ({ ...prev, name: e.target.value }))}
               />
             </div>
@@ -280,6 +316,7 @@ export function NavUser() {
               <Input
                 type="email"
                 value={companyForm.email}
+                disabled={!isManager}
                 onChange={(e) => setCompanyForm((prev) => ({ ...prev, email: e.target.value }))}
               />
             </div>
@@ -287,6 +324,7 @@ export function NavUser() {
               <Label>Country</Label>
               <Input
                 value={companyForm.country}
+                disabled={!isManager}
                 onChange={(e) =>
                   setCompanyForm((prev) => ({ ...prev, country: e.target.value }))
                 }
@@ -297,6 +335,7 @@ export function NavUser() {
               <Input
                 type="file"
                 accept="image/*"
+                disabled={!isManager}
                 onChange={(e) => void onPickLogo(e.target.files?.[0] ?? null)}
               />
               {companyForm.image ? (
@@ -314,7 +353,7 @@ export function NavUser() {
             <Button variant="outline" onClick={() => setCompanyOpen(false)}>
               Cancel
             </Button>
-            <Button disabled={companySaving} onClick={() => void onSaveCompany()}>
+            <Button disabled={companySaving || !isManager} onClick={() => void onSaveCompany()}>
               {companySaving ? "Saving..." : "Save"}
             </Button>
           </DialogFooter>

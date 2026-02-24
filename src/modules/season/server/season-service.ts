@@ -64,6 +64,23 @@ async function getCompanyId(requestHeaders: Headers) {
   return companyId;
 }
 
+async function ensureWritable(requestHeaders: Headers) {
+  const session = await auth.api.getSession({
+    headers: requestHeaders,
+  });
+  if (!session?.user) {
+    throw new SeasonError(401, "UNAUTHORIZED", "You are not authenticated.");
+  }
+  const readOnly = Boolean((session.user as { readOnly?: boolean }).readOnly);
+  if (readOnly) {
+    throw new SeasonError(
+      403,
+      "READ_ONLY_MODE",
+      "You are in read-only mode. Contact a manager for edit access."
+    );
+  }
+}
+
 export async function listSeasons(searchParams: URLSearchParams, headers: Headers) {
   const parsed = seasonListQuerySchema.safeParse(Object.fromEntries(searchParams));
   if (!parsed.success) {
@@ -123,6 +140,7 @@ export async function listSeasons(searchParams: URLSearchParams, headers: Header
 }
 
 export async function createSeason(payload: unknown, headers: Headers) {
+  await ensureWritable(headers);
   const parsed = createSeasonSchema.safeParse(payload);
   if (!parsed.success) {
     throw new SeasonError(400, "VALIDATION_ERROR", normalizeZodError(parsed.error));
@@ -141,6 +159,7 @@ export async function createSeason(payload: unknown, headers: Headers) {
 }
 
 export async function updateSeason(seasonId: string, payload: unknown, headers: Headers) {
+  await ensureWritable(headers);
   const parsed = updateSeasonSchema.safeParse(payload);
   if (!parsed.success) {
     throw new SeasonError(400, "VALIDATION_ERROR", normalizeZodError(parsed.error));
@@ -164,6 +183,7 @@ export async function updateSeason(seasonId: string, payload: unknown, headers: 
 }
 
 export async function deleteSeason(seasonId: string, headers: Headers) {
+  await ensureWritable(headers);
   const companyId = await getCompanyId(headers);
   const [deleted] = await db
     .delete(schema.season)
