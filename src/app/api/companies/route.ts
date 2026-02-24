@@ -5,6 +5,7 @@ import { db } from "@/db";
 import { company } from "@/db/schema";
 
 const createCompanySchema = z.object({
+  code: z.string().trim().toUpperCase().min(1).max(40),
   name: z.string().trim().min(2).max(160),
   email: z.string().trim().email(),
   country: z.string().trim().max(120).optional().nullable(),
@@ -38,6 +39,7 @@ export async function POST(request: Request) {
     const [created] = await db
       .insert(company)
       .values({
+        code: parsed.data.code,
         name: parsed.data.name,
         email: parsed.data.email,
         country: parsed.data.country ?? null,

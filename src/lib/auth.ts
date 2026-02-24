@@ -8,7 +8,7 @@ export const auth = betterAuth({
     additionalFields: {
       companyId: {
         type: "string",
-        required: true,
+        required: false,
         input: true,
       },
     },

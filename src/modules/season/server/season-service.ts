@@ -97,6 +97,7 @@ export async function listSeasons(searchParams: URLSearchParams, headers: Header
   const rows = await db
     .select({
       id: schema.season.id,
+      code: schema.season.code,
       name: schema.season.name,
       description: schema.season.description,
       startDate: schema.season.startDate,

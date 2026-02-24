@@ -7,6 +7,7 @@ export const cursorSchema = z.object({
 
 export const createSeasonSchema = z
   .object({
+    code: z.string().trim().toUpperCase().min(1).max(40),
     name: z.string().trim().min(2).max(120),
     description: z.string().trim().max(255).optional().nullable(),
     startDate: z.string().date(),
@@ -18,6 +19,7 @@ export const createSeasonSchema = z
   });
 
 const seasonBaseSchema = z.object({
+  code: z.string().trim().toUpperCase().min(1).max(40),
   name: z.string().trim().min(2).max(120),
   description: z.string().trim().max(255).optional().nullable(),
   startDate: z.string().date(),

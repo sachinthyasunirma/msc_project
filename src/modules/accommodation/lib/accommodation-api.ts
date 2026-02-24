@@ -14,6 +14,7 @@ async function readError(response: Response, fallback: string) {
 
 export type Hotel = {
   id: string;
+  code: string;
   name: string;
   description: string | null;
   address: string;
@@ -31,6 +32,7 @@ export type Hotel = {
 export type RoomType = {
   id: string;
   hotelId: string;
+  code: string;
   name: string;
   description: string | null;
   maxOccupancy: number;
@@ -47,6 +49,11 @@ export type RoomType = {
 export type RoomRate = {
   id: string;
   hotelId: string;
+  code: string;
+  roomRateHeaderId: string | null;
+  roomRateHeaderName: string | null;
+  roomCategory: string | null;
+  roomBasis: string | null;
   roomTypeId: string;
   roomTypeName: string;
   seasonId: string | null;
@@ -62,9 +69,25 @@ export type RoomRate = {
   updatedAt: string;
 };
 
+export type RoomRateHeader = {
+  id: string;
+  hotelId: string;
+  code: string;
+  name: string;
+  seasonId: string | null;
+  seasonName: string | null;
+  validFrom: string;
+  validTo: string;
+  currency: string;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type Availability = {
   id: string;
   hotelId: string;
+  code: string;
   roomTypeId: string;
   roomTypeName: string;
   date: string;
@@ -79,6 +102,7 @@ export type Availability = {
 export type HotelImage = {
   id: string;
   hotelId: string;
+  code: string;
   imageUrl: string;
   caption: string | null;
   isPrimary: boolean;
@@ -183,6 +207,44 @@ export const deleteRoomType = async (hotelId: string, roomTypeId: string) => {
 
 export const listRoomRates = (hotelId: string, q?: string) =>
   listNested<RoomRate>(`/api/accommodation/hotels/${hotelId}/room-rates`, q);
+
+export const listRoomRateHeaders = (hotelId: string, q?: string) =>
+  listNested<RoomRateHeader>(`/api/accommodation/hotels/${hotelId}/room-rate-headers`, q);
+
+export const createRoomRateHeader = async (hotelId: string, payload: unknown) => {
+  const response = await fetch(`/api/accommodation/hotels/${hotelId}/room-rate-headers`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) await readError(response, "Failed to create room rate header.");
+  return response.json() as Promise<RoomRateHeader>;
+};
+
+export const updateRoomRateHeader = async (
+  hotelId: string,
+  roomRateHeaderId: string,
+  payload: unknown
+) => {
+  const response = await fetch(
+    `/api/accommodation/hotels/${hotelId}/room-rate-headers/${roomRateHeaderId}`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }
+  );
+  if (!response.ok) await readError(response, "Failed to update room rate header.");
+  return response.json() as Promise<RoomRateHeader>;
+};
+
+export const deleteRoomRateHeader = async (hotelId: string, roomRateHeaderId: string) => {
+  const response = await fetch(
+    `/api/accommodation/hotels/${hotelId}/room-rate-headers/${roomRateHeaderId}`,
+    { method: "DELETE" }
+  );
+  if (!response.ok) await readError(response, "Failed to delete room rate header.");
+};
 
 export const createRoomRate = async (hotelId: string, payload: unknown) => {
   const response = await fetch(`/api/accommodation/hotels/${hotelId}/room-rates`, {

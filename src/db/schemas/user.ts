@@ -15,9 +15,7 @@ export const user = pgTable(
     id: text("id").primaryKey(),
     name: text("name").notNull(),
     email: text("email").notNull().unique(),
-    companyId: text("company_id")
-      .notNull()
-      .references(() => company.id, { onDelete: "cascade" }),
+    companyId: text("company_id").references(() => company.id, { onDelete: "cascade" }),
     emailVerified: boolean("email_verified")
       .$defaultFn(() => false)
       .notNull(),

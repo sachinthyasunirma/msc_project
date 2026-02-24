@@ -5,6 +5,7 @@ export const company = pgTable("company", {
   id: text("id")
     .primaryKey()
     .$defaultFn(() => nanoid()),
+  code: text("code").notNull().unique(),
   name: text("name").notNull(),
   email: text("email").notNull().unique(),
   country: text("country"),

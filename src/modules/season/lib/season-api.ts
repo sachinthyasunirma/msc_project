@@ -14,6 +14,7 @@ async function readError(response: Response, fallback: string) {
 
 export type SeasonOption = {
   id: string;
+  code: string;
   name: string;
   description?: string | null;
   startDate: string;

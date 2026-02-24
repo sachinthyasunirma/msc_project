@@ -39,11 +39,13 @@ import {
   createAvailability,
   createHotel,
   createHotelImage,
+  createRoomRateHeader,
   createRoomRate,
   createRoomType,
   deleteAvailability,
   deleteHotel,
   deleteHotelImage,
+  deleteRoomRateHeader,
   deleteRoomRate,
   deleteRoomType,
   getHotel,
@@ -52,13 +54,16 @@ import {
   listAvailability,
   listHotelImages,
   listHotels,
+  listRoomRateHeaders,
   listRoomRates,
   listRoomTypes,
+  RoomRateHeader,
   RoomRate,
   RoomType,
   updateAvailability,
   updateHotel,
   updateHotelImage,
+  updateRoomRateHeader,
   updateRoomRate,
   updateRoomType,
 } from "@/modules/accommodation/lib/accommodation-api";
@@ -73,6 +78,7 @@ import {
   createAvailabilitySchema,
   createHotelImageSchema,
   createHotelSchema,
+  createRoomRateHeaderSchema,
   createRoomRateSchema,
   createRoomTypeSchema,
 } from "@/modules/accommodation/shared/accommodation-schemas";
@@ -107,6 +113,8 @@ export const AccommodationManagementView = ({
   const [loadingDetails, setLoadingDetails] = useState(false);
 
   const [roomTypes, setRoomTypes] = useState<RoomType[]>([]);
+  const [roomRateHeaders, setRoomRateHeaders] = useState<RoomRateHeader[]>([]);
+  const [selectedRoomRateHeaderId, setSelectedRoomRateHeaderId] = useState<string | null>(null);
   const [roomRates, setRoomRates] = useState<RoomRate[]>([]);
   const [availability, setAvailability] = useState<Availability[]>([]);
   const [images, setImages] = useState<HotelImage[]>([]);
@@ -127,6 +135,15 @@ export const AccommodationManagementView = ({
     mode: DialogMode;
     row: RoomRate | null;
   }>({ open: false, mode: "create", row: null });
+  const [roomRateHeaderDialog, setRoomRateHeaderDialog] = useState<{
+    open: boolean;
+    mode: DialogMode;
+    row: RoomRateHeader | null;
+  }>({ open: false, mode: "create", row: null });
+  const [roomRateLinesDialog, setRoomRateLinesDialog] = useState<{
+    open: boolean;
+    headerId: string | null;
+  }>({ open: false, headerId: null });
   const [availabilityDialog, setAvailabilityDialog] = useState<{
     open: boolean;
     mode: DialogMode;
@@ -144,6 +161,7 @@ export const AccommodationManagementView = ({
   }>({ open: false, mode: "create", row: null });
 
   const [hotelForm, setHotelForm] = useState({
+    code: "",
     name: "",
     description: "",
     address: "",
@@ -155,6 +173,7 @@ export const AccommodationManagementView = ({
     isActive: true,
   });
   const [roomTypeForm, setRoomTypeForm] = useState({
+    code: "",
     name: "",
     description: "",
     maxOccupancy: 2,
@@ -166,16 +185,25 @@ export const AccommodationManagementView = ({
     isActive: true,
   });
   const [roomRateForm, setRoomRateForm] = useState({
+    code: "",
+    roomRateHeaderId: "",
     roomTypeId: "",
-    seasonId: "",
+    roomCategory: "Standard",
+    roomBasis: "HB",
     baseRatePerNight: 0,
-    seasonMultiplier: 1,
-    currency: "USD",
     isActive: true,
+  });
+  const [roomRateHeaderForm, setRoomRateHeaderForm] = useState({
+    code: "",
+    name: "",
+    seasonId: "",
+    currency: "USD",
     validFrom: "",
     validTo: "",
+    isActive: true,
   });
   const [availabilityForm, setAvailabilityForm] = useState({
+    code: "",
     roomTypeId: "",
     date: "",
     availableRooms: 0,
@@ -184,22 +212,72 @@ export const AccommodationManagementView = ({
     blockReason: "",
   });
   const [imageForm, setImageForm] = useState({
+    code: "",
     imageUrl: "",
     caption: "",
     isPrimary: false,
     order: 0,
   });
   const [seasonForm, setSeasonForm] = useState({
+    code: "",
     name: "",
     description: "",
     startDate: "",
     endDate: "",
   });
+  const [roomRateLineSearch, setRoomRateLineSearch] = useState("");
+  const [roomRateLineStatusFilter, setRoomRateLineStatusFilter] = useState("all");
+  const [roomRateLinePageSize, setRoomRateLinePageSize] = useState("10");
+  const [roomRateLinePage, setRoomRateLinePage] = useState(1);
 
   const selectedHotel = useMemo(
     () => hotels.find((item) => item.id === selectedHotelId) || null,
     [hotels, selectedHotelId]
   );
+  const activeRoomRateHeaderId = roomRateLinesDialog.headerId ?? selectedRoomRateHeaderId;
+  const filteredRoomRates = useMemo(
+    () =>
+      activeRoomRateHeaderId
+        ? roomRates.filter((item) => item.roomRateHeaderId === activeRoomRateHeaderId)
+        : roomRates,
+    [roomRates, activeRoomRateHeaderId]
+  );
+  const visibleRoomRates = useMemo(() => {
+    if (!roomRateLineSearch.trim()) return filteredRoomRates;
+    const term = roomRateLineSearch.toLowerCase();
+    return filteredRoomRates.filter((item) =>
+      [item.roomCategory, item.roomTypeName, item.roomBasis, item.baseRatePerNight, item.currency]
+        .filter(Boolean)
+        .some((value) => String(value).toLowerCase().includes(term))
+    );
+  }, [filteredRoomRates, roomRateLineSearch]);
+  const statusFilteredRoomRates = useMemo(
+    () =>
+      roomRateLineStatusFilter === "all"
+        ? visibleRoomRates
+        : visibleRoomRates.filter((item) =>
+            roomRateLineStatusFilter === "active" ? item.isActive : !item.isActive
+          ),
+    [visibleRoomRates, roomRateLineStatusFilter]
+  );
+  const roomRateLineTotalPages = Math.max(
+    1,
+    Math.ceil(statusFilteredRoomRates.length / Number(roomRateLinePageSize))
+  );
+  const pagedRoomRates = useMemo(() => {
+    const pageSize = Number(roomRateLinePageSize);
+    const start = (roomRateLinePage - 1) * pageSize;
+    return statusFilteredRoomRates.slice(start, start + pageSize);
+  }, [statusFilteredRoomRates, roomRateLinePageSize, roomRateLinePage]);
+  const selectedRoomRateHeader = useMemo(
+    () => roomRateHeaders.find((item) => item.id === activeRoomRateHeaderId) || null,
+    [roomRateHeaders, activeRoomRateHeaderId]
+  );
+
+  const loadSeasonsForRoomRates = useCallback(async () => {
+    const refreshed = await listSeasons({ limit: 100 });
+    setSeasons(refreshed.items);
+  }, []);
 
   const loadHotels = useCallback(async () => {
     setLoadingHotels(true);
@@ -249,28 +327,65 @@ export const AccommodationManagementView = ({
   const loadDetails = useCallback(async () => {
     if (!selectedHotelId) {
       setRoomTypes([]);
+      setRoomRateHeaders([]);
       setRoomRates([]);
       setAvailability([]);
       setImages([]);
+      setSelectedRoomRateHeaderId(null);
       return;
     }
 
     setLoadingDetails(true);
     try {
-      const [rt, rr, av, im, ss] = await Promise.all([
+      const [rt, rh, rr, av, im, ss] = await Promise.allSettled([
         listRoomTypes(selectedHotelId),
+        listRoomRateHeaders(selectedHotelId),
         listRoomRates(selectedHotelId),
         listAvailability(selectedHotelId),
         listHotelImages(selectedHotelId),
-        listSeasons({ limit: 200 }),
+        listSeasons({ limit: 100 }),
       ]);
-      setRoomTypes(rt);
-      setRoomRates(rr);
-      setAvailability(av);
-      setImages(im);
-      setSeasons(ss.items);
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to load hotel details.");
+
+      if (rt.status === "fulfilled") {
+        setRoomTypes(rt.value);
+      } else {
+        setRoomTypes([]);
+        toast.error("Failed to load room types.");
+      }
+
+      if (rh.status === "fulfilled") {
+        setRoomRateHeaders(rh.value);
+        setSelectedRoomRateHeaderId((prev) =>
+          prev && rh.value.some((item) => item.id === prev) ? prev : (rh.value[0]?.id ?? null)
+        );
+      } else {
+        setRoomRateHeaders([]);
+        setSelectedRoomRateHeaderId(null);
+      }
+
+      if (rr.status === "fulfilled") {
+        setRoomRates(rr.value);
+      } else {
+        setRoomRates([]);
+      }
+
+      if (av.status === "fulfilled") {
+        setAvailability(av.value);
+      } else {
+        setAvailability([]);
+      }
+
+      if (im.status === "fulfilled") {
+        setImages(im.value);
+      } else {
+        setImages([]);
+      }
+
+      if (ss.status === "fulfilled") {
+        setSeasons(ss.value.items);
+      } else {
+        setSeasons([]);
+      }
     } finally {
       setLoadingDetails(false);
     }
@@ -302,9 +417,20 @@ export const AccommodationManagementView = ({
     void loadDetails();
   }, [loadDetails]);
 
+  useEffect(() => {
+    setRoomRateLinePage(1);
+  }, [roomRateLineSearch, roomRateLineStatusFilter, roomRateLinePageSize, activeRoomRateHeaderId]);
+
+  useEffect(() => {
+    if (roomRateLinePage > roomRateLineTotalPages) {
+      setRoomRateLinePage(roomRateLineTotalPages);
+    }
+  }, [roomRateLinePage, roomRateLineTotalPages]);
+
   const openHotelDialog = (mode: DialogMode, row: Hotel | null = null) => {
     setHotelDialog({ open: true, mode, row });
     setHotelForm({
+      code: row?.code ?? "",
       name: row?.name ?? "",
       description: row?.description ?? "",
       address: row?.address ?? "",
@@ -320,6 +446,7 @@ export const AccommodationManagementView = ({
   const openRoomTypeDialog = (mode: DialogMode, row: RoomType | null = null) => {
     setRoomTypeDialog({ open: true, mode, row });
     setRoomTypeForm({
+      code: row?.code ?? "",
       name: row?.name ?? "",
       description: row?.description ?? "",
       maxOccupancy: row?.maxOccupancy ?? 2,
@@ -335,20 +462,50 @@ export const AccommodationManagementView = ({
   const openRoomRateDialog = (mode: DialogMode, row: RoomRate | null = null) => {
     setRoomRateDialog({ open: true, mode, row });
     setRoomRateForm({
+      code: row?.code ?? "",
+      roomRateHeaderId: row?.roomRateHeaderId ?? activeRoomRateHeaderId ?? "",
       roomTypeId: row?.roomTypeId ?? roomTypes[0]?.id ?? "",
-      seasonId: row?.seasonId ?? "",
+      roomCategory: row?.roomCategory ?? "Standard",
+      roomBasis: row?.roomBasis ?? "HB",
       baseRatePerNight: row ? Number(row.baseRatePerNight) : 0,
-      seasonMultiplier: row ? Number(row.seasonMultiplier) : 1,
-      currency: row?.currency ?? "USD",
       isActive: row?.isActive ?? true,
+    });
+  };
+
+  const openRoomRateHeaderDialog = async (
+    mode: DialogMode,
+    row: RoomRateHeader | null = null
+  ) => {
+    try {
+      await loadSeasonsForRoomRates();
+    } catch {
+      toast.error("Failed to load seasons from master data.");
+    }
+    setRoomRateHeaderDialog({ open: true, mode, row });
+    setRoomRateHeaderForm({
+      code: row?.code ?? "",
+      name: row?.name ?? "",
+      seasonId: row?.seasonId ?? "",
+      currency: row?.currency ?? "USD",
       validFrom: row?.validFrom ?? "",
       validTo: row?.validTo ?? "",
+      isActive: row?.isActive ?? true,
     });
+  };
+
+  const openRoomRateLinesDialog = (header: RoomRateHeader) => {
+    setSelectedRoomRateHeaderId(header.id);
+    setRoomRateLineSearch("");
+    setRoomRateLineStatusFilter("all");
+    setRoomRateLinePageSize("10");
+    setRoomRateLinePage(1);
+    setRoomRateLinesDialog({ open: true, headerId: header.id });
   };
 
   const openAvailabilityDialog = (mode: DialogMode, row: Availability | null = null) => {
     setAvailabilityDialog({ open: true, mode, row });
     setAvailabilityForm({
+      code: row?.code ?? "",
       roomTypeId: row?.roomTypeId ?? roomTypes[0]?.id ?? "",
       date: row?.date ?? "",
       availableRooms: row?.availableRooms ?? 0,
@@ -361,6 +518,7 @@ export const AccommodationManagementView = ({
   const openImageDialog = (mode: DialogMode, row: HotelImage | null = null) => {
     setImageDialog({ open: true, mode, row });
     setImageForm({
+      code: row?.code ?? "",
       imageUrl: row?.imageUrl ?? "",
       caption: row?.caption ?? "",
       isPrimary: row?.isPrimary ?? false,
@@ -371,6 +529,7 @@ export const AccommodationManagementView = ({
   const openSeasonDialog = (mode: DialogMode, row: SeasonOption | null = null) => {
     setSeasonDialog({ open: true, mode, row });
     setSeasonForm({
+      code: row?.code ?? "",
       name: row?.name ?? "",
       description: row?.description ?? "",
       startDate: row?.startDate ?? "",
@@ -441,10 +600,7 @@ export const AccommodationManagementView = ({
 
   const submitRoomRate = async () => {
     if (!selectedHotelId) return;
-    const parsed = createRoomRateSchema.safeParse({
-      ...roomRateForm,
-      seasonId: roomRateForm.seasonId || null,
-    });
+    const parsed = createRoomRateSchema.safeParse(roomRateForm);
     if (!parsed.success) {
       toast.error(parsed.error.issues[0]?.message || "Invalid room rate data.");
       return;
@@ -458,6 +614,30 @@ export const AccommodationManagementView = ({
         toast.success("Room rate updated.");
       }
       setRoomRateDialog({ open: false, mode: "create", row: null });
+      await loadDetails();
+    });
+  };
+
+  const submitRoomRateHeader = async () => {
+    if (!selectedHotelId) return;
+    const parsed = createRoomRateHeaderSchema.safeParse({
+      ...roomRateHeaderForm,
+      seasonId: roomRateHeaderForm.seasonId || null,
+    });
+    if (!parsed.success) {
+      toast.error(parsed.error.issues[0]?.message || "Invalid room rate header data.");
+      return;
+    }
+    await withSave(async () => {
+      if (roomRateHeaderDialog.mode === "create") {
+        const created = await createRoomRateHeader(selectedHotelId, parsed.data);
+        setSelectedRoomRateHeaderId(created.id);
+        toast.success("Room rate header created.");
+      } else if (roomRateHeaderDialog.row) {
+        await updateRoomRateHeader(selectedHotelId, roomRateHeaderDialog.row.id, parsed.data);
+        toast.success("Room rate header updated.");
+      }
+      setRoomRateHeaderDialog({ open: false, mode: "create", row: null });
       await loadDetails();
     });
   };
@@ -527,7 +707,7 @@ export const AccommodationManagementView = ({
         toast.success("Season updated.");
       }
       setSeasonDialog({ open: false, mode: "create", row: null });
-      const refreshed = await listSeasons({ limit: 200 });
+      const refreshed = await listSeasons({ limit: 100 });
       setSeasons(refreshed.items);
     });
   };
@@ -803,70 +983,94 @@ export const AccommodationManagementView = ({
 
               <TabsContent value="room-rates" className="mt-4 space-y-3">
                 <div className="flex justify-end gap-2">
-                  <Button variant="outline" onClick={() => openSeasonDialog("create")}>
-                    Manage Seasons
-                  </Button>
-                  <Button onClick={() => openRoomRateDialog("create")} disabled={roomTypes.length === 0}>
+                  <Button onClick={() => void openRoomRateHeaderDialog("create")}>
                     <Plus className="mr-2 size-4" />
-                    Add Room Rate
+                    Add Header
                   </Button>
                 </div>
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Room Type</TableHead>
-                      <TableHead>Season</TableHead>
-                      <TableHead className="text-right">Base</TableHead>
-                      <TableHead className="text-right">Multiplier</TableHead>
-                      <TableHead className="text-right">Final</TableHead>
-                      <TableHead className="text-right">Actions</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {loadingDetails ? (
+                <div className="rounded-lg border">
+                  <div className="border-b px-4 py-2 text-sm font-medium">Room Rate Headers</div>
+                  <Table>
+                    <TableHeader>
                       <TableRow>
-                        <TableCell colSpan={6} className="text-center">
-                          Loading...
-                        </TableCell>
+                        <TableHead>Name</TableHead>
+                        <TableHead>Season</TableHead>
+                        <TableHead>Rate Period</TableHead>
+                        <TableHead>Currency</TableHead>
+                        <TableHead>Status</TableHead>
+                        <TableHead className="text-right">Actions</TableHead>
                       </TableRow>
-                    ) : roomRates.length === 0 ? (
-                      <TableRow>
-                        <TableCell colSpan={6} className="text-center text-muted-foreground">
-                          No room rates.
-                        </TableCell>
-                      </TableRow>
-                    ) : (
-                      roomRates.map((item) => (
-                        <TableRow key={item.id}>
-                          <TableCell>{item.roomTypeName}</TableCell>
-                          <TableCell>{item.seasonName || "-"}</TableCell>
-                          <TableCell className="text-right">{item.baseRatePerNight}</TableCell>
-                          <TableCell className="text-right">{item.seasonMultiplier}</TableCell>
-                          <TableCell className="text-right">{item.finalRatePerNight}</TableCell>
-                          <TableCell className="text-right">
-                            <div className="flex justify-end gap-2">
-                              <Button size="sm" variant="outline" onClick={() => openRoomRateDialog("edit", item)}>
-                                <Edit3 className="size-4" />
-                              </Button>
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={() =>
-                                  void onDelete("Delete room rate?", async () => {
-                                    await deleteRoomRate(selectedHotel.id, item.id);
-                                    toast.success("Room rate deleted.");
-                                  })
-                                }
-                              >
-                                <Trash2 className="size-4" />
-                              </Button>
-                            </div>
+                    </TableHeader>
+                    <TableBody>
+                      {loadingDetails ? (
+                        <TableRow>
+                          <TableCell colSpan={6} className="text-center">
+                            Loading...
                           </TableCell>
                         </TableRow>
-                      ))
-                    )}
-                  </TableBody>
-                </Table>
+                      ) : roomRateHeaders.length === 0 ? (
+                        <TableRow>
+                          <TableCell colSpan={6} className="text-center text-muted-foreground">
+                            No room rate headers.
+                          </TableCell>
+                        </TableRow>
+                      ) : (
+                        roomRateHeaders.map((header) => (
+                          <TableRow
+                            key={header.id}
+                            className={
+                              selectedRoomRateHeaderId === header.id ? "bg-muted/50" : undefined
+                            }
+                          >
+                            <TableCell>{header.name}</TableCell>
+                            <TableCell>{header.seasonName || "-"}</TableCell>
+                            <TableCell>{header.validFrom} to {header.validTo}</TableCell>
+                            <TableCell>{header.currency}</TableCell>
+                            <TableCell>
+                              <Badge variant={header.isActive ? "default" : "secondary"}>
+                                {header.isActive ? "Active" : "Inactive"}
+                              </Badge>
+                            </TableCell>
+                            <TableCell className="text-right">
+                              <div className="flex justify-end gap-2">
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => openRoomRateLinesDialog(header)}
+                                >
+                                  Add Rates
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => void openRoomRateHeaderDialog("edit", header)}
+                                >
+                                  <Edit3 className="size-4" />
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() =>
+                                    void onDelete("Delete room rate header and linked lines?", async () => {
+                                      await deleteRoomRateHeader(selectedHotel.id, header.id);
+                                      if (selectedRoomRateHeaderId === header.id) {
+                                        setSelectedRoomRateHeaderId(null);
+                                        setRoomRateLinesDialog({ open: false, headerId: null });
+                                      }
+                                      toast.success("Room rate header deleted.");
+                                    })
+                                  }
+                                >
+                                  <Trash2 className="size-4" />
+                                </Button>
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        ))
+                      )}
+                    </TableBody>
+                  </Table>
+                </div>
               </TabsContent>
 
               <TabsContent value="availability" className="mt-4 space-y-3">
@@ -1018,6 +1222,7 @@ export const AccommodationManagementView = ({
             <DialogDescription>Hotel (accommodation) details.</DialogDescription>
           </DialogHeader>
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+            <div className="space-y-2"><Label>Code</Label><Input value={hotelForm.code} onChange={(e)=>setHotelForm({...hotelForm,code:e.target.value.toUpperCase()})} /></div>
             <div className="space-y-2 md:col-span-2"><Label>Name</Label><Input value={hotelForm.name} onChange={(e)=>setHotelForm({...hotelForm,name:e.target.value})} /></div>
             <div className="space-y-2 md:col-span-2"><Label>Description</Label><Input value={hotelForm.description} onChange={(e)=>setHotelForm({...hotelForm,description:e.target.value})} /></div>
             <div className="space-y-2 md:col-span-2"><Label>Address</Label><Input value={hotelForm.address} onChange={(e)=>setHotelForm({...hotelForm,address:e.target.value})} /></div>
@@ -1039,6 +1244,7 @@ export const AccommodationManagementView = ({
         <DialogContent>
           <DialogHeader><DialogTitle>{roomTypeDialog.mode === "create" ? "Add Room Type" : "Edit Room Type"}</DialogTitle></DialogHeader>
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+            <div className="space-y-2"><Label>Code</Label><Input value={roomTypeForm.code} onChange={(e)=>setRoomTypeForm({...roomTypeForm,code:e.target.value.toUpperCase()})} /></div>
             <div className="space-y-2"><Label>Name</Label><Input value={roomTypeForm.name} onChange={(e)=>setRoomTypeForm({...roomTypeForm,name:e.target.value})} /></div>
             <div className="space-y-2"><Label>Bed Type</Label><Input value={roomTypeForm.bedType} onChange={(e)=>setRoomTypeForm({...roomTypeForm,bedType:e.target.value})} /></div>
             <div className="space-y-2"><Label>Max Occupancy</Label><Input type="number" min={1} value={roomTypeForm.maxOccupancy} onChange={(e)=>setRoomTypeForm({...roomTypeForm,maxOccupancy:Number(e.target.value)})} /></div>
@@ -1056,10 +1262,327 @@ export const AccommodationManagementView = ({
         </DialogContent>
       </Dialog>
 
-      <Dialog open={roomRateDialog.open} onOpenChange={(open)=>setRoomRateDialog((prev)=>({ ...prev, open }))}>
+      <Dialog
+        open={roomRateHeaderDialog.open}
+        onOpenChange={(open) => setRoomRateHeaderDialog((prev) => ({ ...prev, open }))}
+      >
         <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              {roomRateHeaderDialog.mode === "create"
+                ? "Add Room Rate Header"
+                : "Edit Room Rate Header"}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+            <div className="space-y-2">
+              <Label>Code</Label>
+              <Input
+                value={roomRateHeaderForm.code}
+                onChange={(e) =>
+                  setRoomRateHeaderForm({ ...roomRateHeaderForm, code: e.target.value.toUpperCase() })
+                }
+              />
+            </div>
+            <div className="space-y-2 md:col-span-2">
+              <Label>Header Name</Label>
+              <Input
+                value={roomRateHeaderForm.name}
+                onChange={(e) =>
+                  setRoomRateHeaderForm({ ...roomRateHeaderForm, name: e.target.value })
+                }
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Season (Optional)</Label>
+              <Select
+                value={roomRateHeaderForm.seasonId || "__none__"}
+                onValueChange={(value) =>
+                  setRoomRateHeaderForm({
+                    ...roomRateHeaderForm,
+                    seasonId: value === "__none__" ? "" : value,
+                  })
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none__">No Season</SelectItem>
+                  {seasons.map((season) => (
+                    <SelectItem key={season.id} value={season.id}>
+                      {season.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label>Currency</Label>
+              <Input
+                value={roomRateHeaderForm.currency}
+                maxLength={3}
+                onChange={(e) =>
+                  setRoomRateHeaderForm({
+                    ...roomRateHeaderForm,
+                    currency: e.target.value.toUpperCase(),
+                  })
+                }
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Valid From</Label>
+              <Input
+                type="date"
+                value={roomRateHeaderForm.validFrom}
+                onChange={(e) =>
+                  setRoomRateHeaderForm({
+                    ...roomRateHeaderForm,
+                    validFrom: e.target.value,
+                  })
+                }
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Valid To</Label>
+              <Input
+                type="date"
+                value={roomRateHeaderForm.validTo}
+                onChange={(e) =>
+                  setRoomRateHeaderForm({ ...roomRateHeaderForm, validTo: e.target.value })
+                }
+              />
+            </div>
+            <div className="flex items-center justify-between rounded-md border p-3 md:col-span-2">
+              <Label>Active</Label>
+              <Switch
+                checked={roomRateHeaderForm.isActive}
+                onCheckedChange={(checked) =>
+                  setRoomRateHeaderForm({ ...roomRateHeaderForm, isActive: checked })
+                }
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setRoomRateHeaderDialog({ open: false, mode: "create", row: null })}
+            >
+              Cancel
+            </Button>
+            <Button disabled={saving} onClick={() => void submitRoomRateHeader()}>
+              {saving ? "Saving..." : "Save"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={roomRateLinesDialog.open}
+        onOpenChange={(open) => {
+          if (!open) {
+            setRoomRateLineSearch("");
+            setRoomRateLineStatusFilter("all");
+            setRoomRateLinePageSize("10");
+            setRoomRateLinePage(1);
+          }
+          setRoomRateLinesDialog((prev) => (open ? { ...prev, open } : { open: false, headerId: null }));
+        }}
+      >
+        <DialogContent className="w-[96vw] max-w-[96vw] sm:max-w-6xl">
+          <DialogHeader>
+            <DialogTitle>
+              Room Rate Lines{selectedRoomRateHeader ? ` - ${selectedRoomRateHeader.name}` : ""}
+            </DialogTitle>
+            <DialogDescription>
+              Header details: Season {selectedRoomRateHeader?.seasonName || "-"} | Period{" "}
+              {selectedRoomRateHeader
+                ? `${selectedRoomRateHeader.validFrom} to ${selectedRoomRateHeader.validTo}`
+                : "-"}{" "}
+              | Currency {selectedRoomRateHeader?.currency || "-"}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid grid-cols-1 gap-3 rounded-md border p-3 md:grid-cols-4">
+            <div className="text-sm">
+              <p className="text-muted-foreground">Season</p>
+              <p className="font-medium">{selectedRoomRateHeader?.seasonName || "-"}</p>
+            </div>
+            <div className="text-sm">
+              <p className="text-muted-foreground">Rate Period</p>
+              <p className="font-medium">
+                {selectedRoomRateHeader
+                  ? `${selectedRoomRateHeader.validFrom} to ${selectedRoomRateHeader.validTo}`
+                  : "-"}
+              </p>
+            </div>
+            <div className="text-sm">
+              <p className="text-muted-foreground">Currency</p>
+              <p className="font-medium">{selectedRoomRateHeader?.currency || "-"}</p>
+            </div>
+            <div className="text-sm">
+              <p className="text-muted-foreground">Lines</p>
+              <p className="font-medium">{filteredRoomRates.length}</p>
+            </div>
+          </div>
+          <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+            <Input
+              placeholder="Search by category, room type, basis..."
+              value={roomRateLineSearch}
+              onChange={(e) => setRoomRateLineSearch(e.target.value)}
+              className="md:max-w-sm"
+            />
+            <div className="flex items-center gap-2">
+              <Select value={roomRateLineStatusFilter} onValueChange={setRoomRateLineStatusFilter}>
+                <SelectTrigger className="w-[140px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Status</SelectItem>
+                  <SelectItem value="active">Active</SelectItem>
+                  <SelectItem value="inactive">Inactive</SelectItem>
+                </SelectContent>
+              </Select>
+              <Select value={roomRateLinePageSize} onValueChange={setRoomRateLinePageSize}>
+                <SelectTrigger className="w-[120px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="5">5 / page</SelectItem>
+                  <SelectItem value="10">10 / page</SelectItem>
+                  <SelectItem value="20">20 / page</SelectItem>
+                  <SelectItem value="50">50 / page</SelectItem>
+                </SelectContent>
+              </Select>
+              <Button
+                onClick={() => openRoomRateDialog("create")}
+                disabled={roomTypes.length === 0 || !selectedRoomRateHeaderId}
+              >
+                <Plus className="mr-2 size-4" />
+                Add Rate Line
+              </Button>
+            </div>
+          </div>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Category</TableHead>
+                <TableHead>Room Type</TableHead>
+                <TableHead>Basis</TableHead>
+                <TableHead className="text-right">Rate</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead className="text-right">Actions</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {loadingDetails ? (
+                <TableRow>
+                  <TableCell colSpan={6} className="text-center">
+                    Loading...
+                  </TableCell>
+                </TableRow>
+              ) : statusFilteredRoomRates.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={6} className="text-center text-muted-foreground">
+                    {roomRateLineSearch
+                      ? "No matching room rate lines."
+                      : "No room rate lines for this header."}
+                  </TableCell>
+                </TableRow>
+              ) : (
+                pagedRoomRates.map((item) => (
+                  <TableRow key={item.id}>
+                    <TableCell>{item.roomCategory || "-"}</TableCell>
+                    <TableCell>{item.roomTypeName}</TableCell>
+                    <TableCell>{item.roomBasis || "-"}</TableCell>
+                    <TableCell className="text-right">
+                      {item.baseRatePerNight} {item.currency}
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant={item.isActive ? "default" : "secondary"}>
+                        {item.isActive ? "Active" : "Inactive"}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <div className="flex justify-end gap-2">
+                        <Button size="sm" variant="outline" onClick={() => openRoomRateDialog("edit", item)}>
+                          <Edit3 className="size-4" />
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() =>
+                            void onDelete("Delete room rate line?", async () => {
+                              if (!selectedHotelId) return;
+                              await deleteRoomRate(selectedHotelId, item.id);
+                              toast.success("Room rate line deleted.");
+                            })
+                          }
+                        >
+                          <Trash2 className="size-4" />
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))
+              )}
+            </TableBody>
+          </Table>
+          <DialogFooter>
+            <div className="mr-auto text-sm text-muted-foreground">
+              Page {roomRateLinePage} of {roomRateLineTotalPages} ({statusFilteredRoomRates.length} records)
+            </div>
+            <Button
+              variant="outline"
+              disabled={roomRateLinePage <= 1}
+              onClick={() => setRoomRateLinePage((prev) => Math.max(1, prev - 1))}
+            >
+              Previous
+            </Button>
+            <Button
+              variant="outline"
+              disabled={roomRateLinePage >= roomRateLineTotalPages}
+              onClick={() =>
+                setRoomRateLinePage((prev) => Math.min(roomRateLineTotalPages, prev + 1))
+              }
+            >
+              Next
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setRoomRateLineSearch("");
+                setRoomRateLineStatusFilter("all");
+                setRoomRateLinePageSize("10");
+                setRoomRateLinePage(1);
+                setRoomRateLinesDialog({ open: false, headerId: null });
+              }}
+            >
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={roomRateDialog.open} onOpenChange={(open)=>setRoomRateDialog((prev)=>({ ...prev, open }))}>
+        <DialogContent className="w-[96vw] max-w-[96vw] sm:max-w-5xl">
           <DialogHeader><DialogTitle>{roomRateDialog.mode === "create" ? "Add Room Rate" : "Edit Room Rate"}</DialogTitle></DialogHeader>
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+            <div className="space-y-2">
+              <Label>Code</Label>
+              <Input value={roomRateForm.code} onChange={(e)=>setRoomRateForm({...roomRateForm,code:e.target.value.toUpperCase()})} />
+            </div>
+            <div className="space-y-2">
+              <Label>Room Rate Header</Label>
+              <Select
+                value={roomRateForm.roomRateHeaderId}
+                onValueChange={(value) => setRoomRateForm({ ...roomRateForm, roomRateHeaderId: value })}
+              >
+                <SelectTrigger><SelectValue placeholder="Select header" /></SelectTrigger>
+                <SelectContent>
+                  {roomRateHeaders.map((item)=><SelectItem key={item.id} value={item.id}>{item.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
             <div className="space-y-2">
               <Label>Room Type</Label>
               <Select value={roomRateForm.roomTypeId} onValueChange={(value)=>setRoomRateForm({...roomRateForm,roomTypeId:value})}>
@@ -1068,20 +1591,14 @@ export const AccommodationManagementView = ({
               </Select>
             </div>
             <div className="space-y-2">
-              <Label>Season (Optional)</Label>
-              <Select value={roomRateForm.seasonId || "__none__"} onValueChange={(value)=>setRoomRateForm({...roomRateForm,seasonId:value==="__none__"?"":value})}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__none__">No Season</SelectItem>
-                  {seasons.map((season)=><SelectItem key={season.id} value={season.id}>{season.name}</SelectItem>)}
-                </SelectContent>
-              </Select>
+              <Label>Room Category</Label>
+              <Input value={roomRateForm.roomCategory} onChange={(e)=>setRoomRateForm({...roomRateForm,roomCategory:e.target.value})} />
+            </div>
+            <div className="space-y-2">
+              <Label>Room Basis</Label>
+              <Input value={roomRateForm.roomBasis} onChange={(e)=>setRoomRateForm({...roomRateForm,roomBasis:e.target.value.toUpperCase()})} />
             </div>
             <div className="space-y-2"><Label>Base Rate</Label><Input type="number" min={0} step="0.01" value={roomRateForm.baseRatePerNight} onChange={(e)=>setRoomRateForm({...roomRateForm,baseRatePerNight:Number(e.target.value)})} /></div>
-            <div className="space-y-2"><Label>Season Multiplier</Label><Input type="number" min={0} step="0.01" value={roomRateForm.seasonMultiplier} onChange={(e)=>setRoomRateForm({...roomRateForm,seasonMultiplier:Number(e.target.value)})} /></div>
-            <div className="space-y-2"><Label>Currency</Label><Input value={roomRateForm.currency} maxLength={3} onChange={(e)=>setRoomRateForm({...roomRateForm,currency:e.target.value.toUpperCase()})} /></div>
-            <div className="space-y-2"><Label>Valid From</Label><Input type="date" value={roomRateForm.validFrom} onChange={(e)=>setRoomRateForm({...roomRateForm,validFrom:e.target.value})} /></div>
-            <div className="space-y-2"><Label>Valid To</Label><Input type="date" value={roomRateForm.validTo} onChange={(e)=>setRoomRateForm({...roomRateForm,validTo:e.target.value})} /></div>
             <div className="flex items-center justify-between rounded-md border p-3"><Label>Active</Label><Switch checked={roomRateForm.isActive} onCheckedChange={(checked)=>setRoomRateForm({...roomRateForm,isActive:checked})} /></div>
           </div>
           <DialogFooter>
@@ -1095,6 +1612,7 @@ export const AccommodationManagementView = ({
         <DialogContent>
           <DialogHeader><DialogTitle>{availabilityDialog.mode === "create" ? "Add Availability" : "Edit Availability"}</DialogTitle></DialogHeader>
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+            <div className="space-y-2"><Label>Code</Label><Input value={availabilityForm.code} onChange={(e)=>setAvailabilityForm({...availabilityForm,code:e.target.value.toUpperCase()})} /></div>
             <div className="space-y-2">
               <Label>Room Type</Label>
               <Select value={availabilityForm.roomTypeId} onValueChange={(value)=>setAvailabilityForm({...availabilityForm,roomTypeId:value})}>
@@ -1119,6 +1637,7 @@ export const AccommodationManagementView = ({
         <DialogContent>
           <DialogHeader><DialogTitle>{imageDialog.mode === "create" ? "Add Image" : "Edit Image"}</DialogTitle></DialogHeader>
           <div className="grid grid-cols-1 gap-3">
+            <div className="space-y-2"><Label>Code</Label><Input value={imageForm.code} onChange={(e)=>setImageForm({...imageForm,code:e.target.value.toUpperCase()})} /></div>
             <div className="space-y-2"><Label>Image URL</Label><Input value={imageForm.imageUrl} onChange={(e)=>setImageForm({...imageForm,imageUrl:e.target.value})} /></div>
             <div className="space-y-2"><Label>Caption</Label><Input value={imageForm.caption} onChange={(e)=>setImageForm({...imageForm,caption:e.target.value})} /></div>
             <div className="space-y-2"><Label>Order</Label><Input type="number" min={0} value={imageForm.order} onChange={(e)=>setImageForm({...imageForm,order:Number(e.target.value)})} /></div>
@@ -1138,6 +1657,7 @@ export const AccommodationManagementView = ({
             <DialogDescription>These seasons are used in the Room Rate season dropdown.</DialogDescription>
           </DialogHeader>
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+            <div className="space-y-2"><Label>Code</Label><Input value={seasonForm.code} onChange={(e)=>setSeasonForm({...seasonForm,code:e.target.value.toUpperCase()})} /></div>
             <div className="space-y-2"><Label>Name</Label><Input value={seasonForm.name} onChange={(e)=>setSeasonForm({...seasonForm,name:e.target.value})} /></div>
             <div className="space-y-2"><Label>Description</Label><Input value={seasonForm.description} onChange={(e)=>setSeasonForm({...seasonForm,description:e.target.value})} /></div>
             <div className="space-y-2"><Label>Start Date</Label><Input type="date" value={seasonForm.startDate} onChange={(e)=>setSeasonForm({...seasonForm,startDate:e.target.value})} /></div>
@@ -1184,7 +1704,7 @@ export const AccommodationManagementView = ({
                                 async () => {
                                   await deleteSeason(season.id);
                                   toast.success("Season deleted.");
-                                  const refreshed = await listSeasons({ limit: 200 });
+                                  const refreshed = await listSeasons({ limit: 100 });
                                   setSeasons(refreshed.items);
                                 }
                               )

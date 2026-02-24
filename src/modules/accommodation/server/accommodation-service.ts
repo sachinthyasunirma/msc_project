@@ -7,6 +7,7 @@ import {
   createAvailabilitySchema,
   createHotelImageSchema,
   createHotelSchema,
+  createRoomRateHeaderSchema,
   createRoomRateSchema,
   createRoomTypeSchema,
   cursorSchema,
@@ -15,6 +16,7 @@ import {
   updateAvailabilitySchema,
   updateHotelImageSchema,
   updateHotelSchema,
+  updateRoomRateHeaderSchema,
   updateRoomRateSchema,
   updateRoomTypeSchema,
 } from "@/modules/accommodation/shared/accommodation-schemas";
@@ -105,6 +107,27 @@ async function ensureRoomTypeInHotel(hotelId: string, roomTypeId: string) {
       400,
       "ROOM_TYPE_MISMATCH",
       "Room type does not belong to this hotel."
+    );
+  }
+}
+
+async function ensureRoomRateHeaderInHotel(hotelId: string, roomRateHeaderId: string) {
+  const [header] = await db
+    .select({ id: schema.roomRateHeader.id })
+    .from(schema.roomRateHeader)
+    .where(
+      and(
+        eq(schema.roomRateHeader.id, roomRateHeaderId),
+        eq(schema.roomRateHeader.hotelId, hotelId)
+      )
+    )
+    .limit(1);
+
+  if (!header) {
+    throw new AccommodationError(
+      400,
+      "ROOM_RATE_HEADER_MISMATCH",
+      "Room rate header does not belong to this hotel."
     );
   }
 }
@@ -348,6 +371,204 @@ export async function deleteRoomType(
   }
 }
 
+export async function listRoomRateHeaders(
+  hotelId: string,
+  searchParams: URLSearchParams,
+  headers: Headers
+) {
+  const parsed = nestedListQuerySchema.safeParse(Object.fromEntries(searchParams));
+  if (!parsed.success) {
+    throw new AccommodationError(400, "VALIDATION_ERROR", normalizeZodError(parsed.error));
+  }
+
+  const companyId = await getCompanyId(headers);
+  await ensureHotelOwned(companyId, hotelId);
+  const term = parsed.data.q ? `%${parsed.data.q}%` : null;
+
+  return db
+    .select({
+      id: schema.roomRateHeader.id,
+      hotelId: schema.roomRateHeader.hotelId,
+      code: schema.roomRateHeader.code,
+      name: schema.roomRateHeader.name,
+      seasonId: schema.roomRateHeader.seasonId,
+      seasonName: schema.season.name,
+      validFrom: schema.roomRateHeader.validFrom,
+      validTo: schema.roomRateHeader.validTo,
+      currency: schema.roomRateHeader.currency,
+      isActive: schema.roomRateHeader.isActive,
+      createdAt: schema.roomRateHeader.createdAt,
+      updatedAt: schema.roomRateHeader.updatedAt,
+    })
+    .from(schema.roomRateHeader)
+    .leftJoin(schema.season, eq(schema.season.id, schema.roomRateHeader.seasonId))
+    .where(
+      and(
+        eq(schema.roomRateHeader.hotelId, hotelId),
+        term
+          ? or(
+              ilike(schema.roomRateHeader.name, term),
+              ilike(schema.season.name, term),
+              ilike(schema.roomRateHeader.currency, term)
+            )
+          : undefined
+      )
+    )
+    .orderBy(desc(schema.roomRateHeader.createdAt))
+    .limit(parsed.data.limit);
+}
+
+export async function createRoomRateHeader(
+  hotelId: string,
+  payload: unknown,
+  headers: Headers
+) {
+  const parsed = createRoomRateHeaderSchema.safeParse(payload);
+  if (!parsed.success) {
+    throw new AccommodationError(400, "VALIDATION_ERROR", normalizeZodError(parsed.error));
+  }
+
+  const companyId = await getCompanyId(headers);
+  await ensureHotelOwned(companyId, hotelId);
+
+  if (parsed.data.seasonId) {
+    const [season] = await db
+      .select({ id: schema.season.id })
+      .from(schema.season)
+      .where(
+        and(
+          eq(schema.season.id, parsed.data.seasonId),
+          eq(schema.season.companyId, companyId)
+        )
+      )
+      .limit(1);
+    if (!season) {
+      throw new AccommodationError(400, "SEASON_NOT_FOUND", "Season not found.");
+    }
+  }
+
+  const [created] = await db
+    .insert(schema.roomRateHeader)
+    .values({
+      ...parsed.data,
+      hotelId,
+    })
+    .returning();
+  return created;
+}
+
+export async function updateRoomRateHeader(
+  hotelId: string,
+  roomRateHeaderId: string,
+  payload: unknown,
+  headers: Headers
+) {
+  const parsed = updateRoomRateHeaderSchema.safeParse(payload);
+  if (!parsed.success) {
+    throw new AccommodationError(400, "VALIDATION_ERROR", normalizeZodError(parsed.error));
+  }
+
+  const companyId = await getCompanyId(headers);
+  await ensureHotelOwned(companyId, hotelId);
+  if (parsed.data.seasonId) {
+    const [season] = await db
+      .select({ id: schema.season.id })
+      .from(schema.season)
+      .where(
+        and(
+          eq(schema.season.id, parsed.data.seasonId),
+          eq(schema.season.companyId, companyId)
+        )
+      )
+      .limit(1);
+    if (!season) {
+      throw new AccommodationError(400, "SEASON_NOT_FOUND", "Season not found.");
+    }
+  }
+
+  const [currentHeader] = await db
+    .select()
+    .from(schema.roomRateHeader)
+    .where(
+      and(
+        eq(schema.roomRateHeader.id, roomRateHeaderId),
+        eq(schema.roomRateHeader.hotelId, hotelId)
+      )
+    )
+    .limit(1);
+  if (!currentHeader) {
+    throw new AccommodationError(
+      404,
+      "ROOM_RATE_HEADER_NOT_FOUND",
+      "Room rate header not found."
+    );
+  }
+
+  const nextSeasonId = parsed.data.seasonId ?? currentHeader.seasonId;
+  const nextCurrency = parsed.data.currency ?? currentHeader.currency;
+  const nextValidFrom = parsed.data.validFrom ?? currentHeader.validFrom;
+  const nextValidTo = parsed.data.validTo ?? currentHeader.validTo;
+
+  const [updated] = await db
+    .update(schema.roomRateHeader)
+    .set({
+      ...parsed.data,
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(schema.roomRateHeader.id, roomRateHeaderId),
+        eq(schema.roomRateHeader.hotelId, hotelId)
+      )
+    )
+    .returning();
+  if (!updated) {
+    throw new AccommodationError(
+      404,
+      "ROOM_RATE_HEADER_NOT_FOUND",
+      "Room rate header not found."
+    );
+  }
+
+  await db
+    .update(schema.roomRate)
+    .set({
+      seasonId: nextSeasonId,
+      currency: nextCurrency,
+      validFrom: nextValidFrom,
+      validTo: nextValidTo,
+      updatedAt: new Date(),
+    })
+    .where(eq(schema.roomRate.roomRateHeaderId, roomRateHeaderId));
+
+  return updated;
+}
+
+export async function deleteRoomRateHeader(
+  hotelId: string,
+  roomRateHeaderId: string,
+  headers: Headers
+) {
+  const companyId = await getCompanyId(headers);
+  await ensureHotelOwned(companyId, hotelId);
+  const [deleted] = await db
+    .delete(schema.roomRateHeader)
+    .where(
+      and(
+        eq(schema.roomRateHeader.id, roomRateHeaderId),
+        eq(schema.roomRateHeader.hotelId, hotelId)
+      )
+    )
+    .returning({ id: schema.roomRateHeader.id });
+  if (!deleted) {
+    throw new AccommodationError(
+      404,
+      "ROOM_RATE_HEADER_NOT_FOUND",
+      "Room rate header not found."
+    );
+  }
+}
+
 export async function listRoomRates(
   hotelId: string,
   searchParams: URLSearchParams,
@@ -366,6 +587,11 @@ export async function listRoomRates(
     .select({
       id: schema.roomRate.id,
       hotelId: schema.roomRate.hotelId,
+      code: schema.roomRate.code,
+      roomRateHeaderId: schema.roomRate.roomRateHeaderId,
+      roomRateHeaderName: schema.roomRateHeader.name,
+      roomCategory: schema.roomRate.roomCategory,
+      roomBasis: schema.roomRate.roomBasis,
       roomTypeId: schema.roomRate.roomTypeId,
       roomTypeName: schema.roomType.name,
       seasonId: schema.roomRate.seasonId,
@@ -381,13 +607,23 @@ export async function listRoomRates(
       updatedAt: schema.roomRate.updatedAt,
     })
     .from(schema.roomRate)
+    .leftJoin(
+      schema.roomRateHeader,
+      eq(schema.roomRateHeader.id, schema.roomRate.roomRateHeaderId)
+    )
     .innerJoin(schema.roomType, eq(schema.roomType.id, schema.roomRate.roomTypeId))
     .leftJoin(schema.season, eq(schema.season.id, schema.roomRate.seasonId))
     .where(
       and(
         eq(schema.roomRate.hotelId, hotelId),
         term
-          ? or(ilike(schema.roomType.name, term), ilike(schema.season.name, term))
+          ? or(
+              ilike(schema.roomType.name, term),
+              ilike(schema.season.name, term),
+              ilike(schema.roomRateHeader.name, term),
+              ilike(schema.roomRate.roomCategory, term),
+              ilike(schema.roomRate.roomBasis, term)
+            )
           : undefined
       )
     )
@@ -407,32 +643,40 @@ export async function createRoomRate(
 
   const companyId = await getCompanyId(headers);
   await ensureHotelOwned(companyId, hotelId);
+  await ensureRoomRateHeaderInHotel(hotelId, parsed.data.roomRateHeaderId);
   await ensureRoomTypeInHotel(hotelId, parsed.data.roomTypeId);
 
-  if (parsed.data.seasonId) {
-    const [season] = await db
-      .select({ id: schema.season.id })
-      .from(schema.season)
-      .where(
-        and(
-          eq(schema.season.id, parsed.data.seasonId),
-          eq(schema.season.companyId, companyId)
-        )
+  const [header] = await db
+    .select()
+    .from(schema.roomRateHeader)
+    .where(
+      and(
+        eq(schema.roomRateHeader.id, parsed.data.roomRateHeaderId),
+        eq(schema.roomRateHeader.hotelId, hotelId)
       )
-      .limit(1);
-    if (!season) {
-      throw new AccommodationError(400, "SEASON_NOT_FOUND", "Season not found.");
-    }
+    )
+    .limit(1);
+  if (!header) {
+    throw new AccommodationError(
+      404,
+      "ROOM_RATE_HEADER_NOT_FOUND",
+      "Room rate header not found."
+    );
   }
 
-  const finalRate = parsed.data.baseRatePerNight * parsed.data.seasonMultiplier;
+  const seasonMultiplier = 1;
+  const finalRate = parsed.data.baseRatePerNight * seasonMultiplier;
   const [created] = await db
     .insert(schema.roomRate)
     .values({
       ...parsed.data,
       hotelId,
+      seasonId: header.seasonId,
+      currency: header.currency,
+      validFrom: header.validFrom,
+      validTo: header.validTo,
       baseRatePerNight: toPrice(parsed.data.baseRatePerNight),
-      seasonMultiplier: toPrice(parsed.data.seasonMultiplier),
+      seasonMultiplier: toPrice(seasonMultiplier),
       finalRatePerNight: toPrice(finalRate),
     })
     .returning();
@@ -462,34 +706,50 @@ export async function updateRoomRate(
     throw new AccommodationError(404, "ROOM_RATE_NOT_FOUND", "Room rate not found.");
   }
 
+  const nextHeaderId = parsed.data.roomRateHeaderId ?? current.roomRateHeaderId;
+  if (nextHeaderId) {
+    await ensureRoomRateHeaderInHotel(hotelId, nextHeaderId);
+  }
   if (parsed.data.roomTypeId) {
     await ensureRoomTypeInHotel(hotelId, parsed.data.roomTypeId);
   }
-  if (parsed.data.seasonId) {
-    const [season] = await db
-      .select({ id: schema.season.id })
-      .from(schema.season)
-      .where(
-        and(eq(schema.season.id, parsed.data.seasonId), eq(schema.season.companyId, companyId))
-      )
-      .limit(1);
-    if (!season) {
-      throw new AccommodationError(400, "SEASON_NOT_FOUND", "Season not found.");
-    }
+  if (!nextHeaderId) {
+    throw new AccommodationError(
+      400,
+      "ROOM_RATE_HEADER_REQUIRED",
+      "Room rate header is required."
+    );
+  }
+
+  const [header] = await db
+    .select()
+    .from(schema.roomRateHeader)
+    .where(
+      and(eq(schema.roomRateHeader.id, nextHeaderId), eq(schema.roomRateHeader.hotelId, hotelId))
+    )
+    .limit(1);
+  if (!header) {
+    throw new AccommodationError(
+      404,
+      "ROOM_RATE_HEADER_NOT_FOUND",
+      "Room rate header not found."
+    );
   }
 
   const baseRate = parsed.data.baseRatePerNight ?? Number(current.baseRatePerNight);
-  const multiplier = parsed.data.seasonMultiplier ?? Number(current.seasonMultiplier);
+  const multiplier = 1;
   const updatePayload: Record<string, unknown> = {
     ...parsed.data,
+    seasonId: header.seasonId,
+    currency: header.currency,
+    validFrom: header.validFrom,
+    validTo: header.validTo,
+    seasonMultiplier: toPrice(multiplier),
     updatedAt: new Date(),
     finalRatePerNight: toPrice(baseRate * multiplier),
   };
   if (parsed.data.baseRatePerNight !== undefined) {
     updatePayload.baseRatePerNight = toPrice(parsed.data.baseRatePerNight);
-  }
-  if (parsed.data.seasonMultiplier !== undefined) {
-    updatePayload.seasonMultiplier = toPrice(parsed.data.seasonMultiplier);
   }
 
   const [updated] = await db
@@ -536,6 +796,7 @@ export async function listAvailability(
     .select({
       id: schema.availability.id,
       hotelId: schema.availability.hotelId,
+      code: schema.availability.code,
       roomTypeId: schema.availability.roomTypeId,
       roomTypeName: schema.roomType.name,
       date: schema.availability.date,
@@ -761,6 +1022,19 @@ export function toAccommodationErrorResponse(error: unknown) {
 
   if (error instanceof Error) {
     const message = error.message.toLowerCase();
+    if (
+      (message.includes("relation") && message.includes("does not exist")) ||
+      (message.includes("column") && message.includes("does not exist"))
+    ) {
+      return {
+        status: 500,
+        body: {
+          code: "DB_SCHEMA_MISMATCH",
+          message:
+            "Database schema is not up to date. Please run the latest Drizzle migration/db push.",
+        },
+      };
+    }
     if (message.includes("duplicate key")) {
       return {
         status: 409,

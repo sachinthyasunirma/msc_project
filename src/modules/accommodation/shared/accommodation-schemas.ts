@@ -22,6 +22,7 @@ export const cursorSchema = z.object({
 });
 
 export const createHotelSchema = z.object({
+  code: z.string().trim().toUpperCase().min(1).max(40),
   name: z.string().trim().min(2).max(160),
   description: z.string().trim().max(500).optional().nullable(),
   address: z.string().trim().min(2).max(255),
@@ -40,6 +41,7 @@ export const updateHotelSchema = createHotelSchema
   });
 
 export const createRoomTypeSchema = z.object({
+  code: z.string().trim().toUpperCase().min(1).max(40),
   name: z.string().trim().min(2).max(160),
   description: z.string().trim().max(500).optional().nullable(),
   maxOccupancy: z.coerce.number().int().min(1).max(30),
@@ -58,21 +60,16 @@ export const updateRoomTypeSchema = createRoomTypeSchema
   });
 
 const roomRateBaseSchema = z.object({
+  code: z.string().trim().toUpperCase().min(1).max(40),
+  roomRateHeaderId: z.string().min(1),
   roomTypeId: z.string().min(1),
-  seasonId: z.string().min(1).optional().nullable(),
+  roomCategory: z.string().trim().min(2).max(80),
+  roomBasis: z.string().trim().min(2).max(40),
   baseRatePerNight: z.coerce.number().min(0).max(9999999),
-  seasonMultiplier: z.coerce.number().min(0).max(10).default(1),
-  currency: z.string().trim().toUpperCase().length(3),
   isActive: z.boolean().default(true),
-  validFrom: z.string().date(),
-  validTo: z.string().date(),
 });
 
-export const createRoomRateSchema = roomRateBaseSchema
-  .refine((value) => value.validFrom <= value.validTo, {
-    message: "Valid from date must be before or equal to valid to date.",
-    path: ["validTo"],
-  });
+export const createRoomRateSchema = roomRateBaseSchema;
 
 export const updateRoomRateSchema = roomRateBaseSchema
   .partial()
@@ -80,7 +77,30 @@ export const updateRoomRateSchema = roomRateBaseSchema
     message: "At least one room rate field is required.",
   });
 
+const roomRateHeaderBaseSchema = z.object({
+  code: z.string().trim().toUpperCase().min(1).max(40),
+  name: z.string().trim().min(2).max(120),
+  seasonId: z.string().min(1).optional().nullable(),
+  currency: z.string().trim().toUpperCase().length(3),
+  validFrom: z.string().date(),
+  validTo: z.string().date(),
+  isActive: z.boolean().default(true),
+});
+
+export const createRoomRateHeaderSchema = roomRateHeaderBaseSchema
+  .refine((value) => value.validFrom <= value.validTo, {
+    message: "Valid from date must be before or equal to valid to date.",
+    path: ["validTo"],
+  });
+
+export const updateRoomRateHeaderSchema = roomRateHeaderBaseSchema
+  .partial()
+  .refine((value) => Object.keys(value).length > 0, {
+    message: "At least one room rate header field is required.",
+  });
+
 export const createAvailabilitySchema = z.object({
+  code: z.string().trim().toUpperCase().min(1).max(40),
   roomTypeId: z.string().min(1),
   date: z.string().date(),
   availableRooms: z.coerce.number().int().min(0).max(5000),
@@ -96,6 +116,7 @@ export const updateAvailabilitySchema = createAvailabilitySchema
   });
 
 export const createHotelImageSchema = z.object({
+  code: z.string().trim().toUpperCase().min(1).max(40),
   imageUrl: z.string().url(),
   caption: z.string().trim().max(255).optional().nullable(),
   isPrimary: z.boolean().default(false),

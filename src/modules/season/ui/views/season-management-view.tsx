@@ -53,6 +53,7 @@ export const SeasonManagementView = () => {
     row: SeasonOption | null;
   }>({ open: false, mode: "create", row: null });
   const [form, setForm] = useState({
+    code: "",
     name: "",
     description: "",
     startDate: "",
@@ -97,6 +98,7 @@ export const SeasonManagementView = () => {
   const openDialog = (mode: Mode, row: SeasonOption | null = null) => {
     setDialog({ open: true, mode, row });
     setForm({
+      code: row?.code ?? "",
       name: row?.name ?? "",
       description: row?.description ?? "",
       startDate: row?.startDate ?? "",
@@ -212,6 +214,7 @@ export const SeasonManagementView = () => {
         <Table>
           <TableHeader>
             <TableRow>
+              <TableHead>Code</TableHead>
               <TableHead>Name</TableHead>
               <TableHead>Date Range</TableHead>
               <TableHead>Description</TableHead>
@@ -221,19 +224,20 @@ export const SeasonManagementView = () => {
           <TableBody>
             {loading ? (
               <TableRow>
-                <TableCell colSpan={4} className="text-center text-muted-foreground">
+                <TableCell colSpan={5} className="text-center text-muted-foreground">
                   Loading...
                 </TableCell>
               </TableRow>
             ) : seasons.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={4} className="text-center text-muted-foreground">
+                <TableCell colSpan={5} className="text-center text-muted-foreground">
                   No seasons found.
                 </TableCell>
               </TableRow>
             ) : (
               seasons.map((season) => (
                 <TableRow key={season.id}>
+                  <TableCell>{season.code}</TableCell>
                   <TableCell>{season.name}</TableCell>
                   <TableCell>{season.startDate} to {season.endDate}</TableCell>
                   <TableCell>{season.description || "-"}</TableCell>
@@ -280,6 +284,10 @@ export const SeasonManagementView = () => {
             <DialogDescription>Season will be available in room-rate dropdowns.</DialogDescription>
           </DialogHeader>
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+            <div className="space-y-2">
+              <Label>Code</Label>
+              <Input value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value.toUpperCase() })} />
+            </div>
             <div className="space-y-2">
               <Label>Name</Label>
               <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />

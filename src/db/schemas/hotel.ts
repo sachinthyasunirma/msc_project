@@ -20,6 +20,7 @@ export const hotel = pgTable(
       .primaryKey()
       .$defaultFn(() => nanoid()),
 
+    code: text("code").notNull(),
     name: text("name").notNull(),
     description: text("description"),
     address: text("address").notNull(),
@@ -51,6 +52,7 @@ export const hotel = pgTable(
       table.starRating,
       table.isActive
     ),
+    unique("uq_hotel_company_code").on(table.companyId, table.code),
   ]
 );
 
@@ -63,6 +65,7 @@ export const roomType = pgTable(
     hotelId: text("hotel_id")
       .notNull()
       .references(() => hotel.id, { onDelete: "cascade" }),
+    code: text("code").notNull(),
     name: text("name").notNull(),
     description: text("description"),
     maxOccupancy: integer("max_occupancy").notNull(),
@@ -83,6 +86,34 @@ export const roomType = pgTable(
       table.isActive,
       table.maxOccupancy
     ),
+    unique("uq_room_type_hotel_code").on(table.hotelId, table.code),
+  ]
+);
+
+export const roomRateHeader = pgTable(
+  "room_rate_header",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => nanoid()),
+    hotelId: text("hotel_id")
+      .notNull()
+      .references(() => hotel.id, { onDelete: "cascade" }),
+    code: text("code").notNull(),
+    name: text("name").notNull(),
+    seasonId: text("season_id").references(() => season.id, { onDelete: "set null" }),
+    validFrom: date("valid_from").notNull(),
+    validTo: date("valid_to").notNull(),
+    currency: text("currency").notNull().default("USD"),
+    isActive: boolean("is_active").notNull().default(true),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (table) => [
+    index("idx_room_rate_header_hotel").on(table.hotelId),
+    index("idx_room_rate_header_hotel_period").on(table.hotelId, table.validFrom, table.validTo),
+    index("idx_room_rate_header_active").on(table.isActive),
+    unique("uq_room_rate_header_hotel_code").on(table.hotelId, table.code),
   ]
 );
 
@@ -98,6 +129,12 @@ export const roomRate = pgTable(
     roomTypeId: text("room_type_id")
       .notNull()
       .references(() => roomType.id, { onDelete: "cascade" }),
+    code: text("code").notNull(),
+    roomRateHeaderId: text("room_rate_header_id").references(() => roomRateHeader.id, {
+      onDelete: "cascade",
+    }),
+    roomCategory: text("room_category"),
+    roomBasis: text("room_basis"),
     seasonId: text("season_id").references(() => season.id, {
       onDelete: "cascade",
     }),
@@ -136,10 +173,13 @@ export const roomRate = pgTable(
     index("idx_room_rate_lookup").on(
       table.hotelId,
       table.roomTypeId,
+      table.roomRateHeaderId,
       table.validFrom,
       table.validTo,
       table.isActive
     ),
+    index("idx_room_rate_header").on(table.roomRateHeaderId),
+    unique("uq_room_rate_hotel_code").on(table.hotelId, table.code),
   ]
 );
 
@@ -155,6 +195,7 @@ export const availability = pgTable(
     roomTypeId: text("room_type_id")
       .notNull()
       .references(() => roomType.id, { onDelete: "cascade" }),
+    code: text("code").notNull(),
     date: date("date").notNull(),
     availableRooms: integer("available_rooms").notNull(),
     bookedRooms: integer("booked_rooms").notNull().default(0),
@@ -173,6 +214,7 @@ export const availability = pgTable(
 
     // Unique constraint to prevent duplicate entries for same room type on same date
     unique("unique_date_room").on(table.roomTypeId, table.date),
+    unique("uq_availability_hotel_code").on(table.hotelId, table.code),
   ]
 );
 
@@ -183,12 +225,15 @@ export const hotelImage = pgTable("hotel_image", {
   hotelId: text("hotel_id")
     .notNull()
     .references(() => hotel.id, { onDelete: "cascade" }),
+  code: text("code").notNull(),
   imageUrl: text("image_url").notNull(),
   caption: text("caption"),
   isPrimary: boolean("is_primary").notNull().default(false),
   order: integer("order").notNull().default(0),
   createdAt: timestamp("created_at").notNull().defaultNow(),
-});
+}, (table) => [
+  unique("uq_hotel_image_hotel_code").on(table.hotelId, table.code),
+]);
 
 export const cancellationPolicy = pgTable("cancellation_policy", {
   id: text("id")
@@ -197,6 +242,7 @@ export const cancellationPolicy = pgTable("cancellation_policy", {
   hotelId: text("hotel_id")
     .notNull()
     .references(() => hotel.id, { onDelete: "cascade" }),
+  code: text("code").notNull(),
   name: text("name").notNull(),
   description: text("description"),
   // Cancellation window in days before check-in
@@ -206,4 +252,6 @@ export const cancellationPolicy = pgTable("cancellation_policy", {
   isDefault: boolean("is_default").notNull().default(false),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
-});
+}, (table) => [
+  unique("uq_cancellation_policy_hotel_code").on(table.hotelId, table.code),
+]);
