@@ -371,20 +371,30 @@ export function ActivityManagementView({ activityId, showActivityList = true }: 
   }, [activities, activityId, locations, resource, showActivityList]);
 
   const loadLookups = useCallback(async () => {
-    const [acts, locs] = await Promise.all([
-      listActivityRecords("activities", { limit: 300 }),
-      listTransportRecords("locations", { limit: 200 }),
-    ]);
-    setActivities(acts);
-    setLocations(locs);
+    try {
+      const [acts, locs] = await Promise.all([
+        listActivityRecords("activities", { limit: 200 }),
+        listTransportRecords("locations", { limit: 200 }),
+      ]);
+      setActivities(acts);
+      setLocations(locs);
+    } catch (error) {
+      setActivities([]);
+      setLocations([]);
+      toast.error(error instanceof Error ? error.message : "Failed to load activity lookups.");
+    }
   }, []);
 
   const loadImages = useCallback(async () => {
-    const rows = await listActivityRecords("activity-images", {
-      limit: 500,
-      activityId: activityId || undefined,
-    });
-    setImages(rows);
+    try {
+      const rows = await listActivityRecords("activity-images", {
+        limit: 200,
+        activityId: activityId || undefined,
+      });
+      setImages(rows);
+    } catch {
+      setImages([]);
+    }
   }, [activityId]);
 
   const load = useCallback(async () => {
@@ -419,7 +429,8 @@ export function ActivityManagementView({ activityId, showActivityList = true }: 
   }, [activityId, coverImageMap, query, resource, showActivityList]);
 
   useEffect(() => {
-    void Promise.all([loadLookups(), loadImages()]);
+    void loadLookups();
+    void loadImages();
   }, [loadLookups, loadImages]);
 
   useEffect(() => {
@@ -614,15 +625,17 @@ export function ActivityManagementView({ activityId, showActivityList = true }: 
           </div>
         </div>
 
-        <Tabs value={resource} onValueChange={(value) => setResource(value as ResourceKey)}>
-          <TabsList className="flex h-auto w-full flex-wrap justify-start gap-2 bg-transparent p-0">
-            {resourceTabs.map((key) => (
-              <TabsTrigger key={key} value={key} className="border">
-                {META[key].title.replace("Activity ", "")}
-              </TabsTrigger>
-            ))}
-          </TabsList>
-        </Tabs>
+        {resourceTabs.length > 1 ? (
+          <Tabs value={resource} onValueChange={(value) => setResource(value as ResourceKey)}>
+            <TabsList className="flex h-auto w-full flex-wrap justify-start gap-2 bg-transparent p-0">
+              {resourceTabs.map((key) => (
+                <TabsTrigger key={key} value={key} className="border">
+                  {META[key].title.replace("Activity ", "")}
+                </TabsTrigger>
+              ))}
+            </TabsList>
+          </Tabs>
+        ) : null}
       </CardHeader>
 
       <CardContent className="space-y-4">

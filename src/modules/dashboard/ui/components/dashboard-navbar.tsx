@@ -22,7 +22,7 @@ export const DashboardNavbar = () => {
   return (
     <>
       <DashboardCommands open={commandOpen} setOpen={setCommandOpen} />
-      <nav className="flex px-4 gap-2 items-center py-3 border-b bg-background">
+      <nav className="sticky top-0 z-30 flex items-center gap-2 border-b bg-background/95 px-4 py-3 backdrop-blur supports-[backdrop-filter]:bg-background/85">
         <Button className="size-9" variant="outline" onClick={toggleSidebar}>
           {state === "collapsed" || isMobile ? (
             <PanelLeftIcon className="size-4" />
@@ -31,7 +31,7 @@ export const DashboardNavbar = () => {
           )}
         </Button>
         <Button
-          className="h-9 w-[240px] justify-start font-normal text-muted-foreground hover:text-muted-foreground"
+          className="h-9 w-[280px] justify-start font-normal text-muted-foreground hover:text-foreground"
           variant={"outline"}
           size={"sm"}
           onClick={() => {

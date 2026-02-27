@@ -1,4 +1,5 @@
 import { SidebarProvider } from "@/components/ui/sidebar";
+import { SidebarInset } from "@/components/ui/sidebar";
 import { DashboardNavbar } from "@/modules/dashboard/ui/components/dashboard-navbar";
 import { CompanySetupGate } from "@/modules/dashboard/ui/components/company-setup-gate";
 import { DashboardSidebar } from "@/modules/dashboard/ui/components/dashboard-sidebar";
@@ -12,12 +13,12 @@ const layout = ({ children }: Props) => {
   return (
     <SidebarProvider>
       <DashboardSidebar />
-      <main className="flex flex-col h-screen w-screen bg-muted">
+      <SidebarInset className="min-h-svh bg-background">
         <DashboardNavbar />
         <CompanySetupGate />
         <ViewOnlyModeBadge />
-        {children}
-      </main>
+        <div className="flex-1 bg-muted/35">{children}</div>
+      </SidebarInset>
     </SidebarProvider>
   );
 };

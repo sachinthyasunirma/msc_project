@@ -121,91 +121,91 @@ export async function listActivityRecords(
   const parentActivityId = parsed.data.parentActivityId;
 
   switch (resource) {
-    case "activities":
+    case "activities": {
+      const clauses = [eq(schema.activity.companyId, companyId)];
+      if (q) {
+        const searchClause = or(ilike(schema.activity.code, q), ilike(schema.activity.name, q));
+        if (searchClause) clauses.push(searchClause);
+      }
       return db
         .select()
         .from(schema.activity)
-        .where(
-          and(
-            eq(schema.activity.companyId, companyId),
-            q
-              ? or(ilike(schema.activity.code, q), ilike(schema.activity.name, q))
-              : undefined
-          )
-        )
+        .where(and(...clauses))
         .orderBy(desc(schema.activity.createdAt))
         .limit(limit);
-    case "activity-images":
+    }
+    case "activity-images": {
+      const clauses = [eq(schema.activityImage.companyId, companyId)];
+      if (activityId) {
+        clauses.push(eq(schema.activityImage.activityId, activityId));
+      }
+      if (q) {
+        const searchClause = or(
+          ilike(schema.activityImage.code, q),
+          ilike(schema.activityImage.url, q),
+          ilike(schema.activityImage.altText, q)
+        );
+        if (searchClause) clauses.push(searchClause);
+      }
       return db
         .select()
         .from(schema.activityImage)
-        .where(
-          and(
-            eq(schema.activityImage.companyId, companyId),
-            activityId ? eq(schema.activityImage.activityId, activityId) : undefined,
-            q
-              ? or(
-                  ilike(schema.activityImage.code, q),
-                  ilike(schema.activityImage.url, q),
-                  ilike(schema.activityImage.altText, q)
-                )
-              : undefined
-          )
-        )
+        .where(and(...clauses))
         .orderBy(desc(schema.activityImage.createdAt))
         .limit(limit);
-    case "activity-availability":
+    }
+    case "activity-availability": {
+      const clauses = [eq(schema.activityAvailability.companyId, companyId)];
+      if (activityId) {
+        clauses.push(eq(schema.activityAvailability.activityId, activityId));
+      }
+      if (q) {
+        const searchClause = or(
+          ilike(schema.activityAvailability.code, q),
+          ilike(schema.activityAvailability.startTime, q),
+          ilike(schema.activityAvailability.endTime, q)
+        );
+        if (searchClause) clauses.push(searchClause);
+      }
       return db
         .select()
         .from(schema.activityAvailability)
-        .where(
-          and(
-            eq(schema.activityAvailability.companyId, companyId),
-            activityId ? eq(schema.activityAvailability.activityId, activityId) : undefined,
-            q
-              ? or(
-                  ilike(schema.activityAvailability.code, q),
-                  ilike(schema.activityAvailability.startTime, q),
-                  ilike(schema.activityAvailability.endTime, q)
-                )
-              : undefined
-          )
-        )
+        .where(and(...clauses))
         .orderBy(desc(schema.activityAvailability.createdAt))
         .limit(limit);
-    case "activity-rates":
+    }
+    case "activity-rates": {
+      const clauses = [eq(schema.activityRate.companyId, companyId)];
+      if (activityId) {
+        clauses.push(eq(schema.activityRate.activityId, activityId));
+      }
+      if (q) {
+        const searchClause = or(
+          ilike(schema.activityRate.code, q),
+          ilike(schema.activityRate.label, q),
+          ilike(schema.activityRate.pricingModel, q)
+        );
+        if (searchClause) clauses.push(searchClause);
+      }
       return db
         .select()
         .from(schema.activityRate)
-        .where(
-          and(
-            eq(schema.activityRate.companyId, companyId),
-            activityId ? eq(schema.activityRate.activityId, activityId) : undefined,
-            q
-              ? or(
-                  ilike(schema.activityRate.code, q),
-                  ilike(schema.activityRate.label, q),
-                  ilike(schema.activityRate.pricingModel, q)
-                )
-              : undefined
-          )
-        )
+        .where(and(...clauses))
         .orderBy(desc(schema.activityRate.createdAt))
         .limit(limit);
-    case "activity-supplements":
+    }
+    case "activity-supplements": {
+      const clauses = [eq(schema.activitySupplement.companyId, companyId)];
+      if (parentActivityId) {
+        clauses.push(eq(schema.activitySupplement.parentActivityId, parentActivityId));
+      }
       return db
         .select()
         .from(schema.activitySupplement)
-        .where(
-          and(
-            eq(schema.activitySupplement.companyId, companyId),
-            parentActivityId
-              ? eq(schema.activitySupplement.parentActivityId, parentActivityId)
-              : undefined
-          )
-        )
+        .where(and(...clauses))
         .orderBy(desc(schema.activitySupplement.createdAt))
         .limit(limit);
+    }
     default:
       throw new ActivityError(404, "RESOURCE_NOT_FOUND", "Activity resource not found.");
   }
