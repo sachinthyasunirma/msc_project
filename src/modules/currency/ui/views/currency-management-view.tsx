@@ -1,40 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import Link from "next/link";
-import { Edit3, Plus, RefreshCw, Settings2, Trash2 } from "lucide-react";
 import { toast } from "sonner";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { Switch } from "@/components/ui/switch";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Textarea } from "@/components/ui/textarea";
 import { authClient } from "@/lib/auth-client";
 import {
   createCurrencyRecord,
@@ -42,102 +11,18 @@ import {
   listCurrencyRecords,
   updateCurrencyRecord,
 } from "@/modules/currency/lib/currency-api";
-
-export type CurrencyResourceKey =
-  | "currencies"
-  | "fx-providers"
-  | "exchange-rates"
-  | "money-settings";
-
-type Field = {
-  key: string;
-  label: string;
-  type: "text" | "number" | "boolean" | "select" | "datetime" | "json";
-  required?: boolean;
-  options?: Array<{ label: string; value: string }>;
-  defaultValue?: string | number | boolean;
-  nullable?: boolean;
-};
-
-const META: Record<CurrencyResourceKey, { title: string; description: string }> = {
-  currencies: {
-    title: "Currencies",
-    description: "Maintain currency master with rounding and precision rules.",
-  },
-  "fx-providers": {
-    title: "FX Providers",
-    description: "Maintain exchange-rate providers (manual or external source).",
-  },
-  "exchange-rates": {
-    title: "Exchange Rates",
-    description: "Maintain rate pairs and validity timestamps.",
-  },
-  "money-settings": {
-    title: "Money Settings",
-    description: "Configure pricing mode and FX rate source defaults.",
-  },
-};
-
-const COLUMNS: Record<CurrencyResourceKey, Array<{ key: string; label: string }>> = {
-  currencies: [
-    { key: "code", label: "Code" },
-    { key: "name", label: "Name" },
-    { key: "symbol", label: "Symbol" },
-    { key: "minorUnit", label: "Minor Unit" },
-    { key: "isActive", label: "Status" },
-  ],
-  "fx-providers": [
-    { key: "code", label: "Code" },
-    { key: "name", label: "Name" },
-    { key: "isActive", label: "Status" },
-  ],
-  "exchange-rates": [
-    { key: "code", label: "Code" },
-    { key: "providerId", label: "Provider" },
-    { key: "baseCurrencyId", label: "Base" },
-    { key: "quoteCurrencyId", label: "Quote" },
-    { key: "rate", label: "Rate" },
-    { key: "isActive", label: "Status" },
-  ],
-  "money-settings": [
-    { key: "code", label: "Code" },
-    { key: "baseCurrencyId", label: "Base Currency" },
-    { key: "priceMode", label: "Price Mode" },
-    { key: "fxRateSource", label: "FX Source" },
-  ],
-};
-
-function defaultValue(field: Field) {
-  if (field.defaultValue !== undefined) return field.defaultValue;
-  if (field.type === "boolean") return true;
-  return "";
-}
-
-function toLocalDateTime(value: unknown) {
-  if (!value || typeof value !== "string") return "";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "";
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(
-    date.getHours()
-  )}:${pad(date.getMinutes())}`;
-}
-
-function toIsoDateTime(value: unknown) {
-  if (!value || typeof value !== "string") return null;
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return null;
-  return date.toISOString();
-}
-
-function formatCell(value: unknown, lookups: Record<string, string>) {
-  if (typeof value === "boolean") return value ? "Yes" : "No";
-  if (typeof value === "string" && lookups[value]) return lookups[value];
-  if (Array.isArray(value)) return value.join(", ");
-  if (value && typeof value === "object") return JSON.stringify(value);
-  if (value === null || value === undefined || value === "") return "-";
-  return String(value);
-}
+import {
+  type CurrencyField,
+  type CurrencyResourceKey,
+} from "@/modules/currency/ui/components/currency-management/currency-management-config";
+import { CurrencyManagementHeader } from "@/modules/currency/ui/components/currency-management/currency-management-header";
+import { CurrencyRecordDialog } from "@/modules/currency/ui/components/currency-management/currency-record-dialog";
+import { CurrencyRecordsTable } from "@/modules/currency/ui/components/currency-management/currency-records-table";
+import {
+  getDefaultFieldValue,
+  toIsoDateTime,
+  toLocalDateTime,
+} from "@/modules/currency/ui/components/currency-management/currency-management-utils";
 
 export function CurrencyManagementView({
   initialResource = "currencies",
@@ -170,7 +55,10 @@ export function CurrencyManagementView({
   );
 
   const visibleResources = useMemo<CurrencyResourceKey[]>(
-    () => (isCurrencyManageMode ? ["exchange-rates"] : (Object.keys(META) as CurrencyResourceKey[])),
+    () =>
+      isCurrencyManageMode
+        ? (["exchange-rates", "money-settings"] as CurrencyResourceKey[])
+        : (["currencies", "fx-providers"] as CurrencyResourceKey[]),
     [isCurrencyManageMode]
   );
 
@@ -185,7 +73,7 @@ export function CurrencyManagementView({
     return Object.fromEntries(items);
   }, [currencies, providers]);
 
-  const fields = useMemo<Field[]>(() => {
+  const fields = useMemo<CurrencyField[]>(() => {
     const currencyOptions = currencies.map((item) => ({
       value: String(item.id),
       label: `${item.code} - ${item.name}`,
@@ -251,7 +139,8 @@ export function CurrencyManagementView({
             options: currencyOptions,
           },
           { key: "rate", label: "Rate", type: "number", required: true },
-          { key: "asOf", label: "As Of", type: "datetime", required: true },
+          { key: "effectiveFrom", label: "Effective From", type: "datetime", required: true },
+          { key: "effectiveTo", label: "Effective To", type: "datetime", nullable: true },
           {
             key: "rateType",
             label: "Rate Type",
@@ -323,7 +212,11 @@ export function CurrencyManagementView({
       const rows = await listCurrencyRecords(resource, {
         q: query || undefined,
         limit: 200,
-        currencyId: isCurrencyManageMode && resource === "exchange-rates" ? managedCurrencyId : undefined,
+        currencyId:
+          isCurrencyManageMode &&
+          (resource === "exchange-rates" || resource === "money-settings")
+            ? managedCurrencyId
+            : undefined,
       });
       setRecords(rows);
     } catch (error) {
@@ -349,7 +242,7 @@ export function CurrencyManagementView({
 
   const visibleFields = useMemo(
     () =>
-      isCurrencyManageMode && resource === "exchange-rates"
+      isCurrencyManageMode && (resource === "exchange-rates" || resource === "money-settings")
         ? fields.filter((field) => field.key !== "baseCurrencyId")
         : fields,
     [fields, isCurrencyManageMode, resource]
@@ -363,15 +256,23 @@ export function CurrencyManagementView({
     const next: Record<string, unknown> = {};
     visibleFields.forEach((field) => {
       if (mode === "edit" && row) {
-        const raw = row[field.key];
+        const raw =
+          field.key === "effectiveFrom"
+            ? row.effectiveFrom ?? row.asOf
+            : field.key === "effectiveTo"
+              ? row.effectiveTo ?? null
+              : row[field.key];
         if (field.type === "datetime") next[field.key] = toLocalDateTime(raw);
         else if (field.type === "json") next[field.key] = raw ? JSON.stringify(raw) : "";
-        else next[field.key] = raw ?? defaultValue(field);
+        else next[field.key] = raw ?? getDefaultFieldValue(field);
       } else {
-        next[field.key] = defaultValue(field);
+        next[field.key] = getDefaultFieldValue(field);
       }
     });
-    if (isCurrencyManageMode && resource === "exchange-rates") {
+    if (
+      isCurrencyManageMode &&
+      (resource === "exchange-rates" || resource === "money-settings")
+    ) {
       next.baseCurrencyId = managedCurrencyId;
     }
     setForm(next);
@@ -399,7 +300,10 @@ export function CurrencyManagementView({
         else if (field.key === "code" && typeof value === "string") payload[field.key] = value.toUpperCase().trim();
         else payload[field.key] = value;
       });
-      if (isCurrencyManageMode && resource === "exchange-rates") {
+      if (
+        isCurrencyManageMode &&
+        (resource === "exchange-rates" || resource === "money-settings")
+      ) {
         payload.baseCurrencyId = managedCurrencyId;
       }
       if (dialog.mode === "create") {
@@ -435,194 +339,48 @@ export function CurrencyManagementView({
 
   return (
     <Card>
-      <CardHeader className="space-y-4">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <CardTitle>{META[resource].title}</CardTitle>
-            <CardDescription>
-              {META[resource].description}
-              {isCurrencyManageMode && managedCurrency
-                ? ` Managing: ${managedCurrency.code} - ${managedCurrency.name}`
-                : ""}
-            </CardDescription>
-          </div>
-          <div className="flex items-center gap-2">
-            {isCurrencyManageMode ? (
-              <Button variant="outline" asChild>
-                <Link href="/master-data/currencies">Back to Currencies</Link>
-              </Button>
-            ) : null}
-            <Button variant="outline" onClick={() => void Promise.all([load(), loadLookups()])}>
-              <RefreshCw className="mr-2 size-4" />
-              Refresh
-            </Button>
-            <Button
-              onClick={() => openDialog("create")}
-              disabled={isReadOnly}
-              title={isReadOnly ? "View only mode" : undefined}
-              className="master-add-btn"
-            >
-              <Plus className="mr-2 size-4" />
-              Add Record
-            </Button>
-          </div>
-        </div>
-
-        <Tabs value={resource} onValueChange={(value) => setResource(value as CurrencyResourceKey)}>
-          <div className="master-tabs-scroll">
-            <TabsList className="master-tabs-list">
-              {visibleResources.map((key) => (
-                <TabsTrigger key={key} value={key} className="master-tab-trigger">
-                  {META[key].title}
-                </TabsTrigger>
-              ))}
-            </TabsList>
-          </div>
-        </Tabs>
-      </CardHeader>
+      <CurrencyManagementHeader
+        resource={resource}
+        visibleResources={visibleResources}
+        isCurrencyManageMode={isCurrencyManageMode}
+        managedCurrencyLabel={
+          managedCurrency ? `${String(managedCurrency.code)} - ${String(managedCurrency.name)}` : ""
+        }
+        isReadOnly={isReadOnly}
+        onResourceChange={setResource}
+        onRefresh={() => void Promise.all([load(), loadLookups()])}
+        onAdd={() => openDialog("create")}
+      />
 
       <CardContent className="space-y-4">
-        <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search..." className="max-w-md" />
-
-        <Table>
-          <TableHeader>
-            <TableRow>
-              {COLUMNS[resource].map((column) => (
-                <TableHead key={column.key}>{column.label}</TableHead>
-              ))}
-              <TableHead className="text-right">Actions</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {loading ? (
-              <TableRow>
-                <TableCell colSpan={COLUMNS[resource].length + 1} className="text-center text-muted-foreground">
-                  Loading...
-                </TableCell>
-              </TableRow>
-            ) : records.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={COLUMNS[resource].length + 1} className="text-center text-muted-foreground">
-                  No records found.
-                </TableCell>
-              </TableRow>
-            ) : (
-              records.map((row) => (
-                <TableRow key={String(row.id)}>
-                  {COLUMNS[resource].map((column) => (
-                    <TableCell key={column.key}>
-                      {column.key === "isActive" ? (
-                        <Badge variant={row.isActive ? "default" : "secondary"}>
-                          {row.isActive ? "Active" : "Inactive"}
-                        </Badge>
-                      ) : (
-                        formatCell(row[column.key], lookups)
-                      )}
-                    </TableCell>
-                  ))}
-                  <TableCell className="text-right">
-                    <div className="flex justify-end gap-2">
-                      {resource === "currencies" && row.id ? (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="master-manage-btn"
-                          asChild
-                        >
-                          <Link href={`/master-data/currencies/manage/${row.id}`}>
-                            <Settings2 className="mr-1 size-4" />
-                            Manage
-                          </Link>
-                        </Button>
-                      ) : null}
-                      <Button size="sm" variant="outline" onClick={() => openDialog("edit", row)}>
-                        <Edit3 className="size-4" />
-                      </Button>
-                      <Button size="sm" variant="outline" onClick={() => void onDelete(row)}>
-                        <Trash2 className="size-4" />
-                      </Button>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ))
-            )}
-          </TableBody>
-        </Table>
+        <Input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search..."
+          className="max-w-md"
+        />
+        <CurrencyRecordsTable
+          resource={resource}
+          records={records}
+          loading={loading}
+          lookups={lookups}
+          onEdit={(row) => openDialog("edit", row)}
+          onDelete={(row) => void onDelete(row)}
+        />
       </CardContent>
 
-      <Dialog open={dialog.open} onOpenChange={(open) => setDialog((prev) => ({ ...prev, open }))}>
-        <DialogContent className="flex max-h-[90vh] flex-col sm:max-w-4xl">
-          <DialogHeader>
-            <DialogTitle>{dialog.mode === "create" ? "Add" : "Edit"} Record</DialogTitle>
-            <DialogDescription>Fill required fields and save.</DialogDescription>
-          </DialogHeader>
-          <div className="grid max-h-[62vh] grid-cols-1 gap-3 overflow-x-hidden overflow-y-auto px-1 md:grid-cols-2">
-            {visibleFields.map((field) => (
-              <div key={field.key} className={`min-w-0 space-y-2 ${field.type === "json" ? "md:col-span-2" : ""}`}>
-                <Label>{field.label}</Label>
-                {field.type === "select" ? (
-                  <Select
-                    value={String(form[field.key] ?? (field.nullable ? "__none__" : ""))}
-                    onValueChange={(value) =>
-                      setForm((prev) => ({
-                        ...prev,
-                        [field.key]: value === "__none__" ? "" : value,
-                      }))
-                    }
-                  >
-                    <SelectTrigger className="w-full min-w-0">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {field.nullable ? <SelectItem value="__none__">None</SelectItem> : null}
-                      {field.options?.map((option) => (
-                        <SelectItem key={option.value} value={option.value}>
-                          {option.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                ) : field.type === "boolean" ? (
-                  <div className="flex h-9 items-center justify-between rounded-md border px-3">
-                    <span className="text-muted-foreground text-xs">
-                      {Boolean(form[field.key]) ? "Active" : "Inactive"}
-                    </span>
-                    <Switch
-                      checked={Boolean(form[field.key])}
-                      onCheckedChange={(checked) =>
-                        setForm((prev) => ({ ...prev, [field.key]: checked }))
-                      }
-                    />
-                  </div>
-                ) : field.type === "json" ? (
-                  <Textarea
-                    value={String(form[field.key] ?? "")}
-                    onChange={(event) =>
-                      setForm((prev) => ({ ...prev, [field.key]: event.target.value }))
-                    }
-                  />
-                ) : (
-                  <Input
-                    type={field.type === "number" ? "number" : field.type === "datetime" ? "datetime-local" : "text"}
-                    value={String(form[field.key] ?? "")}
-                    onChange={(event) =>
-                      setForm((prev) => ({ ...prev, [field.key]: event.target.value }))
-                    }
-                  />
-                )}
-              </div>
-            ))}
-          </div>
-          <DialogFooter className="pt-2">
-            <Button variant="outline" onClick={() => setDialog({ open: false, mode: "create", row: null })}>
-              Cancel
-            </Button>
-            <Button onClick={() => void onSubmit()} disabled={saving || (isReadOnly && dialog.mode === "create")}>
-              {saving ? "Saving..." : "Save"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <CurrencyRecordDialog
+        dialog={dialog}
+        visibleFields={visibleFields}
+        form={form}
+        saving={saving}
+        isReadOnly={isReadOnly}
+        setDialog={setDialog}
+        setForm={setForm}
+        onSubmit={onSubmit}
+      />
     </Card>
   );
 }
+
+export type { CurrencyResourceKey };

@@ -20,6 +20,8 @@ const updateCompanySchema = z
     code: z.string().trim().toUpperCase().min(1).max(40).optional(),
     name: z.string().trim().min(2).max(160).optional(),
     email: z.string().trim().email().optional(),
+    baseCurrencyCode: z.string().trim().toUpperCase().min(3).max(10).optional(),
+    helpEnabled: z.boolean().optional(),
     country: z.string().trim().max(120).optional().nullable(),
     image: z.string().trim().min(1).optional().nullable(),
   })
@@ -86,6 +88,8 @@ export async function GET(request: Request) {
         managerPrivilegeCode: company.managerPrivilegeCode,
         name: company.name,
         email: company.email,
+        baseCurrencyCode: company.baseCurrencyCode,
+        helpEnabled: company.helpEnabled,
         country: company.country,
         image: company.image,
       })
@@ -162,6 +166,8 @@ export async function PATCH(request: Request) {
           managerPrivilegeCode: parsed.data.privilegeCode ?? null,
           name: parsed.data.name!,
           email: parsed.data.email!,
+          baseCurrencyCode: parsed.data.baseCurrencyCode ?? "USD",
+          helpEnabled: parsed.data.helpEnabled ?? true,
           country: parsed.data.country ?? null,
           image: parsed.data.image ?? null,
           updatedAt: new Date(),
@@ -228,6 +234,8 @@ export async function PATCH(request: Request) {
         managerPrivilegeCode,
         name: parsed.data.name!,
         email: parsed.data.email!,
+        baseCurrencyCode: parsed.data.baseCurrencyCode ?? "USD",
+        helpEnabled: parsed.data.helpEnabled ?? true,
         country: parsed.data.country ?? null,
         image: parsed.data.image ?? null,
       })

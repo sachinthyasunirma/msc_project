@@ -47,6 +47,12 @@ export const preTourPlan = pgTable(
     mealPreference: text("meal_preference"),
     notes: text("notes"),
     currencyCode: text("currency_code").notNull(),
+    baseCurrencyCode: text("base_currency_code").notNull().default("USD"),
+    exchangeRateMode: text("exchange_rate_mode").notNull().default("AUTO"),
+    exchangeRate: decimal("exchange_rate", { precision: 18, scale: 8 })
+      .notNull()
+      .default("0"),
+    exchangeRateDate: timestamp("exchange_rate_date"),
     priceMode: text("price_mode").notNull().default("EXCLUSIVE"),
     pricingPolicy: jsonb("pricing_policy").$type<{
       mode?: "NONE" | "PERCENT" | "FIXED";

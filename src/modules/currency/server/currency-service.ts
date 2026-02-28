@@ -1,4 +1,4 @@
-import { and, desc, eq, ilike, or } from "drizzle-orm";
+import { and, desc, eq, ilike, isNull, ne, or } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
 import * as schema from "@/db/schema";
@@ -97,6 +97,66 @@ async function ensureFxProvider(companyId: string, providerId: string) {
   }
 }
 
+async function ensureNoDuplicateExchangeRate(
+  companyId: string,
+  data: {
+    providerId?: string | null;
+    baseCurrencyId: string;
+    quoteCurrencyId: string;
+    rateType: string;
+    effectiveFrom: string;
+    effectiveTo?: string | null;
+  },
+  excludeId?: string
+) {
+  const nextFrom = toDate(data.effectiveFrom);
+  if (!nextFrom) return;
+  const nextTo = toDate(data.effectiveTo ?? null);
+  if (nextTo && nextTo < nextFrom) {
+    throw new CurrencyError(
+      400,
+      "VALIDATION_ERROR",
+      "Effective To must be greater than or equal to Effective From."
+    );
+  }
+
+  const existing = await db
+    .select({
+      id: schema.exchangeRate.id,
+      effectiveFrom: schema.exchangeRate.asOf,
+      effectiveTo: schema.exchangeRate.effectiveTo,
+    })
+    .from(schema.exchangeRate)
+    .where(
+      and(
+        eq(schema.exchangeRate.companyId, companyId),
+        eq(schema.exchangeRate.baseCurrencyId, data.baseCurrencyId),
+        eq(schema.exchangeRate.quoteCurrencyId, data.quoteCurrencyId),
+        eq(schema.exchangeRate.rateType, data.rateType),
+        data.providerId
+          ? eq(schema.exchangeRate.providerId, data.providerId)
+          : isNull(schema.exchangeRate.providerId),
+        excludeId ? ne(schema.exchangeRate.id, excludeId) : undefined
+      )
+    );
+
+  for (const row of existing) {
+    const rowFrom = row.effectiveFrom;
+    const rowTo = row.effectiveTo;
+    if (!rowFrom) continue;
+    const overlap =
+      rowFrom <= (nextTo ?? new Date("9999-12-31T23:59:59.999Z")) &&
+      nextFrom <= (rowTo ?? new Date("9999-12-31T23:59:59.999Z"));
+    if (overlap) {
+      throw new CurrencyError(
+        409,
+        "DUPLICATE_RATE_RANGE",
+        "Exchange rate date range overlaps an existing rate for same provider, pair, and rate type."
+      );
+    }
+  }
+}
+
 export async function listCurrencyRecords(
   resourceInput: string,
   searchParams: URLSearchParams,
@@ -168,6 +228,7 @@ export async function listCurrencyRecords(
         .where(
           and(
             eq(schema.moneySetting.companyId, companyId),
+            currencyId ? eq(schema.moneySetting.baseCurrencyId, currencyId) : undefined,
             q
               ? or(
                   ilike(schema.moneySetting.code, q),
@@ -232,13 +293,20 @@ export async function createCurrencyRecord(
       if (parsed.data.providerId) {
         await ensureFxProvider(companyId, parsed.data.providerId);
       }
+      await ensureNoDuplicateExchangeRate(companyId, parsed.data);
       const [created] = await db
         .insert(schema.exchangeRate)
         .values({
-          ...parsed.data,
           companyId,
+          code: parsed.data.code,
+          providerId: parsed.data.providerId ?? null,
+          baseCurrencyId: parsed.data.baseCurrencyId,
+          quoteCurrencyId: parsed.data.quoteCurrencyId,
           rate: toDecimal(parsed.data.rate, 8) ?? "0.00000000",
-          asOf: toDate(parsed.data.asOf)!,
+          asOf: toDate(parsed.data.effectiveFrom)!,
+          effectiveTo: toDate(parsed.data.effectiveTo),
+          rateType: parsed.data.rateType,
+          isActive: parsed.data.isActive,
         })
         .returning();
       return created;
@@ -303,8 +371,12 @@ export async function updateCurrencyRecord(
       }
       const [current] = await db
         .select({
+          providerId: schema.exchangeRate.providerId,
           baseCurrencyId: schema.exchangeRate.baseCurrencyId,
           quoteCurrencyId: schema.exchangeRate.quoteCurrencyId,
+          rateType: schema.exchangeRate.rateType,
+          asOf: schema.exchangeRate.asOf,
+          effectiveTo: schema.exchangeRate.effectiveTo,
         })
         .from(schema.exchangeRate)
         .where(and(eq(schema.exchangeRate.id, id), eq(schema.exchangeRate.companyId, companyId)))
@@ -325,18 +397,54 @@ export async function updateCurrencyRecord(
       if (parsed.data.quoteCurrencyId) await ensureCurrency(companyId, parsed.data.quoteCurrencyId);
       if (parsed.data.providerId) await ensureFxProvider(companyId, parsed.data.providerId);
 
+      const nextProviderId =
+        "providerId" in parsed.data ? parsed.data.providerId ?? null : current.providerId ?? null;
+      const nextRateType = parsed.data.rateType ?? current.rateType ?? "MID";
+      const nextAsOfRaw =
+        parsed.data.effectiveFrom ??
+        (current.asOf instanceof Date ? current.asOf.toISOString() : String(current.asOf || ""));
+      const nextEffectiveToRaw =
+        "effectiveTo" in parsed.data
+          ? parsed.data.effectiveTo ?? null
+          : current.effectiveTo instanceof Date
+            ? current.effectiveTo.toISOString()
+            : null;
+
+      await ensureNoDuplicateExchangeRate(
+        companyId,
+        {
+          providerId: nextProviderId,
+          baseCurrencyId: nextBase,
+          quoteCurrencyId: nextQuote,
+          rateType: nextRateType,
+          effectiveFrom: nextAsOfRaw,
+          effectiveTo: nextEffectiveToRaw,
+        },
+        id
+      );
+
       const [updated] = await db
         .update(schema.exchangeRate)
         .set({
-          ...parsed.data,
+          code: parsed.data.code,
+          providerId:
+            parsed.data.providerId !== undefined ? parsed.data.providerId ?? null : undefined,
+          baseCurrencyId: parsed.data.baseCurrencyId,
+          quoteCurrencyId: parsed.data.quoteCurrencyId,
           rate:
             parsed.data.rate !== undefined
               ? toDecimal(parsed.data.rate, 8) ?? undefined
               : undefined,
           asOf:
-            parsed.data.asOf !== undefined
-              ? toDate(parsed.data.asOf) ?? undefined
+            parsed.data.effectiveFrom !== undefined
+              ? toDate(parsed.data.effectiveFrom) ?? undefined
               : undefined,
+          effectiveTo:
+            parsed.data.effectiveTo !== undefined
+              ? toDate(parsed.data.effectiveTo ?? null) ?? null
+              : undefined,
+          rateType: parsed.data.rateType,
+          isActive: parsed.data.isActive,
         })
         .where(and(eq(schema.exchangeRate.id, id), eq(schema.exchangeRate.companyId, companyId)))
         .returning();

@@ -1,4 +1,4 @@
-import { and, desc, eq, ilike, or } from "drizzle-orm";
+import { and, desc, eq, gte, ilike, isNull, lte, or } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
 import * as schema from "@/db/schema";
@@ -146,6 +146,138 @@ async function ensureOrganizationType(
       `Invalid organization selection for ${errorCode.replaceAll("_", " ").toLowerCase()}.`
     );
   }
+}
+
+async function resolvePreTourCurrencyContext(
+  companyId: string,
+  options: {
+    planCurrencyCode: string;
+    startDate: string;
+    exchangeRateMode?: "AUTO" | "MANUAL";
+    exchangeRate?: number;
+    exchangeRateDate?: string | null;
+  }
+) {
+  const normalizedPlanCurrencyCode = options.planCurrencyCode.trim().toUpperCase();
+  const startDate = new Date(options.startDate);
+  if (Number.isNaN(startDate.getTime())) {
+    throw new PreTourError(400, "VALIDATION_ERROR", "Invalid pre-tour start date.");
+  }
+
+  const [companyRecord] = await db
+    .select({ baseCurrencyCode: schema.company.baseCurrencyCode })
+    .from(schema.company)
+    .where(eq(schema.company.id, companyId))
+    .limit(1);
+
+  if (!companyRecord) {
+    throw new PreTourError(400, "COMPANY_NOT_FOUND", "Company configuration not found.");
+  }
+
+  const baseCurrencyCode = String(companyRecord.baseCurrencyCode || "").trim().toUpperCase();
+
+  const [planCurrency] = await db
+    .select({ id: schema.currency.id })
+    .from(schema.currency)
+    .where(
+      and(
+        eq(schema.currency.companyId, companyId),
+        eq(schema.currency.code, normalizedPlanCurrencyCode),
+        eq(schema.currency.isActive, true)
+      )
+    )
+    .limit(1);
+
+  if (!planCurrency) {
+    throw new PreTourError(
+      400,
+      "PLAN_CURRENCY_NOT_FOUND",
+      "Pre-tour currency must exist as an active currency in company settings."
+    );
+  }
+
+  if (!baseCurrencyCode) {
+    throw new PreTourError(
+      400,
+      "COMPANY_BASE_CURRENCY_REQUIRED",
+      "Company base currency is not configured."
+    );
+  }
+
+  if (baseCurrencyCode === normalizedPlanCurrencyCode) {
+    return {
+      baseCurrencyCode,
+      exchangeRateMode: "AUTO" as const,
+      exchangeRate: 1,
+      exchangeRateDate: startDate,
+    };
+  }
+
+  const [baseCurrency] = await db
+    .select({ id: schema.currency.id })
+    .from(schema.currency)
+    .where(
+      and(
+        eq(schema.currency.companyId, companyId),
+        eq(schema.currency.code, baseCurrencyCode),
+        eq(schema.currency.isActive, true)
+      )
+    )
+    .limit(1);
+
+  if (!baseCurrency) {
+    throw new PreTourError(
+      400,
+      "COMPANY_BASE_CURRENCY_INVALID",
+      "Company base currency does not exist in active currency master."
+    );
+  }
+
+  const requestedMode = options.exchangeRateMode ?? "AUTO";
+  if (requestedMode === "MANUAL") {
+    const manualRate = Number(options.exchangeRate ?? 0);
+    if (!Number.isFinite(manualRate) || manualRate < 0) {
+      throw new PreTourError(
+        400,
+        "VALIDATION_ERROR",
+        "Manual exchange rate must be a valid number greater than or equal to zero."
+      );
+    }
+    const manualDate = options.exchangeRateDate ? new Date(options.exchangeRateDate) : startDate;
+    return {
+      baseCurrencyCode,
+      exchangeRateMode: "MANUAL" as const,
+      exchangeRate: manualRate,
+      exchangeRateDate: Number.isNaN(manualDate.getTime()) ? startDate : manualDate,
+    };
+  }
+
+  const [rate] = await db
+    .select({
+      rate: schema.exchangeRate.rate,
+      asOf: schema.exchangeRate.asOf,
+    })
+    .from(schema.exchangeRate)
+    .where(
+      and(
+        eq(schema.exchangeRate.companyId, companyId),
+        eq(schema.exchangeRate.baseCurrencyId, baseCurrency.id),
+        eq(schema.exchangeRate.quoteCurrencyId, planCurrency.id),
+        eq(schema.exchangeRate.isActive, true),
+        lte(schema.exchangeRate.asOf, startDate),
+        or(isNull(schema.exchangeRate.effectiveTo), gte(schema.exchangeRate.effectiveTo, startDate))
+      )
+    )
+    .orderBy(desc(schema.exchangeRate.asOf), desc(schema.exchangeRate.createdAt))
+    .limit(1);
+
+  const selectedRate = rate ? Number(rate.rate) : 0;
+  return {
+    baseCurrencyCode,
+    exchangeRateMode: "AUTO" as const,
+    exchangeRate: Number.isFinite(selectedRate) && selectedRate > 0 ? selectedRate : 0,
+    exchangeRateDate: rate?.asOf ?? null,
+  };
 }
 
 function validatePlanDateRange(startDate: string, endDate: string) {
@@ -336,6 +468,13 @@ export async function createPreTourRecord(
       }
 
       validatePlanDateRange(parsed.data.startDate, parsed.data.endDate);
+      const currencyContext = await resolvePreTourCurrencyContext(companyId, {
+        planCurrencyCode: parsed.data.currencyCode,
+        startDate: parsed.data.startDate,
+        exchangeRateMode: parsed.data.exchangeRateMode,
+        exchangeRate: parsed.data.exchangeRate,
+        exchangeRateDate: parsed.data.exchangeRateDate ?? null,
+      });
       if (parsed.data.operatorOrgId === parsed.data.marketOrgId) {
         throw new PreTourError(
           400,
@@ -368,6 +507,10 @@ export async function createPreTourRecord(
           referenceNo,
           startDate: toDate(parsed.data.startDate)!,
           endDate: toDate(parsed.data.endDate)!,
+          baseCurrencyCode: currencyContext.baseCurrencyCode,
+          exchangeRateMode: currencyContext.exchangeRateMode,
+          exchangeRate: toDecimal(currencyContext.exchangeRate, 8) ?? "0",
+          exchangeRateDate: currencyContext.exchangeRateDate,
           baseTotal: toDecimal(parsed.data.baseTotal),
           taxTotal: toDecimal(parsed.data.taxTotal),
           grandTotal: toDecimal(parsed.data.grandTotal),
@@ -504,14 +647,16 @@ export async function updatePreTourRecord(
         throw new PreTourError(400, "VALIDATION_ERROR", normalizeZodError(parsed.error));
       }
 
-      if (parsed.data.startDate && parsed.data.endDate) {
-        validatePlanDateRange(parsed.data.startDate, parsed.data.endDate);
-      }
-
       const [current] = await db
         .select({
           operatorOrgId: schema.preTourPlan.operatorOrgId,
           marketOrgId: schema.preTourPlan.marketOrgId,
+          startDate: schema.preTourPlan.startDate,
+          endDate: schema.preTourPlan.endDate,
+          currencyCode: schema.preTourPlan.currencyCode,
+          exchangeRateMode: schema.preTourPlan.exchangeRateMode,
+          exchangeRate: schema.preTourPlan.exchangeRate,
+          exchangeRateDate: schema.preTourPlan.exchangeRateDate,
         })
         .from(schema.preTourPlan)
         .where(and(eq(schema.preTourPlan.id, id), eq(schema.preTourPlan.companyId, companyId)))
@@ -523,6 +668,39 @@ export async function updatePreTourRecord(
 
       const nextOperatorOrgId = parsed.data.operatorOrgId ?? current.operatorOrgId;
       const nextMarketOrgId = parsed.data.marketOrgId ?? current.marketOrgId;
+      const nextStartDateRaw =
+        parsed.data.startDate ??
+        (current.startDate instanceof Date
+          ? current.startDate.toISOString()
+          : String(current.startDate || ""));
+      const nextEndDateRaw =
+        parsed.data.endDate ??
+        (current.endDate instanceof Date
+          ? current.endDate.toISOString()
+          : String(current.endDate || ""));
+      const nextCurrencyCode = parsed.data.currencyCode ?? String(current.currencyCode || "");
+      const nextExchangeRateMode =
+        (parsed.data.exchangeRateMode ??
+          (String(current.exchangeRateMode || "AUTO") as "AUTO" | "MANUAL")) || "AUTO";
+      const nextExchangeRate =
+        parsed.data.exchangeRate !== undefined
+          ? parsed.data.exchangeRate
+          : Number(current.exchangeRate ?? 0);
+      const nextExchangeRateDateRaw =
+        parsed.data.exchangeRateDate !== undefined
+          ? parsed.data.exchangeRateDate
+          : current.exchangeRateDate instanceof Date
+            ? current.exchangeRateDate.toISOString()
+            : null;
+
+      validatePlanDateRange(nextStartDateRaw, nextEndDateRaw);
+      const currencyContext = await resolvePreTourCurrencyContext(companyId, {
+        planCurrencyCode: nextCurrencyCode,
+        startDate: nextStartDateRaw,
+        exchangeRateMode: nextExchangeRateMode,
+        exchangeRate: nextExchangeRate,
+        exchangeRateDate: nextExchangeRateDateRaw,
+      });
 
       if (!nextOperatorOrgId || !nextMarketOrgId) {
         throw new PreTourError(
@@ -562,6 +740,10 @@ export async function updatePreTourRecord(
           ...parsed.data,
           startDate: parsed.data.startDate ? toDate(parsed.data.startDate) : undefined,
           endDate: parsed.data.endDate ? toDate(parsed.data.endDate) : undefined,
+          baseCurrencyCode: currencyContext.baseCurrencyCode,
+          exchangeRateMode: currencyContext.exchangeRateMode,
+          exchangeRate: toDecimal(currencyContext.exchangeRate, 8) ?? "0",
+          exchangeRateDate: currencyContext.exchangeRateDate,
           baseTotal:
             parsed.data.baseTotal !== undefined ? toDecimal(parsed.data.baseTotal) : undefined,
           taxTotal: parsed.data.taxTotal !== undefined ? toDecimal(parsed.data.taxTotal) : undefined,

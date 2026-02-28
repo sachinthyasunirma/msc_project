@@ -47,6 +47,10 @@ export const createPreTourSchema = baseCodeSchema.extend({
   mealPreference: z.string().trim().max(40).optional().nullable(),
   notes: z.string().trim().max(2000).optional().nullable(),
   currencyCode: z.string().trim().toUpperCase().min(1).max(10),
+  baseCurrencyCode: z.string().trim().toUpperCase().min(1).max(10).optional(),
+  exchangeRateMode: z.enum(["AUTO", "MANUAL"]).default("AUTO"),
+  exchangeRate: z.coerce.number().min(0).max(999999999).default(0),
+  exchangeRateDate: z.string().datetime().optional().nullable(),
   priceMode: z.enum(["EXCLUSIVE", "INCLUSIVE"]).default("EXCLUSIVE"),
   pricingPolicy: z
     .object({

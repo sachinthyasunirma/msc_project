@@ -33,6 +33,8 @@ export async function GET(request: Request) {
         id: company.id,
         code: company.code,
         name: company.name,
+        baseCurrencyCode: company.baseCurrencyCode,
+        helpEnabled: company.helpEnabled,
         joinSecretCode: company.joinSecretCode,
         managerPrivilegeCode: company.managerPrivilegeCode,
       })

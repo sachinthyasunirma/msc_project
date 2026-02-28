@@ -76,6 +76,9 @@ type Field = {
 };
 
 type Row = Record<string, unknown>;
+type CompanySettingsResponse = {
+  company?: { baseCurrencyCode?: string | null } | null;
+};
 
 const META: Record<PreTourResourceKey, { title: string; description: string }> = {
   "pre-tours": {
@@ -111,6 +114,8 @@ const COLUMNS: Record<PreTourResourceKey, Array<{ key: string; label: string }>>
     { key: "marketOrgId", label: "Market" },
     { key: "status", label: "Status" },
     { key: "currencyCode", label: "Currency" },
+    { key: "exchangeRateMode", label: "FX Mode" },
+    { key: "exchangeRate", label: "FX Rate" },
     { key: "isActive", label: "Active" },
   ],
   "pre-tour-days": [
@@ -426,6 +431,7 @@ export function PreTourManagementView({
   const [guides, setGuides] = useState<Row[]>([]);
   const [currencies, setCurrencies] = useState<Row[]>([]);
   const [organizations, setOrganizations] = useState<Row[]>([]);
+  const [companyBaseCurrencyCode, setCompanyBaseCurrencyCode] = useState("USD");
 
   const [selectedDayId, setSelectedDayId] = useState("");
   const [selectedItemId, setSelectedItemId] = useState("");
@@ -463,7 +469,7 @@ export function PreTourManagementView({
     infants: "0",
     operatorOrgId: "",
     marketOrgId: "",
-    currencyCode: "USD",
+    currencyCode: companyBaseCurrencyCode,
     priceMode: "EXCLUSIVE",
   });
 
@@ -650,9 +656,20 @@ export function PreTourManagementView({
             label: "Currency",
             type: "select",
             required: true,
-            defaultValue: "USD",
+            defaultValue: companyBaseCurrencyCode,
             options: currencyOptions,
           },
+          {
+            key: "exchangeRateMode",
+            label: "FX Mode",
+            type: "select",
+            defaultValue: "AUTO",
+            options: [
+              { label: "AUTO", value: "AUTO" },
+              { label: "MANUAL", value: "MANUAL" },
+            ],
+          },
+          { key: "exchangeRate", label: "FX Rate", type: "number", defaultValue: 0 },
           {
             key: "priceMode",
             label: "Price Mode",
@@ -717,7 +734,7 @@ export function PreTourManagementView({
           { key: "toLocationId", label: "To", type: "select", nullable: true, options: locationOptions },
           { key: "locationId", label: "Location", type: "select", nullable: true, options: locationOptions },
           { key: "rateId", label: "Rate Id", type: "text", nullable: true },
-          { key: "currencyCode", label: "Currency", type: "select", required: true, defaultValue: "USD", options: currencyOptions },
+          { key: "currencyCode", label: "Currency", type: "select", required: true, defaultValue: companyBaseCurrencyCode, options: currencyOptions },
           {
             key: "priceMode",
             label: "Price Mode",
@@ -765,7 +782,7 @@ export function PreTourManagementView({
           { key: "addonServiceId", label: "Addon Service", type: "text", nullable: true },
           { key: "title", label: "Title", type: "text", required: true },
           { key: "qty", label: "Quantity", type: "number", defaultValue: 1 },
-          { key: "currencyCode", label: "Currency", type: "select", required: true, defaultValue: "USD", options: currencyOptions },
+          { key: "currencyCode", label: "Currency", type: "select", required: true, defaultValue: companyBaseCurrencyCode, options: currencyOptions },
           { key: "baseAmount", label: "Base Amount", type: "number", defaultValue: 0 },
           { key: "taxAmount", label: "Tax Amount", type: "number", defaultValue: 0 },
           { key: "totalAmount", label: "Total Amount", type: "number", defaultValue: 0 },
@@ -776,7 +793,7 @@ export function PreTourManagementView({
         return [
           { key: "code", label: "Code", type: "text", required: true },
           { key: "planId", label: "Pre-Tour Plan", type: "select", required: true, options: planOptions },
-          { key: "currencyCode", label: "Currency", type: "select", required: true, defaultValue: "USD", options: currencyOptions },
+          { key: "currencyCode", label: "Currency", type: "select", required: true, defaultValue: companyBaseCurrencyCode, options: currencyOptions },
           { key: "totalsByType", label: "Totals By Type JSON", type: "json", nullable: true },
           { key: "baseTotal", label: "Base Total", type: "number", required: true, defaultValue: 0 },
           { key: "taxTotal", label: "Tax Total", type: "number", required: true, defaultValue: 0 },
@@ -797,6 +814,7 @@ export function PreTourManagementView({
     currencyOptions,
     operatorOrganizationOptions,
     marketOrganizationOptions,
+    companyBaseCurrencyCode,
   ]);
 
   const visibleFields = useMemo(() => {
@@ -821,13 +839,14 @@ export function PreTourManagementView({
   );
 
   const loadMasters = useCallback(async () => {
-    const [locationRows, activityRows, guideRows, currencyRows, organizationRows] =
+    const [locationRows, activityRows, guideRows, currencyRows, organizationRows, companyResponse] =
       await Promise.all([
         listTransportRecords("locations", { limit: 300 }),
         listActivityRecords("activities", { limit: 300 }),
         listGuideRecords("guides", { limit: 300 }),
         listCurrencyRecords("currencies", { limit: 200 }),
         listBusinessNetworkRecords("organizations", { limit: 400 }),
+        fetch("/api/companies/me", { cache: "no-store" }),
       ]);
 
     setLocations(locationRows);
@@ -835,6 +854,11 @@ export function PreTourManagementView({
     setGuides(guideRows);
     setCurrencies(currencyRows);
     setOrganizations(organizationRows);
+    if (companyResponse.ok) {
+      const body = (await companyResponse.json()) as CompanySettingsResponse;
+      const base = body.company?.baseCurrencyCode?.trim().toUpperCase();
+      if (base) setCompanyBaseCurrencyCode(base);
+    }
   }, []);
 
   const loadData = useCallback(async () => {
@@ -877,6 +901,14 @@ export function PreTourManagementView({
       toast.error(error instanceof Error ? error.message : "Failed to load lookup data.");
     });
   }, [loadMasters]);
+
+  useEffect(() => {
+    setCopyForm((prev) =>
+      prev.currencyCode && prev.currencyCode !== "USD"
+        ? prev
+        : { ...prev, currencyCode: companyBaseCurrencyCode }
+    );
+  }, [companyBaseCurrencyCode]);
 
   useEffect(() => {
     void loadData();
@@ -1094,7 +1126,9 @@ export function PreTourManagementView({
       toLocationId: sharingItem.toLocationId ?? null,
       locationId: sharingItem.locationId ?? null,
       rateId: sharingItem.rateId ?? null,
-      currencyCode: String(sharingItem.currencyCode || selectedPlan?.currencyCode || "USD"),
+      currencyCode: String(
+        sharingItem.currencyCode || selectedPlan?.currencyCode || companyBaseCurrencyCode
+      ),
       priceMode: String(sharingItem.priceMode || selectedPlan?.priceMode || "EXCLUSIVE"),
       baseAmount: Number(sharingItem.baseAmount ?? 0),
       taxAmount: Number(sharingItem.taxAmount ?? 0),
@@ -1175,7 +1209,9 @@ export function PreTourManagementView({
           toLocationId: sourceItem.toLocationId ?? null,
           locationId: sourceItem.locationId ?? null,
           rateId: sourceItem.rateId ?? null,
-          currencyCode: String(sourceItem.currencyCode || sourcePlan.currencyCode || "USD"),
+          currencyCode: String(
+            sourceItem.currencyCode || sourcePlan.currencyCode || companyBaseCurrencyCode
+          ),
           priceMode: String(sourceItem.priceMode || sourcePlan.priceMode || "EXCLUSIVE"),
           baseAmount: Number(sourceItem.baseAmount || 0),
           taxAmount: Number(sourceItem.taxAmount || 0),
@@ -1201,7 +1237,9 @@ export function PreTourManagementView({
           addonServiceId: sourceAddon.addonServiceId ?? null,
           title: sourceAddon.title ?? null,
           qty: Number(sourceAddon.qty || 1),
-          currencyCode: String(sourceAddon.currencyCode || sourcePlan.currencyCode || "USD"),
+          currencyCode: String(
+            sourceAddon.currencyCode || sourcePlan.currencyCode || companyBaseCurrencyCode
+          ),
           baseAmount: Number(sourceAddon.baseAmount || 0),
           taxAmount: Number(sourceAddon.taxAmount || 0),
           totalAmount: Number(sourceAddon.totalAmount || 0),
@@ -1214,7 +1252,9 @@ export function PreTourManagementView({
         await createPreTourRecord("pre-tour-totals", {
           code: `${codePrefix}_TOTAL`.slice(0, 80),
           planId: newPlanId,
-          currencyCode: String(sourceTotal.currencyCode || sourcePlan.currencyCode || "USD"),
+          currencyCode: String(
+            sourceTotal.currencyCode || sourcePlan.currencyCode || companyBaseCurrencyCode
+          ),
           totalsByType: sourceTotal.totalsByType ?? null,
           baseTotal: Number(sourceTotal.baseTotal || 0),
           taxTotal: Number(sourceTotal.taxTotal || 0),
@@ -1260,7 +1300,7 @@ export function PreTourManagementView({
         roomPreference: sourcePlan.roomPreference ?? null,
         mealPreference: sourcePlan.mealPreference ?? null,
         notes: sourcePlan.notes ?? null,
-        currencyCode: String(sourcePlan.currencyCode || "USD"),
+        currencyCode: String(sourcePlan.currencyCode || companyBaseCurrencyCode),
         priceMode: String(sourcePlan.priceMode || "EXCLUSIVE"),
         pricingPolicy: sourcePlan.pricingPolicy ?? null,
         baseTotal: Number(sourcePlan.baseTotal || 0),
@@ -1303,11 +1343,11 @@ export function PreTourManagementView({
       infants: String(Number(sourcePlan.infants || 0)),
       operatorOrgId: String(sourcePlan.operatorOrgId || ""),
       marketOrgId: String(sourcePlan.marketOrgId || ""),
-      currencyCode: String(sourcePlan.currencyCode || "USD"),
+      currencyCode: String(sourcePlan.currencyCode || companyBaseCurrencyCode),
       priceMode: String(sourcePlan.priceMode || "EXCLUSIVE"),
     });
     setCopyDialogOpen(true);
-  }, []);
+  }, [companyBaseCurrencyCode]);
 
   const submitCopyPlan = useCallback(async () => {
     if (!copySourcePlan) return;

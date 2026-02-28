@@ -18,6 +18,8 @@ import { Switch } from "@/components/ui/switch";
 type CompanyPayload = {
   id: string;
   code: string;
+  baseCurrencyCode: string;
+  helpEnabled: boolean;
   joinSecretCode: string | null;
   managerPrivilegeCode: string | null;
   name: string;
@@ -39,6 +41,8 @@ export function CompanySetupGate() {
     privilegeCode: "",
     name: "",
     email: "",
+    baseCurrencyCode: "USD",
+    helpEnabled: true,
     country: "",
     image: "",
   });
@@ -70,6 +74,8 @@ export function CompanySetupGate() {
             privilegeCode: body.company.managerPrivilegeCode ?? "",
             name: body.company.name ?? "",
             email: body.company.email ?? "",
+            baseCurrencyCode: body.company.baseCurrencyCode ?? "USD",
+            helpEnabled: body.company.helpEnabled ?? true,
             country: body.company.country ?? "",
             image: body.company.image ?? "",
           });
@@ -78,6 +84,7 @@ export function CompanySetupGate() {
             ...prev,
             joinExisting: false,
             email: session.user.email || prev.email,
+            baseCurrencyCode: prev.baseCurrencyCode || "USD",
           }));
         }
       } catch (e) {
@@ -132,6 +139,8 @@ export function CompanySetupGate() {
             secretCode: form.secretCode.toUpperCase().trim(),
             privilegeCode: form.privilegeCode.toUpperCase().trim() || null,
             country: form.country.trim() || null,
+            helpEnabled: form.helpEnabled,
+            baseCurrencyCode: form.baseCurrencyCode.trim().toUpperCase() || "USD",
             image: form.image.trim() || null,
           }
         : {
@@ -141,6 +150,8 @@ export function CompanySetupGate() {
             privilegeCode: form.privilegeCode.toUpperCase().trim() || null,
             name: form.name.trim(),
             email: form.email.trim(),
+            baseCurrencyCode: form.baseCurrencyCode.trim().toUpperCase() || "USD",
+            helpEnabled: form.helpEnabled,
             country: form.country.trim() || null,
             image: form.image.trim() || null,
           };
@@ -231,6 +242,33 @@ export function CompanySetupGate() {
                   value={form.country}
                   onChange={(e) => setForm((prev) => ({ ...prev, country: e.target.value }))}
                 />
+              </div>
+              <div className="space-y-2">
+                <Label>Base Currency Code</Label>
+                <Input
+                  value={form.baseCurrencyCode}
+                  onChange={(e) =>
+                    setForm((prev) => ({
+                      ...prev,
+                      baseCurrencyCode: e.target.value.toUpperCase(),
+                    }))
+                  }
+                  placeholder="USD"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Help Documentation</Label>
+                <div className="flex h-10 items-center justify-between rounded-md border px-3">
+                  <span className="text-sm text-muted-foreground">
+                    {form.helpEnabled ? "Enabled" : "Disabled"}
+                  </span>
+                  <Switch
+                    checked={form.helpEnabled}
+                    onCheckedChange={(checked) =>
+                      setForm((prev) => ({ ...prev, helpEnabled: checked }))
+                    }
+                  />
+                </div>
               </div>
               <div className="space-y-2 md:col-span-2">
                 <Label>Company Logo</Label>

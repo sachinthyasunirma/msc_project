@@ -47,18 +47,46 @@ export const updateFxProviderSchema = createFxProviderSchema
     message: "At least one FX provider field is required.",
   });
 
-export const createExchangeRateSchema = baseSchema.extend({
+const exchangeRateShape = baseSchema.extend({
   providerId: z.string().min(1).optional().nullable(),
   baseCurrencyId: z.string().min(1),
   quoteCurrencyId: z.string().min(1),
   rate: z.coerce.number().gt(0).max(999999999),
-  asOf: z.string().datetime(),
+  effectiveFrom: z.string().datetime(),
+  effectiveTo: z.string().datetime().optional().nullable(),
   rateType: z.enum(["MID", "BUY", "SELL"]).default("MID"),
   isActive: z.boolean().default(true),
 });
 
-export const updateExchangeRateSchema = createExchangeRateSchema
+export const createExchangeRateSchema = exchangeRateShape.superRefine((data, ctx) => {
+  if (data.effectiveTo) {
+    const from = new Date(data.effectiveFrom);
+    const to = new Date(data.effectiveTo);
+    if (to < from) {
+      ctx.addIssue({
+        path: ["effectiveTo"],
+        code: z.ZodIssueCode.custom,
+        message: "Effective To must be greater than or equal to Effective From.",
+      });
+    }
+  }
+});
+
+export const updateExchangeRateSchema = exchangeRateShape
   .partial()
+  .superRefine((data, ctx) => {
+    if (data.effectiveFrom && data.effectiveTo) {
+      const from = new Date(data.effectiveFrom);
+      const to = new Date(data.effectiveTo);
+      if (to < from) {
+        ctx.addIssue({
+          path: ["effectiveTo"],
+          code: z.ZodIssueCode.custom,
+          message: "Effective To must be greater than or equal to Effective From.",
+        });
+      }
+    }
+  })
   .refine((value) => Object.keys(value).length > 0, {
     message: "At least one exchange rate field is required.",
   });

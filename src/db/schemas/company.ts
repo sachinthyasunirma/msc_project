@@ -10,6 +10,8 @@ export const company = pgTable("company", {
   managerPrivilegeCode: text("manager_privilege_code"),
   name: text("name").notNull(),
   email: text("email").notNull().unique(),
+  baseCurrencyCode: text("base_currency_code").notNull().default("USD"),
+  helpEnabled: boolean("help_enabled").notNull().default(true),
   country: text("country"),
   isActive: boolean("is_active").notNull().default(true),
   emailVerified: boolean("email_verified")

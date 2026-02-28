@@ -2,6 +2,7 @@ import { SidebarProvider } from "@/components/ui/sidebar";
 import { SidebarInset } from "@/components/ui/sidebar";
 import { DashboardNavbar } from "@/modules/dashboard/ui/components/dashboard-navbar";
 import { CompanySetupGate } from "@/modules/dashboard/ui/components/company-setup-gate";
+import { DashboardScreenHelp } from "@/modules/dashboard/ui/components/dashboard-screen-help";
 import { DashboardSidebar } from "@/modules/dashboard/ui/components/dashboard-sidebar";
 import { ViewOnlyModeBadge } from "@/modules/dashboard/ui/components/view-only-mode-badge";
 
@@ -16,6 +17,7 @@ const layout = ({ children }: Props) => {
       <SidebarInset className="min-h-svh bg-background">
         <DashboardNavbar />
         <CompanySetupGate />
+        <DashboardScreenHelp />
         <ViewOnlyModeBadge />
         <div className="flex-1 bg-muted/35">{children}</div>
       </SidebarInset>

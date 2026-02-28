@@ -1,39 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import Link from "next/link";
-import { Edit3, Plus, RefreshCw, Settings2, Trash2 } from "lucide-react";
 import { toast } from "sonner";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { Switch } from "@/components/ui/switch";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { authClient } from "@/lib/auth-client";
 import {
   createTaxRecord,
@@ -41,170 +11,21 @@ import {
   listTaxRecords,
   updateTaxRecord,
 } from "@/modules/tax/lib/tax-api";
-
-export type TaxResourceKey =
-  | "tax-jurisdictions"
-  | "taxes"
-  | "tax-rates"
-  | "tax-rule-sets"
-  | "tax-rules"
-  | "tax-rule-taxes"
-  | "document-fx-snapshots"
-  | "document-tax-snapshots"
-  | "document-tax-lines";
-
-type Field = {
-  key: string;
-  label: string;
-  type: "text" | "number" | "boolean" | "select" | "datetime";
-  required?: boolean;
-  options?: Array<{ label: string; value: string }>;
-  defaultValue?: string | number | boolean;
-  nullable?: boolean;
-};
-
-const META: Record<TaxResourceKey, { title: string; description: string }> = {
-  "tax-jurisdictions": {
-    title: "Tax Jurisdictions",
-    description: "Country/region/city level jurisdiction master data.",
-  },
-  taxes: {
-    title: "Taxes",
-    description: "Tax definitions such as VAT, levy and withholding.",
-  },
-  "tax-rates": {
-    title: "Tax Rates",
-    description: "Tax rates per jurisdiction with effective dates.",
-  },
-  "tax-rule-sets": {
-    title: "Tax Rule Sets",
-    description: "Versioned collections of tax rules.",
-  },
-  "tax-rules": {
-    title: "Tax Rules",
-    description: "Matching rules by service type, customer and residency.",
-  },
-  "tax-rule-taxes": {
-    title: "Tax Rule Taxes",
-    description: "Tax application order and inclusion behavior per rule.",
-  },
-  "document-fx-snapshots": {
-    title: "Document FX Snapshots",
-    description: "FX rates frozen against quote/booking/invoice documents.",
-  },
-  "document-tax-snapshots": {
-    title: "Document Tax Snapshots",
-    description: "Tax totals frozen on commercial documents.",
-  },
-  "document-tax-lines": {
-    title: "Document Tax Lines",
-    description: "Detailed line-level taxes linked to tax snapshots.",
-  },
-};
-
-const COLUMNS: Record<TaxResourceKey, Array<{ key: string; label: string }>> = {
-  "tax-jurisdictions": [
-    { key: "code", label: "Code" },
-    { key: "countryCode", label: "Country" },
-    { key: "name", label: "Name" },
-    { key: "region", label: "Region" },
-    { key: "isActive", label: "Status" },
-  ],
-  taxes: [
-    { key: "code", label: "Code" },
-    { key: "name", label: "Name" },
-    { key: "taxType", label: "Type" },
-    { key: "scope", label: "Scope" },
-    { key: "isActive", label: "Status" },
-  ],
-  "tax-rates": [
-    { key: "code", label: "Code" },
-    { key: "taxId", label: "Tax" },
-    { key: "jurisdictionId", label: "Jurisdiction" },
-    { key: "rateType", label: "Rate Type" },
-    { key: "ratePercent", label: "Rate %" },
-    { key: "rateAmount", label: "Rate Amount" },
-    { key: "isActive", label: "Status" },
-  ],
-  "tax-rule-sets": [
-    { key: "code", label: "Code" },
-    { key: "name", label: "Name" },
-    { key: "isActive", label: "Status" },
-  ],
-  "tax-rules": [
-    { key: "code", label: "Code" },
-    { key: "name", label: "Name" },
-    { key: "serviceType", label: "Service" },
-    { key: "customerType", label: "Customer" },
-    { key: "taxInclusion", label: "Tax Inclusion" },
-    { key: "isActive", label: "Status" },
-  ],
-  "tax-rule-taxes": [
-    { key: "code", label: "Code" },
-    { key: "ruleId", label: "Rule" },
-    { key: "taxId", label: "Tax" },
-    { key: "applyOn", label: "Apply On" },
-    { key: "priority", label: "Priority" },
-    { key: "isActive", label: "Status" },
-  ],
-  "document-fx-snapshots": [
-    { key: "code", label: "Code" },
-    { key: "documentType", label: "Document" },
-    { key: "documentId", label: "Document ID" },
-    { key: "baseCurrencyId", label: "Base Currency" },
-    { key: "quoteCurrencyId", label: "Quote Currency" },
-    { key: "rate", label: "Rate" },
-  ],
-  "document-tax-snapshots": [
-    { key: "code", label: "Code" },
-    { key: "documentType", label: "Document" },
-    { key: "documentId", label: "Document ID" },
-    { key: "jurisdictionCode", label: "Jurisdiction Code" },
-    { key: "taxAmount", label: "Tax Amount" },
-    { key: "totalAmount", label: "Total Amount" },
-  ],
-  "document-tax-lines": [
-    { key: "code", label: "Code" },
-    { key: "snapshotId", label: "Snapshot" },
-    { key: "taxCode", label: "Tax Code" },
-    { key: "taxName", label: "Tax Name" },
-    { key: "rateType", label: "Rate Type" },
-    { key: "taxAmount", label: "Tax Amount" },
-  ],
-};
-
-function defaultValue(field: Field) {
-  if (field.defaultValue !== undefined) return field.defaultValue;
-  if (field.type === "boolean") return true;
-  return "";
-}
-
-function toLocalDateTime(value: unknown) {
-  if (!value || typeof value !== "string") return "";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "";
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(
-    date.getHours()
-  )}:${pad(date.getMinutes())}`;
-}
-
-function toIsoDateTime(value: unknown) {
-  if (!value || typeof value !== "string") return null;
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return null;
-  return date.toISOString();
-}
-
-function formatCell(value: unknown, lookups: Record<string, string>) {
-  if (typeof value === "boolean") return value ? "Yes" : "No";
-  if (typeof value === "string" && lookups[value]) return lookups[value];
-  if (value === null || value === undefined || value === "") return "-";
-  return String(value);
-}
+import {
+  type TaxField,
+  type TaxResourceKey,
+} from "@/modules/tax/ui/components/tax-management/tax-management-config";
+import { TaxManagementHeader } from "@/modules/tax/ui/components/tax-management/tax-management-header";
+import { TaxRecordDialog } from "@/modules/tax/ui/components/tax-management/tax-record-dialog";
+import { TaxRecordsTable } from "@/modules/tax/ui/components/tax-management/tax-records-table";
+import {
+  getDefaultTaxFieldValue,
+  toIsoDateTime,
+  toLocalDateTime,
+} from "@/modules/tax/ui/components/tax-management/tax-management-utils";
 
 export function TaxManagementView({
-  initialResource = "tax-jurisdictions",
+  initialResource = "taxes",
   managedTaxId = "",
 }: {
   initialResource?: TaxResourceKey;
@@ -249,7 +70,7 @@ export function TaxManagementView({
     return Object.fromEntries(items);
   }, [currencies, jurisdictions, ruleSets, rules, snapshots, taxes]);
 
-  const fields = useMemo<Field[]>(() => {
+  const fields = useMemo<TaxField[]>(() => {
     const taxOptions = taxes.map((item) => ({
       value: String(item.id),
       label: `${item.code} - ${item.name}`,
@@ -711,9 +532,9 @@ export function TaxManagementView({
       if (mode === "edit" && row) {
         const raw = row[field.key];
         if (field.type === "datetime") next[field.key] = toLocalDateTime(raw);
-        else next[field.key] = raw ?? defaultValue(field);
+        else next[field.key] = raw ?? getDefaultTaxFieldValue(field);
       } else {
-        next[field.key] = defaultValue(field);
+        next[field.key] = getDefaultTaxFieldValue(field);
       }
     });
     if (isTaxManageMode && taxScopedResources.includes(resource)) {
@@ -792,51 +613,16 @@ export function TaxManagementView({
 
   return (
     <Card>
-      <CardHeader className="space-y-4">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <CardTitle>{META[resource].title}</CardTitle>
-            <CardDescription>
-              {META[resource].description}
-              {isTaxManageMode && managedTax
-                ? ` Managing: ${managedTax.code} - ${managedTax.name}`
-                : ""}
-            </CardDescription>
-          </div>
-          <div className="flex items-center gap-2">
-            {isTaxManageMode ? (
-              <Button variant="outline" asChild>
-                <Link href="/master-data/taxes">Back to Taxes</Link>
-              </Button>
-            ) : null}
-            <Button variant="outline" onClick={() => void Promise.all([load(), loadLookups(), loadCurrencies()])}>
-              <RefreshCw className="mr-2 size-4" />
-              Refresh
-            </Button>
-            <Button
-              onClick={() => openDialog("create")}
-              disabled={isReadOnly}
-              title={isReadOnly ? "View only mode" : undefined}
-              className="master-add-btn"
-            >
-              <Plus className="mr-2 size-4" />
-              Add Record
-            </Button>
-          </div>
-        </div>
-
-        <Tabs value={resource} onValueChange={(value) => setResource(value as TaxResourceKey)}>
-          <div className="master-tabs-scroll">
-            <TabsList className="master-tabs-list">
-              {visibleResources.map((key) => (
-                <TabsTrigger key={key} value={key} className="master-tab-trigger">
-                  {META[key].title}
-                </TabsTrigger>
-              ))}
-            </TabsList>
-          </div>
-        </Tabs>
-      </CardHeader>
+      <TaxManagementHeader
+        resource={resource}
+        visibleResources={visibleResources}
+        isTaxManageMode={isTaxManageMode}
+        managedTaxLabel={managedTax ? `${String(managedTax.code)} - ${String(managedTax.name)}` : ""}
+        isReadOnly={isReadOnly}
+        onResourceChange={setResource}
+        onRefresh={() => void Promise.all([load(), loadLookups(), loadCurrencies()])}
+        onAdd={() => openDialog("create")}
+      />
 
       <CardContent className="space-y-4">
         <Input
@@ -845,157 +631,28 @@ export function TaxManagementView({
           placeholder="Search..."
           className="max-w-md"
         />
-
-        <Table>
-          <TableHeader>
-            <TableRow>
-              {COLUMNS[resource].map((column) => (
-                <TableHead key={column.key}>{column.label}</TableHead>
-              ))}
-              <TableHead className="text-right">Actions</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {loading ? (
-              <TableRow>
-                <TableCell colSpan={COLUMNS[resource].length + 1} className="text-center text-muted-foreground">
-                  Loading...
-                </TableCell>
-              </TableRow>
-            ) : records.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={COLUMNS[resource].length + 1} className="text-center text-muted-foreground">
-                  No records found.
-                </TableCell>
-              </TableRow>
-            ) : (
-              records.map((row) => (
-                <TableRow key={String(row.id)}>
-                  {COLUMNS[resource].map((column) => (
-                    <TableCell key={column.key}>
-                      {column.key === "isActive" ? (
-                        <Badge variant={row.isActive ? "default" : "secondary"}>
-                          {row.isActive ? "Active" : "Inactive"}
-                        </Badge>
-                      ) : (
-                        formatCell(row[column.key], lookups)
-                      )}
-                    </TableCell>
-                  ))}
-                  <TableCell className="text-right">
-                    <div className="flex justify-end gap-2">
-                      {resource === "taxes" && row.id ? (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="master-manage-btn"
-                          asChild
-                        >
-                          <Link href={`/master-data/taxes/manage/${row.id}`}>
-                            <Settings2 className="mr-1 size-4" />
-                            Manage
-                          </Link>
-                        </Button>
-                      ) : null}
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => openDialog("edit", row)}
-                        disabled={isReadOnly}
-                        title={isReadOnly ? "View only mode" : undefined}
-                      >
-                        <Edit3 className="size-4" />
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => void onDelete(row)}
-                        disabled={isReadOnly}
-                        title={isReadOnly ? "View only mode" : undefined}
-                      >
-                        <Trash2 className="size-4" />
-                      </Button>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ))
-            )}
-          </TableBody>
-        </Table>
+        <TaxRecordsTable
+          resource={resource}
+          records={records}
+          loading={loading}
+          isReadOnly={isReadOnly}
+          lookups={lookups}
+          onEdit={(row) => openDialog("edit", row)}
+          onDelete={(row) => void onDelete(row)}
+        />
       </CardContent>
-
-      <Dialog open={dialog.open} onOpenChange={(open) => setDialog((prev) => ({ ...prev, open }))}>
-        <DialogContent className="flex max-h-[92vh] flex-col sm:max-w-5xl">
-          <DialogHeader>
-            <DialogTitle>{dialog.mode === "create" ? "Add" : "Edit"} Record</DialogTitle>
-            <DialogDescription>Fill required fields and save.</DialogDescription>
-          </DialogHeader>
-          <div className="grid max-h-[68vh] grid-cols-1 gap-3 overflow-x-hidden overflow-y-auto px-1 md:grid-cols-2 lg:grid-cols-3">
-            {visibleFields.map((field) => (
-              <div key={field.key} className="min-w-0 space-y-2">
-                <Label>{field.label}</Label>
-                {field.type === "select" ? (
-                  <Select
-                    value={String(form[field.key] ?? (field.nullable ? "__none__" : ""))}
-                    onValueChange={(value) =>
-                      setForm((prev) => ({
-                        ...prev,
-                        [field.key]: value === "__none__" ? "" : value,
-                      }))
-                    }
-                  >
-                    <SelectTrigger className="w-full min-w-0">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {field.nullable ? <SelectItem value="__none__">None</SelectItem> : null}
-                      {field.options?.map((option) => (
-                        <SelectItem key={option.value} value={option.value}>
-                          {option.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                ) : field.type === "boolean" ? (
-                  <div className="flex h-9 items-center justify-between rounded-md border px-3">
-                    <span className="text-muted-foreground text-xs">
-                      {Boolean(form[field.key]) ? "Enabled" : "Disabled"}
-                    </span>
-                    <Switch
-                      checked={Boolean(form[field.key])}
-                      onCheckedChange={(checked) =>
-                        setForm((prev) => ({ ...prev, [field.key]: checked }))
-                      }
-                    />
-                  </div>
-                ) : (
-                  <Input
-                    type={
-                      field.type === "number"
-                        ? "number"
-                        : field.type === "datetime"
-                          ? "datetime-local"
-                          : "text"
-                    }
-                    value={String(form[field.key] ?? "")}
-                    onChange={(event) =>
-                      setForm((prev) => ({ ...prev, [field.key]: event.target.value }))
-                    }
-                  />
-                )}
-              </div>
-            ))}
-          </div>
-          <DialogFooter className="pt-2">
-            <Button variant="outline" onClick={() => setDialog({ open: false, mode: "create", row: null })}>
-              Cancel
-            </Button>
-            <Button onClick={() => void onSubmit()} disabled={saving || (isReadOnly && dialog.mode === "create")}>
-              {saving ? "Saving..." : "Save"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <TaxRecordDialog
+        dialog={dialog}
+        visibleFields={visibleFields}
+        form={form}
+        saving={saving}
+        isReadOnly={isReadOnly}
+        setDialog={setDialog}
+        setForm={setForm}
+        onSubmit={onSubmit}
+      />
     </Card>
   );
 }
+
+export type { TaxResourceKey };

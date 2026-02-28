@@ -23,6 +23,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import {
   SidebarMenu,
   SidebarMenuButton,
@@ -34,6 +35,8 @@ import { authClient } from "@/lib/auth-client";
 type CompanyProfile = {
   id: string;
   code: string;
+  baseCurrencyCode: string;
+  helpEnabled: boolean;
   joinSecretCode: string | null;
   managerPrivilegeCode: string | null;
   name: string;
@@ -52,6 +55,8 @@ export function NavUser() {
   const [companyError, setCompanyError] = useState<string | null>(null);
   const [companyForm, setCompanyForm] = useState({
     code: "",
+    baseCurrencyCode: "USD",
+    helpEnabled: true,
     secretCode: "",
     privilegeCode: "",
     name: "",
@@ -87,6 +92,8 @@ export function NavUser() {
       if (details) {
         setCompanyForm({
           code: details.code || "",
+          baseCurrencyCode: details.baseCurrencyCode || "USD",
+          helpEnabled: details.helpEnabled ?? true,
           secretCode: details.joinSecretCode || "",
           privilegeCode: details.managerPrivilegeCode || "",
           name: details.name || "",
@@ -132,6 +139,8 @@ export function NavUser() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           code: companyForm.code.toUpperCase().trim(),
+          baseCurrencyCode: companyForm.baseCurrencyCode.toUpperCase().trim() || "USD",
+          helpEnabled: Boolean(companyForm.helpEnabled),
           secretCode: companyForm.secretCode.toUpperCase().trim(),
           privilegeCode: companyForm.privilegeCode.toUpperCase().trim() || null,
           name: companyForm.name.trim(),
@@ -282,6 +291,34 @@ export function NavUser() {
                   setCompanyForm((prev) => ({ ...prev, code: e.target.value.toUpperCase() }))
                 }
               />
+            </div>
+            <div className="space-y-2">
+              <Label>Base Currency Code</Label>
+              <Input
+                value={companyForm.baseCurrencyCode}
+                disabled={!isManager}
+                onChange={(e) =>
+                  setCompanyForm((prev) => ({
+                    ...prev,
+                    baseCurrencyCode: e.target.value.toUpperCase(),
+                  }))
+                }
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Help Documentation</Label>
+              <div className="flex h-10 items-center justify-between rounded-md border px-3">
+                <span className="text-sm text-muted-foreground">
+                  {companyForm.helpEnabled ? "Enabled" : "Disabled"}
+                </span>
+                <Switch
+                  checked={companyForm.helpEnabled}
+                  disabled={!isManager}
+                  onCheckedChange={(checked) =>
+                    setCompanyForm((prev) => ({ ...prev, helpEnabled: checked }))
+                  }
+                />
+              </div>
             </div>
             <div className="space-y-2">
               <Label>Secret Code</Label>

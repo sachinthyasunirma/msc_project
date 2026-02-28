@@ -80,7 +80,8 @@ export const exchangeRate = pgTable(
       .notNull()
       .references(() => currency.id, { onDelete: "restrict" }),
     rate: decimal("rate", { precision: 18, scale: 8 }).notNull(),
-    asOf: timestamp("as_of").notNull(),
+    asOf: timestamp("as_of").notNull(), // effectiveFrom
+    effectiveTo: timestamp("effective_to"),
     rateType: text("rate_type").notNull().default("MID"),
     isActive: boolean("is_active").notNull().default(true),
     createdAt: timestamp("created_at").notNull().defaultNow(),
@@ -89,6 +90,7 @@ export const exchangeRate = pgTable(
     index("idx_exchange_rate_company").on(table.companyId),
     index("idx_exchange_rate_pair").on(table.baseCurrencyId, table.quoteCurrencyId),
     index("idx_exchange_rate_asof").on(table.asOf),
+    index("idx_exchange_rate_effective_to").on(table.effectiveTo),
     unique("uq_exchange_rate_company_code").on(table.companyId, table.code),
   ]
 );

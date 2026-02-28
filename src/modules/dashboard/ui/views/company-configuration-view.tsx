@@ -38,6 +38,8 @@ type CompanyUsersResponse = {
     id: string;
     code: string;
     name: string;
+    baseCurrencyCode: string;
+    helpEnabled: boolean;
     joinSecretCode: string | null;
     managerPrivilegeCode: string | null;
   };
@@ -72,8 +74,10 @@ const ROLE_NOTES: Record<Role, string> = {
 export function CompanyConfigurationView() {
   const [loading, setLoading] = useState(true);
   const [savingUserId, setSavingUserId] = useState<string | null>(null);
+  const [savingHelp, setSavingHelp] = useState(false);
   const [query, setQuery] = useState("");
   const [payload, setPayload] = useState<CompanyUsersResponse | null>(null);
+  const [helpEnabled, setHelpEnabled] = useState(true);
   const [drafts, setDrafts] = useState<Record<string, UserDraft>>({});
 
   const canManageUsers =
@@ -93,6 +97,7 @@ export function CompanyConfigurationView() {
 
       const typed = body as CompanyUsersResponse;
       setPayload(typed);
+      setHelpEnabled(Boolean(typed.company.helpEnabled));
       setDrafts(
         Object.fromEntries(
           typed.users.map((user) => [
@@ -121,6 +126,59 @@ export function CompanyConfigurationView() {
         user.name.toLowerCase().includes(term) || user.email.toLowerCase().includes(term)
     );
   }, [payload, query]);
+
+  const onSaveHelpSetting = async () => {
+    if (!payload) return;
+    setSavingHelp(true);
+    try {
+      const currentResponse = await fetch("/api/companies/me", { cache: "no-store" });
+      const currentBody = (await currentResponse.json()) as {
+        company?: {
+          code?: string;
+          name?: string;
+          email?: string;
+          baseCurrencyCode?: string;
+          joinSecretCode?: string | null;
+          managerPrivilegeCode?: string | null;
+          country?: string | null;
+          image?: string | null;
+        } | null;
+        message?: string;
+      };
+      if (!currentResponse.ok || !currentBody.company) {
+        throw new Error(currentBody.message || "Failed to load company profile.");
+      }
+      const patchResponse = await fetch("/api/companies/me", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          code: currentBody.company.code || payload.company.code,
+          name: currentBody.company.name || payload.company.name,
+          email: currentBody.company.email || "",
+          baseCurrencyCode:
+            currentBody.company.baseCurrencyCode || payload.company.baseCurrencyCode || "USD",
+          secretCode: currentBody.company.joinSecretCode || payload.company.joinSecretCode || "",
+          privilegeCode:
+            currentBody.company.managerPrivilegeCode ||
+            payload.company.managerPrivilegeCode ||
+            null,
+          country: currentBody.company.country ?? null,
+          image: currentBody.company.image ?? null,
+          helpEnabled,
+        }),
+      });
+      const patchBody = (await patchResponse.json()) as { message?: string };
+      if (!patchResponse.ok) {
+        throw new Error(patchBody.message || "Failed to update help setting.");
+      }
+      toast.success("Screen help setting saved.");
+      await load();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to save help setting.");
+    } finally {
+      setSavingHelp(false);
+    }
+  };
 
   const onSaveUser = async (userId: string) => {
     if (!payload) return;
@@ -207,12 +265,36 @@ export function CompanyConfigurationView() {
               <Input value={payload?.company.joinSecretCode || "-"} readOnly />
             </div>
             <div className="space-y-2">
+              <Label>Base Currency Code</Label>
+              <Input value={payload?.company.baseCurrencyCode || "-"} readOnly />
+            </div>
+            <div className="space-y-2">
+              <Label>Screen Help</Label>
+              <div className="flex h-10 items-center justify-between rounded-md border px-3">
+                <span className="text-sm text-muted-foreground">
+                  {helpEnabled ? "Enabled" : "Disabled"}
+                </span>
+                <Switch
+                  checked={helpEnabled}
+                  disabled={!canManageUsers || savingHelp}
+                  onCheckedChange={setHelpEnabled}
+                />
+              </div>
+            </div>
+            <div className="space-y-2">
               <Label>Manager Privilege Code</Label>
               <Input value={payload?.company.managerPrivilegeCode || "-"} readOnly />
             </div>
             <p className="text-xs text-muted-foreground">
               Secret code joins company. Manager privilege code promotes joined user to manager.
             </p>
+            <Button
+              variant="outline"
+              disabled={!canManageUsers || savingHelp}
+              onClick={() => void onSaveHelpSetting()}
+            >
+              {savingHelp ? "Saving..." : "Save Help Setting"}
+            </Button>
           </CardContent>
         </Card>
 
