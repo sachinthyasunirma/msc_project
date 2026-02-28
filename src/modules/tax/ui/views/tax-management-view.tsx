@@ -614,9 +614,14 @@ export function TaxManagementView({
       return;
     }
     if (!row.id) return;
+    const targetLabel =
+      String(row.code ?? "").trim() ||
+      String(row.name ?? "").trim() ||
+      String(row.taxName ?? "").trim() ||
+      String(row.id);
     const confirmed = await confirm({
       title: "Delete Record",
-      description: "Delete this record? This action cannot be undone.",
+      targetLabel,
       confirmText: "Yes",
       cancelText: "No",
       destructive: true,

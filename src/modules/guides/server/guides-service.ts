@@ -58,7 +58,25 @@ function toDate(value: string | null | undefined) {
 }
 
 async function getAccess(headers: Headers) {
-  const session = await auth.api.getSession({ headers });
+  let session: Awaited<ReturnType<typeof auth.api.getSession>>;
+  try {
+    session = await auth.api.getSession({ headers });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const lowered = message.toLowerCase();
+    if (
+      lowered.includes("fetch failed") ||
+      lowered.includes("enotfound") ||
+      lowered.includes("error connecting to database")
+    ) {
+      throw new GuideError(
+        503,
+        "DATABASE_UNAVAILABLE",
+        "Database connection is unavailable. Check DATABASE_URL/network and try again."
+      );
+    }
+    throw error;
+  }
   if (!session?.user) {
     throw new GuideError(401, "UNAUTHORIZED", "You are not authenticated.");
   }
@@ -756,8 +774,30 @@ export function toGuideErrorResponse(error: unknown) {
   if (error instanceof GuideError) {
     return { status: error.status, body: { code: error.code, message: error.message } };
   }
+  if (error && typeof error === "object") {
+    const dbError = error as { code?: string; message?: string };
+    const lowered = (dbError.message ?? "").toLowerCase();
+    if (dbError.code === "ENOTFOUND" || lowered.includes("fetch failed")) {
+      return {
+        status: 503,
+        body: {
+          code: "DATABASE_UNAVAILABLE",
+          message: "Database connection is unavailable. Check DATABASE_URL/network and try again.",
+        },
+      };
+    }
+  }
   if (error instanceof Error) {
     const message = error.message.toLowerCase();
+    if (message.includes("fetch failed") || message.includes("enotfound")) {
+      return {
+        status: 503,
+        body: {
+          code: "DATABASE_UNAVAILABLE",
+          message: "Database connection is unavailable. Check DATABASE_URL/network and try again.",
+        },
+      };
+    }
     if (
       (message.includes("relation") && message.includes("does not exist")) ||
       (message.includes("column") && message.includes("does not exist"))

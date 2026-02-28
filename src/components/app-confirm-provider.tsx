@@ -1,6 +1,7 @@
 "use client";
 
 import { createContext, useCallback, useContext, useMemo, useRef, useState } from "react";
+import { buttonVariants } from "@/components/ui/button";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -11,10 +12,12 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { cn } from "@/lib/utils";
 
 type ConfirmOptions = {
   title?: string;
   description?: string;
+  targetLabel?: string;
   confirmText?: string;
   cancelText?: string;
   destructive?: boolean;
@@ -49,6 +52,11 @@ export function AppConfirmProvider({ children }: { children: React.ReactNode }) 
   }, []);
 
   const value = useMemo(() => confirm, [confirm]);
+  const resolvedDescription =
+    options.description ||
+    (options.targetLabel
+      ? `You are about to delete "${options.targetLabel}". This action cannot be undone.`
+      : "Are you sure you want to continue?");
 
   return (
     <ConfirmContext.Provider value={value}>
@@ -57,20 +65,19 @@ export function AppConfirmProvider({ children }: { children: React.ReactNode }) 
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>{options.title ?? "Please Confirm"}</AlertDialogTitle>
-            <AlertDialogDescription>
-              {options.description ?? "Are you sure you want to continue?"}
-            </AlertDialogDescription>
+            <AlertDialogDescription>{resolvedDescription}</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel onClick={() => closeWith(false)}>
+            <AlertDialogCancel className="min-w-24" onClick={() => closeWith(false)}>
               {options.cancelText ?? "No"}
             </AlertDialogCancel>
             <AlertDialogAction
-              className={
+              className={cn(
+                "min-w-24 font-semibold shadow-sm",
                 options.destructive
-                  ? "bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                  : undefined
-              }
+                  ? buttonVariants({ variant: "destructive" })
+                  : buttonVariants({ variant: "default" })
+              )}
               onClick={() => closeWith(true)}
             >
               {options.confirmText ?? "Yes"}
@@ -89,4 +96,3 @@ export function useConfirm() {
   }
   return context;
 }
-

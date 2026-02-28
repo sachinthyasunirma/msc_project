@@ -30,6 +30,19 @@ class BusinessNetworkError extends Error {
 
 type BusinessNetworkResource = z.infer<typeof businessNetworkResourceSchema>;
 
+const ORG_MEMBER_ROLES_BY_TYPE: Record<"PLATFORM" | "OPERATOR" | "MARKET" | "SUPPLIER", string[]> = {
+  PLATFORM: ["PLATFORM_ADMIN", "PLATFORM_OPERATIONS", "PLATFORM_FINANCE"],
+  OPERATOR: [
+    "OPERATOR_ADMIN",
+    "OPERATOR_CONTRACTS",
+    "OPERATOR_RESERVATIONS",
+    "OPERATOR_TICKETING",
+    "OPERATOR_FINANCE",
+  ],
+  MARKET: ["MARKET_ADMIN", "MARKET_SALES", "MARKET_RESERVATIONS", "MARKET_FINANCE"],
+  SUPPLIER: ["SUPPLIER_ADMIN", "SUPPLIER_OPERATIONS", "SUPPLIER_FINANCE"],
+};
+
 function normalizeZodError(error: z.ZodError) {
   return error.issues[0]?.message || "Validation failed.";
 }
@@ -121,6 +134,31 @@ async function ensureOrganizationType(
   const record = await ensureOrganization(companyId, id);
   if (!types.includes(record.type as (typeof types)[number])) {
     throw new BusinessNetworkError(400, code, `Organization type must be one of: ${types.join(", ")}.`);
+  }
+}
+
+async function ensureOrgMemberRoleForOrganization(
+  companyId: string,
+  organizationId: string,
+  role: string
+) {
+  const organization = await ensureOrganization(companyId, organizationId);
+  const allowedRoles = ORG_MEMBER_ROLES_BY_TYPE[
+    organization.type as keyof typeof ORG_MEMBER_ROLES_BY_TYPE
+  ];
+  if (!allowedRoles) {
+    throw new BusinessNetworkError(
+      400,
+      "INVALID_ORGANIZATION_TYPE",
+      "Unsupported organization type for member role mapping."
+    );
+  }
+  if (!allowedRoles.includes(role)) {
+    throw new BusinessNetworkError(
+      400,
+      "INVALID_MEMBER_ROLE",
+      `Role "${role}" is not allowed for organization type "${organization.type}".`
+    );
   }
 }
 
@@ -320,6 +358,11 @@ export async function createBusinessNetworkRecord(
       }
       await ensureOrganization(companyId, parsed.data.organizationId);
       await ensureUserInCompany(companyId, parsed.data.userId);
+      await ensureOrgMemberRoleForOrganization(
+        companyId,
+        parsed.data.organizationId,
+        parsed.data.role
+      );
       const [created] = await db
         .insert(schema.businessOrgMember)
         .values({ ...parsed.data, companyId })
@@ -457,6 +500,30 @@ export async function updateBusinessNetworkRecord(
       }
       if (parsed.data.organizationId) await ensureOrganization(companyId, parsed.data.organizationId);
       if (parsed.data.userId) await ensureUserInCompany(companyId, parsed.data.userId);
+
+      if (parsed.data.organizationId || parsed.data.role) {
+        const [current] = await db
+          .select({
+            organizationId: schema.businessOrgMember.organizationId,
+            role: schema.businessOrgMember.role,
+          })
+          .from(schema.businessOrgMember)
+          .where(
+            and(
+              eq(schema.businessOrgMember.id, id),
+              eq(schema.businessOrgMember.companyId, companyId)
+            )
+          )
+          .limit(1);
+        if (!current) {
+          throw new BusinessNetworkError(404, "RECORD_NOT_FOUND", "Org member not found.");
+        }
+        await ensureOrgMemberRoleForOrganization(
+          companyId,
+          parsed.data.organizationId ?? current.organizationId,
+          parsed.data.role ?? current.role
+        );
+      }
       const [updated] = await db
         .update(schema.businessOrgMember)
         .set(parsed.data)

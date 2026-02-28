@@ -7,6 +7,7 @@ import { notify } from "@/lib/notify";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { RecordAuditMeta } from "@/components/ui/record-audit-meta";
 import {
   Dialog,
   DialogContent,
@@ -42,6 +43,7 @@ import {
   listBusinessNetworkRecords,
   updateBusinessNetworkRecord,
 } from "@/modules/business-network/lib/business-network-api";
+import { listCurrencyRecords } from "@/modules/currency/lib/currency-api";
 
 export type BusinessNetworkResourceKey =
   | "organizations"
@@ -58,6 +60,35 @@ type Field = {
   options?: Array<{ label: string; value: string }>;
   defaultValue?: string | number | boolean;
   nullable?: boolean;
+};
+
+const ORG_MEMBER_ROLE_OPTIONS_BY_TYPE: Record<
+  "PLATFORM" | "OPERATOR" | "MARKET" | "SUPPLIER",
+  Array<{ label: string; value: string }>
+> = {
+  PLATFORM: [
+    { label: "Platform Admin", value: "PLATFORM_ADMIN" },
+    { label: "Platform Operations", value: "PLATFORM_OPERATIONS" },
+    { label: "Platform Finance", value: "PLATFORM_FINANCE" },
+  ],
+  OPERATOR: [
+    { label: "Operator Admin", value: "OPERATOR_ADMIN" },
+    { label: "Operator Contracts", value: "OPERATOR_CONTRACTS" },
+    { label: "Operator Reservations", value: "OPERATOR_RESERVATIONS" },
+    { label: "Operator Ticketing", value: "OPERATOR_TICKETING" },
+    { label: "Operator Finance", value: "OPERATOR_FINANCE" },
+  ],
+  MARKET: [
+    { label: "Market Admin", value: "MARKET_ADMIN" },
+    { label: "Market Sales", value: "MARKET_SALES" },
+    { label: "Market Reservations", value: "MARKET_RESERVATIONS" },
+    { label: "Market Finance", value: "MARKET_FINANCE" },
+  ],
+  SUPPLIER: [
+    { label: "Supplier Admin", value: "SUPPLIER_ADMIN" },
+    { label: "Supplier Operations", value: "SUPPLIER_OPERATIONS" },
+    { label: "Supplier Finance", value: "SUPPLIER_FINANCE" },
+  ],
 };
 
 const META: Record<BusinessNetworkResourceKey, { title: string; description: string }> = {
@@ -183,6 +214,7 @@ export function BusinessNetworkManagementViewContent({
   const [saving, setSaving] = useState(false);
   const [organizations, setOrganizations] = useState<Array<Record<string, unknown>>>([]);
   const [users, setUsers] = useState<Array<Record<string, unknown>>>([]);
+  const [currencies, setCurrencies] = useState<Array<Record<string, unknown>>>([]);
   const [dialog, setDialog] = useState<{
     open: boolean;
     mode: "create" | "edit";
@@ -230,6 +262,15 @@ export function BusinessNetworkManagementViewContent({
     [users]
   );
 
+  const currencyOptions = useMemo(
+    () =>
+      currencies.map((item) => ({
+        value: String(item.code),
+        label: `${item.code} - ${item.name}`,
+      })),
+    [currencies]
+  );
+
   const lookups = useMemo(() => {
     const items: Array<[string, string]> = [];
     organizations.forEach((item) => {
@@ -240,6 +281,31 @@ export function BusinessNetworkManagementViewContent({
     });
     return Object.fromEntries(items);
   }, [organizations, users]);
+
+  const orgMemberRoleOptions = useMemo(() => {
+    const selectedOrganization = organizations.find(
+      (item) => String(item.id) === String(form.organizationId ?? "")
+    );
+    const selectedType = String(selectedOrganization?.type ?? "").toUpperCase() as
+      | "PLATFORM"
+      | "OPERATOR"
+      | "MARKET"
+      | "SUPPLIER";
+    const scopedOptions =
+      selectedType && ORG_MEMBER_ROLE_OPTIONS_BY_TYPE[selectedType]
+        ? ORG_MEMBER_ROLE_OPTIONS_BY_TYPE[selectedType]
+        : [
+      ...ORG_MEMBER_ROLE_OPTIONS_BY_TYPE.PLATFORM,
+      ...ORG_MEMBER_ROLE_OPTIONS_BY_TYPE.OPERATOR,
+      ...ORG_MEMBER_ROLE_OPTIONS_BY_TYPE.MARKET,
+      ...ORG_MEMBER_ROLE_OPTIONS_BY_TYPE.SUPPLIER,
+    ];
+    const currentRole = String(form.role ?? "").toUpperCase();
+    if (currentRole && !scopedOptions.some((option) => option.value === currentRole)) {
+      return [...scopedOptions, { label: `${currentRole} (Legacy)`, value: currentRole }];
+    }
+    return scopedOptions;
+  }, [form.organizationId, form.role, organizations]);
 
   const fields = useMemo<Field[]>(() => {
     switch (resource) {
@@ -268,7 +334,13 @@ export function BusinessNetworkManagementViewContent({
           { key: "country", label: "Country (ISO2)", type: "text", nullable: true },
           { key: "city", label: "City", type: "text", nullable: true },
           { key: "address", label: "Address", type: "text", nullable: true },
-          { key: "baseCurrency", label: "Base Currency", type: "text", defaultValue: "LKR" },
+          {
+            key: "baseCurrency",
+            label: "Base Currency",
+            type: "select",
+            defaultValue: "LKR",
+            options: currencyOptions,
+          },
           { key: "timezone", label: "Timezone", type: "text", defaultValue: "Asia/Colombo" },
           { key: "metadata", label: "Metadata JSON", type: "json", nullable: true },
           { key: "isVerified", label: "Verified", type: "boolean", defaultValue: false },
@@ -357,7 +429,13 @@ export function BusinessNetworkManagementViewContent({
             ],
           },
           { key: "licenseNo", label: "License No", type: "text", nullable: true },
-          { key: "preferredCurrency", label: "Preferred Currency", type: "text", nullable: true },
+          {
+            key: "preferredCurrency",
+            label: "Preferred Currency",
+            type: "select",
+            nullable: true,
+            options: currencyOptions,
+          },
           { key: "creditEnabled", label: "Credit Enabled", type: "boolean", defaultValue: false },
           { key: "creditLimit", label: "Credit Limit", type: "number", nullable: true },
           { key: "paymentTermDays", label: "Payment Term Days", type: "number", nullable: true },
@@ -381,7 +459,13 @@ export function BusinessNetworkManagementViewContent({
             required: true,
             options: userOptions,
           },
-          { key: "role", label: "Role", type: "text", required: true },
+          {
+            key: "role",
+            label: "Role",
+            type: "select",
+            required: true,
+            options: orgMemberRoleOptions,
+          },
           { key: "isActive", label: "Active", type: "boolean", defaultValue: true },
         ];
       case "operator-market-contracts":
@@ -441,13 +525,22 @@ export function BusinessNetworkManagementViewContent({
       default:
         return [];
     }
-  }, [marketOrganizationOptions, operatorOrganizationOptions, organizationOptions, resource, userOptions]);
+  }, [
+    currencyOptions,
+    marketOrganizationOptions,
+    orgMemberRoleOptions,
+    operatorOrganizationOptions,
+    organizationOptions,
+    resource,
+    userOptions,
+  ]);
 
   const loadLookups = useCallback(async () => {
     try {
-      const [orgs, companyUsersResponse] = await Promise.all([
+      const [orgs, companyUsersResponse, currencyList] = await Promise.all([
         listBusinessNetworkRecords("organizations", { limit: 200 }),
         fetch("/api/companies/users", { cache: "no-store" }),
+        listCurrencyRecords("currencies", { limit: 500 }),
       ]);
 
       const usersPayload = (await companyUsersResponse.json()) as {
@@ -460,9 +553,11 @@ export function BusinessNetworkManagementViewContent({
 
       setOrganizations(orgs);
       setUsers(usersPayload.users ?? []);
+      setCurrencies(currencyList);
     } catch (error) {
       setOrganizations([]);
       setUsers([]);
+      setCurrencies([]);
       notify.error(error instanceof Error ? error.message : "Failed to load lookup data.");
     }
   }, []);
@@ -551,9 +646,13 @@ export function BusinessNetworkManagementViewContent({
 
   const onDelete = async (row: Record<string, unknown>) => {
     if (!row.id) return;
+    const targetLabel =
+      String(row.code ?? "").trim() ||
+      String(row.name ?? "").trim() ||
+      String(row.id);
     const confirmed = await confirm({
       title: "Delete Record",
-      description: "Delete this record? This action cannot be undone.",
+      targetLabel,
       confirmText: "Yes",
       cancelText: "No",
       destructive: true,
@@ -738,6 +837,7 @@ export function BusinessNetworkManagementViewContent({
             ))}
           </div>
           <DialogFooter className="pt-2">
+            <RecordAuditMeta row={dialog.row} className="mr-auto" />
             <Button variant="outline" onClick={() => setDialog({ open: false, mode: "create", row: null })}>
               Cancel
             </Button>

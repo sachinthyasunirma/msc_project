@@ -1,5 +1,23 @@
 import { z } from "zod";
 
+const businessOrgMemberRoleSchema = z.enum([
+  "PLATFORM_ADMIN",
+  "PLATFORM_OPERATIONS",
+  "PLATFORM_FINANCE",
+  "OPERATOR_ADMIN",
+  "OPERATOR_CONTRACTS",
+  "OPERATOR_RESERVATIONS",
+  "OPERATOR_TICKETING",
+  "OPERATOR_FINANCE",
+  "MARKET_ADMIN",
+  "MARKET_SALES",
+  "MARKET_RESERVATIONS",
+  "MARKET_FINANCE",
+  "SUPPLIER_ADMIN",
+  "SUPPLIER_OPERATIONS",
+  "SUPPLIER_FINANCE",
+]);
+
 export const businessNetworkResourceSchema = z.enum([
   "organizations",
   "operator-profiles",
@@ -10,7 +28,7 @@ export const businessNetworkResourceSchema = z.enum([
 
 export const businessNetworkListQuerySchema = z.object({
   q: z.string().trim().max(120).optional(),
-  limit: z.coerce.number().int().min(1).max(200).default(100),
+  limit: z.coerce.number().int().min(1).max(500).default(100),
   organizationId: z.string().trim().min(1).optional(),
   operatorOrgId: z.string().trim().min(1).optional(),
   marketOrgId: z.string().trim().min(1).optional(),
@@ -87,7 +105,7 @@ export const updateBusinessMarketProfileSchema = createBusinessMarketProfileSche
 export const createBusinessOrgMemberSchema = baseSchema.extend({
   organizationId: z.string().min(1),
   userId: z.string().min(1),
-  role: z.string().trim().toUpperCase().min(2).max(40),
+  role: businessOrgMemberRoleSchema,
 });
 
 export const updateBusinessOrgMemberSchema = createBusinessOrgMemberSchema

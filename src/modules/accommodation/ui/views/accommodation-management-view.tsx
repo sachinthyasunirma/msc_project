@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { Edit3, ImageIcon, Loader2, Plus, RefreshCw, Settings2, Trash2 } from "lucide-react";
 import { useConfirm } from "@/components/app-confirm-provider";
+import { RecordAuditMeta } from "@/components/ui/record-audit-meta";
 import { notify } from "@/lib/notify";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -1340,6 +1341,7 @@ export const AccommodationManagementView = ({
             <div className="flex items-center justify-between rounded-md border p-3"><Label>Active</Label><Switch checked={hotelForm.isActive} onCheckedChange={(checked)=>setHotelForm({...hotelForm,isActive:checked})} /></div>
           </div>
           <DialogFooter>
+            <RecordAuditMeta row={hotelDialog.row} className="mr-auto" />
             <Button variant="outline" onClick={()=>setHotelDialog({open:false,mode:"create",row:null})}>Cancel</Button>
             <Button
               disabled={saving || (isReadOnly && hotelDialog.mode === "create")}
@@ -1367,6 +1369,7 @@ export const AccommodationManagementView = ({
             <div className="flex items-center justify-between rounded-md border p-3 md:col-span-2"><Label>Active</Label><Switch checked={roomTypeForm.isActive} onCheckedChange={(checked)=>setRoomTypeForm({...roomTypeForm,isActive:checked})} /></div>
           </div>
           <DialogFooter>
+            <RecordAuditMeta row={roomTypeDialog.row} className="mr-auto" />
             <Button variant="outline" onClick={()=>setRoomTypeDialog({open:false,mode:"create",row:null})}>Cancel</Button>
             <Button
               disabled={saving || (isReadOnly && roomTypeDialog.mode === "create")}
@@ -1480,6 +1483,7 @@ export const AccommodationManagementView = ({
             </div>
           </div>
           <DialogFooter>
+            <RecordAuditMeta row={roomRateHeaderDialog.row} className="mr-auto" />
             <Button
               variant="outline"
               onClick={() => setRoomRateHeaderDialog({ open: false, mode: "create", row: null })}
@@ -1722,6 +1726,7 @@ export const AccommodationManagementView = ({
             <div className="flex items-center justify-between rounded-md border p-3"><Label>Active</Label><Switch checked={roomRateForm.isActive} onCheckedChange={(checked)=>setRoomRateForm({...roomRateForm,isActive:checked})} /></div>
           </div>
           <DialogFooter>
+            <RecordAuditMeta row={roomRateDialog.row} className="mr-auto" />
             <Button variant="outline" onClick={()=>setRoomRateDialog({open:false,mode:"create",row:null})}>Cancel</Button>
             <Button
               disabled={saving || (isReadOnly && roomRateDialog.mode === "create")}
@@ -1752,6 +1757,7 @@ export const AccommodationManagementView = ({
             <div className="flex items-center justify-between rounded-md border p-3 md:col-span-2"><Label>Blocked</Label><Switch checked={availabilityForm.isBlocked} onCheckedChange={(checked)=>setAvailabilityForm({...availabilityForm,isBlocked:checked})} /></div>
           </div>
           <DialogFooter>
+            <RecordAuditMeta row={availabilityDialog.row} className="mr-auto" />
             <Button variant="outline" onClick={()=>setAvailabilityDialog({open:false,mode:"create",row:null})}>Cancel</Button>
             <Button
               disabled={saving || (isReadOnly && availabilityDialog.mode === "create")}
@@ -1774,6 +1780,7 @@ export const AccommodationManagementView = ({
             <div className="flex items-center justify-between rounded-md border p-3"><Label>Primary Image</Label><Switch checked={imageForm.isPrimary} onCheckedChange={(checked)=>setImageForm({...imageForm,isPrimary:checked})} /></div>
           </div>
           <DialogFooter>
+            <RecordAuditMeta row={imageDialog.row} className="mr-auto" />
             <Button variant="outline" onClick={()=>setImageDialog({open:false,mode:"create",row:null})}>Cancel</Button>
             <Button
               disabled={saving || (isReadOnly && imageDialog.mode === "create")}
@@ -1799,6 +1806,7 @@ export const AccommodationManagementView = ({
             <div className="space-y-2"><Label>End Date</Label><Input type="date" value={seasonForm.endDate} onChange={(e)=>setSeasonForm({...seasonForm,endDate:e.target.value})} /></div>
           </div>
           <DialogFooter>
+            <RecordAuditMeta row={seasonDialog.row} className="mr-auto" />
             <Button variant="outline" onClick={()=>setSeasonDialog({open:false,mode:"create",row:null})}>Cancel</Button>
             <Button
               disabled={saving || (isReadOnly && seasonDialog.mode === "create")}

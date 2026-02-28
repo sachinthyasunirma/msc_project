@@ -16,7 +16,7 @@ export const guideResourceSchema = z.enum([
 
 export const guideListQuerySchema = z.object({
   q: z.string().trim().max(120).optional(),
-  limit: z.coerce.number().int().min(1).max(200).default(100),
+  limit: z.coerce.number().int().min(1).max(500).default(100),
   guideId: z.string().trim().min(1).optional(),
 });
 
@@ -46,7 +46,12 @@ export const createGuideSchema = baseSchema.extend({
     .nullable(),
   bio: z.string().trim().max(2000).optional().nullable(),
   yearsExperience: z.coerce.number().int().min(0).max(80).default(0),
-  rating: z.coerce.number().min(0).max(5).optional().nullable(),
+  rating: z.coerce
+    .number()
+    .min(0, "Rating must be between 0 and 5.")
+    .max(5, "Rating must be between 0 and 5.")
+    .optional()
+    .nullable(),
   baseCurrencyId: z.string().min(1).optional().nullable(),
 });
 export const updateGuideSchema = createGuideSchema.partial().refine((value) => Object.keys(value).length > 0, {

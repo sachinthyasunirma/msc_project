@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Edit3, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { useConfirm } from "@/components/app-confirm-provider";
+import { RecordAuditMeta } from "@/components/ui/record-audit-meta";
 import { notify } from "@/lib/notify";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -340,6 +341,7 @@ export const SeasonManagementView = () => {
             </div>
           </div>
           <DialogFooter>
+            <RecordAuditMeta row={dialog.row} className="mr-auto" />
             <Button variant="outline" onClick={() => setDialog({ open: false, mode: "create", row: null })}>
               Cancel
             </Button>

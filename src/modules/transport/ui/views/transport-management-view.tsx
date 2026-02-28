@@ -7,6 +7,7 @@ import { notify } from "@/lib/notify";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { RecordAuditMeta } from "@/components/ui/record-audit-meta";
 import {
   Dialog,
   DialogContent,
@@ -460,9 +461,13 @@ export function TransportManagementView({
 
   const onDelete = async (row: Record<string, unknown>) => {
     if (!row.id) return;
+    const targetLabel =
+      String(row.code ?? "").trim() ||
+      String(row.name ?? "").trim() ||
+      String(row.id);
     const confirmed = await confirm({
       title: "Delete Record",
-      description: "Delete this record? This action cannot be undone.",
+      targetLabel,
       confirmText: "Yes",
       cancelText: "No",
       destructive: true,
@@ -651,6 +656,7 @@ export function TransportManagementView({
             ))}
           </div>
           <DialogFooter className="pt-2">
+            <RecordAuditMeta row={dialog.row} className="mr-auto" />
             <Button variant="outline" onClick={() => setDialog({ open: false, mode: "create", row: null })}>
               Cancel
             </Button>

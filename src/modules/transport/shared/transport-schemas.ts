@@ -12,7 +12,7 @@ export const transportResourceSchema = z.enum([
 
 export const transportListQuerySchema = z.object({
   q: z.string().trim().max(120).optional(),
-  limit: z.coerce.number().int().min(1).max(200).default(50),
+  limit: z.coerce.number().int().min(1).max(500).default(50),
 });
 
 export const pointGeoSchema = z.object({
@@ -184,4 +184,3 @@ export const updateTransportBaggageRateSchema = createTransportBaggageRateSchema
   .refine((value) => Object.keys(value).length > 0, {
     message: "At least one baggage rate field is required.",
   });
-

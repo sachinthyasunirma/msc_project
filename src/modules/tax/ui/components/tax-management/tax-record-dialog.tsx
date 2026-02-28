@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { RecordAuditMeta } from "@/components/ui/record-audit-meta";
 import {
   Select,
   SelectContent,
@@ -117,6 +118,7 @@ export function TaxRecordDialog({
           ))}
         </div>
         <DialogFooter className="pt-2">
+          <RecordAuditMeta row={dialog.row} className="mr-auto" />
           <Button variant="outline" onClick={() => setDialog({ open: false, mode: "create", row: null })}>
             Cancel
           </Button>

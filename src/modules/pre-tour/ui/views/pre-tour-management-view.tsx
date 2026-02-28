@@ -15,6 +15,7 @@ import { notify } from "@/lib/notify";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { RecordAuditMeta } from "@/components/ui/record-audit-meta";
 import {
   Dialog,
   DialogContent,
@@ -2125,6 +2126,7 @@ export function PreTourManagementView({
           </div>
 
           <DialogFooter>
+            <RecordAuditMeta row={dialog.row} className="mr-auto" />
             <Button variant="outline" onClick={() => setDialog((prev) => ({ ...prev, open: false }))}>
               Cancel
             </Button>

@@ -8,6 +8,7 @@ import { notify } from "@/lib/notify";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { RecordAuditMeta } from "@/components/ui/record-audit-meta";
 import {
   Dialog,
   DialogContent,
@@ -186,6 +187,19 @@ function formatCell(value: unknown, lookups: Record<string, string>) {
   return String(value);
 }
 
+function getBooleanMeta(fieldKey: string, value: boolean) {
+  switch (fieldKey) {
+    case "isActive":
+      return { text: value ? "Active" : "Inactive", active: value };
+    case "isAvailable":
+      return { text: value ? "Available" : "Unavailable", active: value };
+    case "isVerified":
+      return { text: value ? "Verified" : "Unverified", active: value };
+    default:
+      return { text: value ? "Yes" : "No", active: value };
+  }
+}
+
 export function GuidesManagementView({
   initialResource = "guides",
   managedGuideId = "",
@@ -229,6 +243,7 @@ export function GuidesManagementView({
 
   const guideScopedResources: GuideResourceKey[] = useMemo(
     () => [
+      "guide-rates",
       "guide-languages",
       "guide-coverage-areas",
       "guide-licenses",
@@ -236,7 +251,6 @@ export function GuidesManagementView({
       "guide-documents",
       "guide-weekly-availability",
       "guide-blackout-dates",
-      "guide-rates",
       "guide-assignments",
     ],
     []
@@ -257,7 +271,18 @@ export function GuidesManagementView({
           { key: "guideType", label: "Guide Type", type: "select", defaultValue: "INDIVIDUAL", options: [{label:"INDIVIDUAL",value:"INDIVIDUAL"},{label:"COMPANY",value:"COMPANY"},{label:"INTERNAL",value:"INTERNAL"}] },
           { key: "fullName", label: "Full Name", type: "text", required: true },
           { key: "displayName", label: "Display Name", type: "text", nullable: true },
-          { key: "gender", label: "Gender", type: "text", nullable: true },
+          {
+            key: "gender",
+            label: "Gender",
+            type: "select",
+            nullable: true,
+            options: [
+              { label: "Male", value: "MALE" },
+              { label: "Female", value: "FEMALE" },
+              { label: "Other", value: "OTHER" },
+              { label: "Prefer Not To Say", value: "PREFER_NOT_TO_SAY" },
+            ],
+          },
           { key: "dob", label: "DOB", type: "datetime", nullable: true },
           { key: "phone", label: "Phone", type: "text", nullable: true },
           { key: "email", label: "Email", type: "text", nullable: true },
@@ -267,7 +292,7 @@ export function GuidesManagementView({
           { key: "emergencyContact", label: "Emergency Contact JSON", type: "json", nullable: true },
           { key: "bio", label: "Bio", type: "text", nullable: true },
           { key: "yearsExperience", label: "Experience Years", type: "number", defaultValue: 0 },
-          { key: "rating", label: "Rating", type: "number", nullable: true },
+          { key: "rating", label: "Rating (0-5)", type: "number", nullable: true },
           { key: "baseCurrencyId", label: "Base Currency", type: "select", nullable: true, options: currencyOptions },
           { key: "isActive", label: "Active", type: "boolean", defaultValue: true },
         ];
@@ -534,9 +559,14 @@ export function GuidesManagementView({
 
   const onDelete = async (row: Record<string, unknown>) => {
     if (!row.id) return;
+    const targetLabel =
+      String(row.code ?? "").trim() ||
+      String(row.fullName ?? "").trim() ||
+      String(row.name ?? "").trim() ||
+      String(row.id);
     const confirmed = await confirm({
       title: "Delete Record",
-      description: "Delete this record? This action cannot be undone.",
+      targetLabel,
       confirmText: "Yes",
       cancelText: "No",
       destructive: true,
@@ -623,7 +653,15 @@ export function GuidesManagementView({
                   {COLUMNS[resource].map((column) => (
                     <TableCell key={column.key}>
                       {typeof row[column.key] === "boolean" ? (
-                        <Badge variant={row[column.key] ? "default" : "secondary"}>{row[column.key] ? "Yes" : "No"}</Badge>
+                        <Badge
+                          variant={
+                            getBooleanMeta(column.key, Boolean(row[column.key])).active
+                              ? "default"
+                              : "secondary"
+                          }
+                        >
+                          {getBooleanMeta(column.key, Boolean(row[column.key])).text}
+                        </Badge>
                       ) : (
                         formatCell(row[column.key], lookups)
                       )}
@@ -690,7 +728,9 @@ export function GuidesManagementView({
                   </Select>
                 ) : field.type === "boolean" ? (
                   <div className="flex h-9 items-center justify-between rounded-md border px-3">
-                    <span className="text-muted-foreground text-xs">{Boolean(form[field.key]) ? "Yes" : "No"}</span>
+                    <span className="text-muted-foreground text-xs">
+                      {getBooleanMeta(field.key, Boolean(form[field.key])).text}
+                    </span>
                     <Switch checked={Boolean(form[field.key])} onCheckedChange={(checked) => setForm((prev) => ({ ...prev, [field.key]: checked }))} />
                   </div>
                 ) : field.type === "json" ? (
@@ -706,6 +746,7 @@ export function GuidesManagementView({
             ))}
           </div>
           <DialogFooter className="pt-2">
+            <RecordAuditMeta row={dialog.row} className="mr-auto" />
             <Button variant="outline" onClick={() => setDialog({ open: false, mode: "create", row: null })}>Cancel</Button>
             <Button onClick={() => void onSubmit()} disabled={saving || (isReadOnly && dialog.mode === "create")}>{saving ? "Saving..." : "Save"}</Button>
           </DialogFooter>
