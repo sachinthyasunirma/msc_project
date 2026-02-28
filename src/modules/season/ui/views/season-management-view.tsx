@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { Edit3, Plus, RefreshCw, Trash2 } from "lucide-react";
-import { toast } from "sonner";
+import { useConfirm } from "@/components/app-confirm-provider";
+import { notify } from "@/lib/notify";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -37,10 +38,18 @@ type Mode = "create" | "edit";
 const PAGE_SIZE = 20;
 
 export const SeasonManagementView = () => {
+  const confirm = useConfirm();
   const { data: session } = authClient.useSession();
-  const isReadOnly = Boolean(
-    (session?.user as { readOnly?: boolean } | undefined)?.readOnly
-  );
+  const accessUser = session?.user as
+    | { readOnly?: boolean; role?: string | null; canWriteMasterData?: boolean }
+    | undefined;
+  const canWrite =
+    Boolean(accessUser) &&
+    !Boolean(accessUser?.readOnly) &&
+    (accessUser?.role === "ADMIN" ||
+      accessUser?.role === "MANAGER" ||
+      Boolean(accessUser?.canWriteMasterData));
+  const isReadOnly = !canWrite;
   const [seasons, setSeasons] = useState<SeasonOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -80,7 +89,7 @@ export const SeasonManagementView = () => {
       setHasNext(data.hasNext);
       setNextCursor(data.nextCursor);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to load seasons.");
+      notify.error(error instanceof Error ? error.message : "Failed to load seasons.");
     } finally {
       setLoading(false);
     }
@@ -102,7 +111,7 @@ export const SeasonManagementView = () => {
 
   const openDialog = (mode: Mode, row: SeasonOption | null = null) => {
     if (mode === "create" && isReadOnly) {
-      toast.error("View only mode: adding records is disabled.");
+      notify.warning("View only mode: adding records is disabled.");
       return;
     }
     setDialog({ open: true, mode, row });
@@ -117,7 +126,7 @@ export const SeasonManagementView = () => {
 
   const submit = async () => {
     if (dialog.mode === "create" && isReadOnly) {
-      toast.error("View only mode: adding records is disabled.");
+      notify.warning("View only mode: adding records is disabled.");
       return;
     }
     const parsed = createSeasonSchema.safeParse({
@@ -125,7 +134,7 @@ export const SeasonManagementView = () => {
       description: form.description || null,
     });
     if (!parsed.success) {
-      toast.error(parsed.error.issues[0]?.message || "Invalid season data.");
+      notify.error(parsed.error.issues[0]?.message || "Invalid season data.");
       return;
     }
 
@@ -133,10 +142,10 @@ export const SeasonManagementView = () => {
     try {
       if (dialog.mode === "create") {
         await createSeason(parsed.data);
-        toast.success("Season created.");
+        notify.success("Season created.");
       } else if (dialog.row) {
         await updateSeason(dialog.row.id, parsed.data);
-        toast.success("Season updated.");
+        notify.success("Season updated.");
       }
       setDialog({ open: false, mode: "create", row: null });
       if (pageIndex === 0) {
@@ -146,18 +155,25 @@ export const SeasonManagementView = () => {
         setPageIndex(0);
       }
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Request failed.");
+      notify.error(error instanceof Error ? error.message : "Request failed.");
     } finally {
       setSaving(false);
     }
   };
 
   const remove = async (season: SeasonOption) => {
-    if (!window.confirm(`Delete season "${season.name}"?`)) return;
+    const confirmed = await confirm({
+      title: "Delete Season",
+      description: `Delete season "${season.name}"? This action cannot be undone.`,
+      confirmText: "Yes",
+      cancelText: "No",
+      destructive: true,
+    });
+    if (!confirmed) return;
     setSaving(true);
     try {
       await deleteSeason(season.id);
-      toast.success("Season deleted.");
+      notify.success("Season deleted.");
       if (pageIndex === 0) {
         await load();
       } else {
@@ -165,7 +181,7 @@ export const SeasonManagementView = () => {
         setPageIndex(0);
       }
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Delete failed.");
+      notify.error(error instanceof Error ? error.message : "Delete failed.");
     } finally {
       setSaving(false);
     }

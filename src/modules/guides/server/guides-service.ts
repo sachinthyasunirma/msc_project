@@ -62,11 +62,21 @@ async function getAccess(headers: Headers) {
   if (!session?.user) {
     throw new GuideError(401, "UNAUTHORIZED", "You are not authenticated.");
   }
-  const user = session.user as { companyId?: string | null; readOnly?: boolean };
+  const user = session.user as {
+    companyId?: string | null;
+    role?: string | null;
+    readOnly?: boolean;
+    canWriteMasterData?: boolean;
+  };
   if (!user.companyId) {
     throw new GuideError(403, "COMPANY_REQUIRED", "User is not linked to a company.");
   }
-  return { companyId: user.companyId, readOnly: Boolean(user.readOnly) };
+  return {
+    companyId: user.companyId,
+    role: user.role ?? "USER",
+    readOnly: Boolean(user.readOnly),
+    canWriteMasterData: Boolean(user.canWriteMasterData),
+  };
 }
 
 async function ensureWritable(headers: Headers) {
@@ -76,6 +86,14 @@ async function ensureWritable(headers: Headers) {
       403,
       "READ_ONLY_MODE",
       "You are in read-only mode. Contact a manager for edit access."
+    );
+  }
+  const elevated = access.role === "ADMIN" || access.role === "MANAGER";
+  if (!elevated && !access.canWriteMasterData) {
+    throw new GuideError(
+      403,
+      "PERMISSION_DENIED",
+      "You do not have write access for Master Data."
     );
   }
   return access;

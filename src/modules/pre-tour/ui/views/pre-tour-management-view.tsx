@@ -11,7 +11,7 @@ import {
   Settings2,
   Trash2,
 } from "lucide-react";
-import { toast } from "sonner";
+import { notify } from "@/lib/notify";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -411,7 +411,16 @@ export function PreTourManagementView({
   managedPlanId?: string;
 }) {
   const { data: session } = authClient.useSession();
-  const isReadOnly = Boolean((session?.user as { readOnly?: boolean } | undefined)?.readOnly);
+  const accessUser = session?.user as
+    | { readOnly?: boolean; role?: string | null; canWritePreTour?: boolean }
+    | undefined;
+  const canWrite =
+    Boolean(accessUser) &&
+    !Boolean(accessUser?.readOnly) &&
+    (accessUser?.role === "ADMIN" ||
+      accessUser?.role === "MANAGER" ||
+      Boolean(accessUser?.canWritePreTour));
+  const isReadOnly = !canWrite;
 
   const isPlanManageMode = Boolean(managedPlanId);
 
@@ -890,7 +899,7 @@ export function PreTourManagementView({
       setAddons(addonRows);
       setTotals(totalRows);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to load records.");
+      notify.error(error instanceof Error ? error.message : "Failed to load records.");
     } finally {
       setLoading(false);
     }
@@ -898,7 +907,7 @@ export function PreTourManagementView({
 
   useEffect(() => {
     void loadMasters().catch((error) => {
-      toast.error(error instanceof Error ? error.message : "Failed to load lookup data.");
+      notify.error(error instanceof Error ? error.message : "Failed to load lookup data.");
     });
   }, [loadMasters]);
 
@@ -1022,17 +1031,17 @@ export function PreTourManagementView({
 
       if (dialog.mode === "create") {
         await createPreTourRecord(dialog.resource, payload);
-        toast.success("Record created.");
+        notify.success("Record created.");
       } else {
         const id = String(dialog.row?.id || "");
         await updatePreTourRecord(dialog.resource, id, payload);
-        toast.success("Record updated.");
+        notify.success("Record updated.");
       }
 
       setDialog((prev) => ({ ...prev, open: false, row: null, mode: "create" }));
       await loadData();
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to save record.");
+      notify.error(error instanceof Error ? error.message : "Failed to save record.");
     } finally {
       setSaving(false);
     }
@@ -1040,16 +1049,16 @@ export function PreTourManagementView({
 
   const onDelete = async (resource: PreTourResourceKey, row: Row) => {
     if (isReadOnly) {
-      toast.error("You are in read-only mode.");
+      notify.warning("You are in read-only mode.");
       return;
     }
 
     try {
       await deletePreTourRecord(resource, String(row.id));
-      toast.success("Record deleted.");
+      notify.success("Record deleted.");
       await loadData();
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to delete record.");
+      notify.error(error instanceof Error ? error.message : "Failed to delete record.");
     }
   };
 
@@ -1089,7 +1098,7 @@ export function PreTourManagementView({
           )
         );
       } catch (error) {
-        toast.error(error instanceof Error ? error.message : "Failed to reorder items.");
+        notify.error(error instanceof Error ? error.message : "Failed to reorder items.");
         await loadData();
       }
     },
@@ -1098,7 +1107,7 @@ export function PreTourManagementView({
 
   const shareItemToDay = useCallback(async () => {
     if (!sharingItem || !shareTargetDayId) {
-      toast.error("Select a target day.");
+      notify.error("Select a target day.");
       return;
     }
 
@@ -1144,12 +1153,12 @@ export function PreTourManagementView({
     setSharing(true);
     try {
       await createPreTourRecord("pre-tour-items", payload);
-      toast.success("Item shared to selected day.");
+      notify.success("Item shared to selected day.");
       setSharingItem(null);
       setShareTargetDayId("");
       await loadData();
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to share item.");
+      notify.error(error instanceof Error ? error.message : "Failed to share item.");
     } finally {
       setSharing(false);
     }
@@ -1270,7 +1279,7 @@ export function PreTourManagementView({
   const createVersionFromPlan = useCallback(
     async (sourcePlan: Row) => {
       if (!sourcePlan.operatorOrgId || !sourcePlan.marketOrgId) {
-        toast.error("Source pre-tour must have Operator and Market before creating a version.");
+        notify.error("Source pre-tour must have Operator and Market before creating a version.");
         return;
       }
       const sourceReferenceNo = String(sourcePlan.referenceNo || sourcePlan.planCode || "");
@@ -1315,10 +1324,10 @@ export function PreTourManagementView({
       try {
         const createdPlan = await createPreTourRecord("pre-tours", headerPayload);
         await clonePlanChildren(sourcePlan, String(createdPlan.id), codePrefix);
-        toast.success(`Version V${nextVersion} created.`);
+        notify.success(`Version V${nextVersion} created.`);
         await loadData();
       } catch (error) {
-        toast.error(error instanceof Error ? error.message : "Failed to create version.");
+        notify.error(error instanceof Error ? error.message : "Failed to create version.");
       } finally {
         setCreatingVersion(false);
       }
@@ -1357,14 +1366,14 @@ export function PreTourManagementView({
       !copyForm.operatorOrgId ||
       !copyForm.marketOrgId
     ) {
-      toast.error("Code, Plan Code, Operator and Market are required.");
+      notify.error("Code, Plan Code, Operator and Market are required.");
       return;
     }
 
     const startIso = toIsoDateTime(copyForm.startDate);
     const endIso = toIsoDateTime(copyForm.endDate);
     if (!startIso || !endIso) {
-      toast.error("Start Date and End Date are required.");
+      notify.error("Start Date and End Date are required.");
       return;
     }
 
@@ -1400,12 +1409,12 @@ export function PreTourManagementView({
     try {
       const createdPlan = await createPreTourRecord("pre-tours", headerPayload);
       await clonePlanChildren(copySourcePlan, String(createdPlan.id), copyForm.planCode.trim().toUpperCase());
-      toast.success("Pre-tour copied successfully.");
+      notify.success("Pre-tour copied successfully.");
       setCopyDialogOpen(false);
       setCopySourcePlan(null);
       await loadData();
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to copy pre-tour.");
+      notify.error(error instanceof Error ? error.message : "Failed to copy pre-tour.");
     } finally {
       setCopySaving(false);
     }
@@ -1418,7 +1427,7 @@ export function PreTourManagementView({
     const expectedDays = toDayCount(startDate, endDate);
 
     if (expectedDays <= 0) {
-      toast.error("Invalid plan date range. Update pre-tour header dates first.");
+      notify.error("Invalid plan date range. Update pre-tour header dates first.");
       return;
     }
 
@@ -1432,7 +1441,7 @@ export function PreTourManagementView({
     }
 
     if (missingDayNumbers.length === 0) {
-      toast.info("All days are already initialized from the date range.");
+      notify.info("All days are already initialized from the date range.");
       return;
     }
 
@@ -1454,10 +1463,10 @@ export function PreTourManagementView({
           isActive: true,
         });
       }
-      toast.success(`Initialized ${missingDayNumbers.length} day(s) from plan date range.`);
+      notify.success(`Initialized ${missingDayNumbers.length} day(s) from plan date range.`);
       await loadData();
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to initialize plan days.");
+      notify.error(error instanceof Error ? error.message : "Failed to initialize plan days.");
     } finally {
       setSyncingDays(false);
     }

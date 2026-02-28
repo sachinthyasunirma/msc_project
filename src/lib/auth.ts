@@ -21,6 +21,16 @@ export const auth = betterAuth({
         required: false,
         input: true,
       },
+      canWriteMasterData: {
+        type: "boolean",
+        required: false,
+        input: true,
+      },
+      canWritePreTour: {
+        type: "boolean",
+        required: false,
+        input: true,
+      },
       isActive: {
         type: "boolean",
         required: false,

@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Edit3, Plus, RefreshCw, Trash2 } from "lucide-react";
-import { toast } from "sonner";
+import { useConfirm } from "@/components/app-confirm-provider";
+import { notify } from "@/lib/notify";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -162,8 +163,18 @@ export function BusinessNetworkManagementViewContent({
 }: {
   initialResource?: BusinessNetworkResourceKey;
 }) {
+  const confirm = useConfirm();
   const { data: session } = authClient.useSession();
-  const isReadOnly = Boolean((session?.user as { readOnly?: boolean } | undefined)?.readOnly);
+  const accessUser = session?.user as
+    | { readOnly?: boolean; role?: string | null; canWriteMasterData?: boolean }
+    | undefined;
+  const canWrite =
+    Boolean(accessUser) &&
+    !Boolean(accessUser?.readOnly) &&
+    (accessUser?.role === "ADMIN" ||
+      accessUser?.role === "MANAGER" ||
+      Boolean(accessUser?.canWriteMasterData));
+  const isReadOnly = !canWrite;
 
   const [resource, setResource] = useState<BusinessNetworkResourceKey>(initialResource);
   const [query, setQuery] = useState("");
@@ -452,7 +463,7 @@ export function BusinessNetworkManagementViewContent({
     } catch (error) {
       setOrganizations([]);
       setUsers([]);
-      toast.error(error instanceof Error ? error.message : "Failed to load lookup data.");
+      notify.error(error instanceof Error ? error.message : "Failed to load lookup data.");
     }
   }, []);
 
@@ -465,7 +476,7 @@ export function BusinessNetworkManagementViewContent({
       });
       setRecords(rows);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to load records.");
+      notify.error(error instanceof Error ? error.message : "Failed to load records.");
     } finally {
       setLoading(false);
     }
@@ -481,7 +492,7 @@ export function BusinessNetworkManagementViewContent({
 
   const openDialog = (mode: "create" | "edit", row?: Record<string, unknown>) => {
     if (mode === "create" && isReadOnly) {
-      toast.error("View only mode: adding records is disabled.");
+      notify.warning("View only mode: adding records is disabled.");
       return;
     }
     const next: Record<string, unknown> = {};
@@ -523,16 +534,16 @@ export function BusinessNetworkManagementViewContent({
 
       if (dialog.mode === "create") {
         await createBusinessNetworkRecord(resource, payload);
-        toast.success("Record created.");
+        notify.success("Record created.");
       } else if (dialog.row?.id) {
         await updateBusinessNetworkRecord(resource, String(dialog.row.id), payload);
-        toast.success("Record updated.");
+        notify.success("Record updated.");
       }
 
       setDialog({ open: false, mode: "create", row: null });
       await Promise.all([load(), loadLookups()]);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to save record.");
+      notify.error(error instanceof Error ? error.message : "Failed to save record.");
     } finally {
       setSaving(false);
     }
@@ -540,14 +551,21 @@ export function BusinessNetworkManagementViewContent({
 
   const onDelete = async (row: Record<string, unknown>) => {
     if (!row.id) return;
-    if (!window.confirm("Delete this record?")) return;
+    const confirmed = await confirm({
+      title: "Delete Record",
+      description: "Delete this record? This action cannot be undone.",
+      confirmText: "Yes",
+      cancelText: "No",
+      destructive: true,
+    });
+    if (!confirmed) return;
     try {
       setSaving(true);
       await deleteBusinessNetworkRecord(resource, String(row.id));
-      toast.success("Record deleted.");
+      notify.success("Record deleted.");
       await Promise.all([load(), loadLookups()]);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to delete record.");
+      notify.error(error instanceof Error ? error.message : "Failed to delete record.");
     } finally {
       setSaving(false);
     }
@@ -657,7 +675,9 @@ export function BusinessNetworkManagementViewContent({
       <Dialog open={dialog.open} onOpenChange={(open) => setDialog((prev) => ({ ...prev, open }))}>
         <DialogContent className="flex max-h-[90vh] flex-col sm:max-w-4xl">
           <DialogHeader>
-            <DialogTitle>{dialog.mode === "create" ? "Add" : "Edit"} Record</DialogTitle>
+            <DialogTitle>
+              {dialog.mode === "create" ? "Add" : "Edit"} {META[resource].title}
+            </DialogTitle>
             <DialogDescription>Fill required fields and save.</DialogDescription>
           </DialogHeader>
           <div className="grid max-h-[62vh] grid-cols-1 gap-3 overflow-x-hidden overflow-y-auto px-1 md:grid-cols-2">

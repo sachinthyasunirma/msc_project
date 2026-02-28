@@ -57,6 +57,8 @@ export async function GET(request: Request) {
         image: user.image,
         role: user.role,
         readOnly: user.readOnly,
+        canWriteMasterData: user.canWriteMasterData,
+        canWritePreTour: user.canWritePreTour,
         isActive: user.isActive,
         createdAt: user.createdAt,
       })

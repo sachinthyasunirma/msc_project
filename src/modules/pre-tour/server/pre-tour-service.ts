@@ -59,14 +59,21 @@ async function getAccess(headers: Headers) {
     throw new PreTourError(401, "UNAUTHORIZED", "You are not authenticated.");
   }
 
-  const user = session.user as { companyId?: string | null; readOnly?: boolean };
+  const user = session.user as {
+    companyId?: string | null;
+    role?: string | null;
+    readOnly?: boolean;
+    canWritePreTour?: boolean;
+  };
   if (!user.companyId) {
     throw new PreTourError(403, "COMPANY_REQUIRED", "User is not linked to a company.");
   }
 
   return {
     companyId: user.companyId,
+    role: user.role ?? "USER",
     readOnly: Boolean(user.readOnly),
+    canWritePreTour: Boolean(user.canWritePreTour),
   };
 }
 
@@ -77,6 +84,14 @@ async function ensureWritable(headers: Headers) {
       403,
       "READ_ONLY_MODE",
       "You are in read-only mode. Contact a manager for edit access."
+    );
+  }
+  const elevated = access.role === "ADMIN" || access.role === "MANAGER";
+  if (!elevated && !access.canWritePreTour) {
+    throw new PreTourError(
+      403,
+      "PERMISSION_DENIED",
+      "You do not have write access for Pre-Tour."
     );
   }
   return access;

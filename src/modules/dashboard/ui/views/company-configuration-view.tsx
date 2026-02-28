@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { KeyRound, RefreshCw, ShieldCheck, Users } from "lucide-react";
-import { toast } from "sonner";
+import { useConfirm } from "@/components/app-confirm-provider";
+import { notify } from "@/lib/notify";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -53,6 +54,8 @@ type CompanyUsersResponse = {
     image: string | null;
     role: Role;
     readOnly: boolean;
+    canWriteMasterData: boolean;
+    canWritePreTour: boolean;
     isActive: boolean;
     createdAt: string;
   }>;
@@ -62,6 +65,8 @@ type CompanyUsersResponse = {
 type UserDraft = {
   role: Role;
   readOnly: boolean;
+  canWriteMasterData: boolean;
+  canWritePreTour: boolean;
   isActive: boolean;
 };
 
@@ -72,12 +77,15 @@ const ROLE_NOTES: Record<Role, string> = {
 };
 
 export function CompanyConfigurationView() {
+  const confirm = useConfirm();
   const [loading, setLoading] = useState(true);
   const [savingUserId, setSavingUserId] = useState<string | null>(null);
   const [savingHelp, setSavingHelp] = useState(false);
   const [query, setQuery] = useState("");
   const [payload, setPayload] = useState<CompanyUsersResponse | null>(null);
   const [helpEnabled, setHelpEnabled] = useState(true);
+  const [baseCurrencyCode, setBaseCurrencyCode] = useState("USD");
+  const [currencyOptions, setCurrencyOptions] = useState<Array<{ code: string; name: string }>>([]);
   const [drafts, setDrafts] = useState<Record<string, UserDraft>>({});
 
   const canManageUsers =
@@ -98,16 +106,23 @@ export function CompanyConfigurationView() {
       const typed = body as CompanyUsersResponse;
       setPayload(typed);
       setHelpEnabled(Boolean(typed.company.helpEnabled));
+      setBaseCurrencyCode(typed.company.baseCurrencyCode || "USD");
       setDrafts(
         Object.fromEntries(
           typed.users.map((user) => [
             user.id,
-            { role: user.role, readOnly: user.readOnly, isActive: user.isActive },
+            {
+              role: user.role,
+              readOnly: user.readOnly,
+              canWriteMasterData: user.canWriteMasterData,
+              canWritePreTour: user.canWritePreTour,
+              isActive: user.isActive,
+            },
           ])
         )
       );
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to load configuration.");
+      notify.error(error instanceof Error ? error.message : "Failed to load configuration.");
     } finally {
       setLoading(false);
     }
@@ -116,6 +131,28 @@ export function CompanyConfigurationView() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      try {
+        const response = await fetch("/api/currencies/currencies?limit=500", { cache: "no-store" });
+        if (!response.ok) return;
+        const rows = (await response.json()) as Array<{ code?: string; name?: string }>;
+        if (!active) return;
+        setCurrencyOptions(
+          rows
+            .map((row) => ({ code: String(row.code || ""), name: String(row.name || "") }))
+            .filter((row) => row.code)
+        );
+      } catch {
+        if (active) setCurrencyOptions([]);
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const filteredUsers = useMemo(() => {
     if (!payload) return [];
@@ -156,7 +193,7 @@ export function CompanyConfigurationView() {
           name: currentBody.company.name || payload.company.name,
           email: currentBody.company.email || "",
           baseCurrencyCode:
-            currentBody.company.baseCurrencyCode || payload.company.baseCurrencyCode || "USD",
+            baseCurrencyCode || currentBody.company.baseCurrencyCode || payload.company.baseCurrencyCode || "USD",
           secretCode: currentBody.company.joinSecretCode || payload.company.joinSecretCode || "",
           privilegeCode:
             currentBody.company.managerPrivilegeCode ||
@@ -171,10 +208,10 @@ export function CompanyConfigurationView() {
       if (!patchResponse.ok) {
         throw new Error(patchBody.message || "Failed to update help setting.");
       }
-      toast.success("Screen help setting saved.");
+      notify.success("Screen help setting saved.");
       await load();
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to save help setting.");
+      notify.error(error instanceof Error ? error.message : "Failed to save help setting.");
     } finally {
       setSavingHelp(false);
     }
@@ -188,14 +225,20 @@ export function CompanyConfigurationView() {
     if (
       draft.role === user.role &&
       draft.readOnly === user.readOnly &&
+      draft.canWriteMasterData === user.canWriteMasterData &&
+      draft.canWritePreTour === user.canWritePreTour &&
       draft.isActive === user.isActive
     ) {
       return;
     }
     if (user.isActive && !draft.isActive) {
-      const confirmed = window.confirm(
-        "Set this user to inactive? This will remove the user from company access."
-      );
+      const confirmed = await confirm({
+        title: "Deactivate User",
+        description: "Set this user to inactive? This will remove the user from company access.",
+        confirmText: "Yes",
+        cancelText: "No",
+        destructive: true,
+      });
       if (!confirmed) return;
     }
 
@@ -210,10 +253,10 @@ export function CompanyConfigurationView() {
       if (!response.ok) {
         throw new Error(body.message || "Failed to update user access.");
       }
-      toast.success("User access updated.");
+      notify.success("User access updated.");
       await load();
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to update user access.");
+      notify.error(error instanceof Error ? error.message : "Failed to update user access.");
     } finally {
       setSavingUserId(null);
     }
@@ -266,7 +309,22 @@ export function CompanyConfigurationView() {
             </div>
             <div className="space-y-2">
               <Label>Base Currency Code</Label>
-              <Input value={payload?.company.baseCurrencyCode || "-"} readOnly />
+              <Select
+                value={baseCurrencyCode}
+                onValueChange={setBaseCurrencyCode}
+                disabled={!canManageUsers || savingHelp}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select base currency" />
+                </SelectTrigger>
+                <SelectContent>
+                  {currencyOptions.map((option) => (
+                    <SelectItem key={option.code} value={option.code}>
+                      {option.code} - {option.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
             <div className="space-y-2">
               <Label>Screen Help</Label>
@@ -345,6 +403,8 @@ export function CompanyConfigurationView() {
                 <TableHead>Email</TableHead>
                 <TableHead>Role</TableHead>
                 <TableHead>Read Only</TableHead>
+                <TableHead>Master Data Write</TableHead>
+                <TableHead>Pre-Tour Write</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead className="text-right">Action</TableHead>
               </TableRow>
@@ -352,13 +412,13 @@ export function CompanyConfigurationView() {
             <TableBody>
               {loading ? (
                 <TableRow>
-                  <TableCell colSpan={6} className="text-center text-muted-foreground">
+                  <TableCell colSpan={8} className="text-center text-muted-foreground">
                     Loading users...
                   </TableCell>
                 </TableRow>
               ) : filteredUsers.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={6} className="text-center text-muted-foreground">
+                  <TableCell colSpan={8} className="text-center text-muted-foreground">
                     No users found.
                   </TableCell>
                 </TableRow>
@@ -367,6 +427,8 @@ export function CompanyConfigurationView() {
                   const draft = drafts[entry.id] ?? {
                     role: entry.role,
                     readOnly: entry.readOnly,
+                    canWriteMasterData: entry.canWriteMasterData,
+                    canWritePreTour: entry.canWritePreTour,
                     isActive: entry.isActive,
                   };
                   const isSelf = entry.id === payload?.currentUserId;
@@ -377,6 +439,8 @@ export function CompanyConfigurationView() {
                   const hasChanged =
                     draft.role !== entry.role ||
                     draft.readOnly !== entry.readOnly ||
+                    draft.canWriteMasterData !== entry.canWriteMasterData ||
+                    draft.canWritePreTour !== entry.canWritePreTour ||
                     draft.isActive !== entry.isActive;
 
                   return (
@@ -393,6 +457,8 @@ export function CompanyConfigurationView() {
                                 ...(prev[entry.id] ?? {
                                   role: entry.role,
                                   readOnly: entry.readOnly,
+                                  canWriteMasterData: entry.canWriteMasterData,
+                                  canWritePreTour: entry.canWritePreTour,
                                   isActive: entry.isActive,
                                 }),
                                 role: value as Role,
@@ -420,12 +486,14 @@ export function CompanyConfigurationView() {
                               setDrafts((prev) => ({
                                 ...prev,
                                 [entry.id]: {
-                                  ...(prev[entry.id] ?? {
-                                    role: entry.role,
-                                    readOnly: entry.readOnly,
-                                    isActive: entry.isActive,
-                                  }),
-                                  readOnly: checked,
+                                ...(prev[entry.id] ?? {
+                                  role: entry.role,
+                                  readOnly: entry.readOnly,
+                                  canWriteMasterData: entry.canWriteMasterData,
+                                  canWritePreTour: entry.canWritePreTour,
+                                  isActive: entry.isActive,
+                                }),
+                                readOnly: checked,
                                 },
                               }))
                             }
@@ -438,8 +506,8 @@ export function CompanyConfigurationView() {
                       <TableCell>
                         <div className="flex items-center gap-2">
                           <Switch
-                            checked={draft.isActive}
-                            disabled={disabled}
+                            checked={draft.canWriteMasterData}
+                            disabled={disabled || draft.readOnly}
                             onCheckedChange={(checked) =>
                               setDrafts((prev) => ({
                                 ...prev,
@@ -447,9 +515,63 @@ export function CompanyConfigurationView() {
                                   ...(prev[entry.id] ?? {
                                     role: entry.role,
                                     readOnly: entry.readOnly,
+                                    canWriteMasterData: entry.canWriteMasterData,
+                                    canWritePreTour: entry.canWritePreTour,
                                     isActive: entry.isActive,
                                   }),
-                                  isActive: checked,
+                                  canWriteMasterData: checked,
+                                },
+                              }))
+                            }
+                          />
+                          <span className="text-xs text-muted-foreground">
+                            {draft.canWriteMasterData ? "Allowed" : "Blocked"}
+                          </span>
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex items-center gap-2">
+                          <Switch
+                            checked={draft.canWritePreTour}
+                            disabled={disabled || draft.readOnly}
+                            onCheckedChange={(checked) =>
+                              setDrafts((prev) => ({
+                                ...prev,
+                                [entry.id]: {
+                                  ...(prev[entry.id] ?? {
+                                    role: entry.role,
+                                    readOnly: entry.readOnly,
+                                    canWriteMasterData: entry.canWriteMasterData,
+                                    canWritePreTour: entry.canWritePreTour,
+                                    isActive: entry.isActive,
+                                  }),
+                                  canWritePreTour: checked,
+                                },
+                              }))
+                            }
+                          />
+                          <span className="text-xs text-muted-foreground">
+                            {draft.canWritePreTour ? "Allowed" : "Blocked"}
+                          </span>
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex items-center gap-2">
+                          <Switch
+                            checked={draft.isActive}
+                            disabled={disabled}
+                            onCheckedChange={(checked) =>
+                              setDrafts((prev) => ({
+                                ...prev,
+                                [entry.id]: {
+                                ...(prev[entry.id] ?? {
+                                  role: entry.role,
+                                  readOnly: entry.readOnly,
+                                  canWriteMasterData: entry.canWriteMasterData,
+                                  canWritePreTour: entry.canWritePreTour,
+                                  isActive: entry.isActive,
+                                }),
+                                isActive: checked,
                                 },
                               }))
                             }

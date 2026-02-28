@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
+import { AppConfirmProvider } from "@/components/app-confirm-provider";
 import { Geist, Geist_Mono } from "next/font/google";
+import { AppToaster } from "@/components/app-toaster";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -28,7 +30,10 @@ export default function RootLayout({
         suppressHydrationWarning
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
-        {children}
+        <AppConfirmProvider>
+          {children}
+          <AppToaster />
+        </AppConfirmProvider>
       </body>
     </html>
   );

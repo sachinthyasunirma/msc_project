@@ -30,6 +30,7 @@ type TaxDialogState = {
 
 type Props = {
   dialog: TaxDialogState;
+  resourceTitle: string;
   visibleFields: TaxField[];
   form: Record<string, unknown>;
   saving: boolean;
@@ -41,6 +42,7 @@ type Props = {
 
 export function TaxRecordDialog({
   dialog,
+  resourceTitle,
   visibleFields,
   form,
   saving,
@@ -53,7 +55,9 @@ export function TaxRecordDialog({
     <Dialog open={dialog.open} onOpenChange={(open) => setDialog((prev) => ({ ...prev, open }))}>
       <DialogContent className="flex max-h-[92vh] flex-col sm:max-w-5xl">
         <DialogHeader>
-          <DialogTitle>{dialog.mode === "create" ? "Add" : "Edit"} Record</DialogTitle>
+          <DialogTitle>
+            {dialog.mode === "create" ? "Add" : "Edit"} {resourceTitle}
+          </DialogTitle>
           <DialogDescription>Fill required fields and save.</DialogDescription>
         </DialogHeader>
         <div className="grid max-h-[68vh] grid-cols-1 gap-3 overflow-x-hidden overflow-y-auto px-1 md:grid-cols-2 lg:grid-cols-3">
@@ -124,4 +128,3 @@ export function TaxRecordDialog({
     </Dialog>
   );
 }
-

@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { Edit3, ImageIcon, Loader2, Plus, RefreshCw, Settings2, Trash2 } from "lucide-react";
-import { toast } from "sonner";
+import { useConfirm } from "@/components/app-confirm-provider";
+import { notify } from "@/lib/notify";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -96,10 +97,18 @@ export const AccommodationManagementView = ({
   hotelId,
   showHotelList = true,
 }: Props) => {
+  const confirm = useConfirm();
   const { data: session } = authClient.useSession();
-  const isReadOnly = Boolean(
-    (session?.user as { readOnly?: boolean } | undefined)?.readOnly
-  );
+  const accessUser = session?.user as
+    | { readOnly?: boolean; role?: string | null; canWriteMasterData?: boolean }
+    | undefined;
+  const canWrite =
+    Boolean(accessUser) &&
+    !Boolean(accessUser?.readOnly) &&
+    (accessUser?.role === "ADMIN" ||
+      accessUser?.role === "MANAGER" ||
+      Boolean(accessUser?.canWriteMasterData));
+  const isReadOnly = !canWrite;
   const [loadingHotels, setLoadingHotels] = useState(true);
   const [saving, setSaving] = useState(false);
   const [hotelSearch, setHotelSearch] = useState("");
@@ -313,7 +322,7 @@ export const AccommodationManagementView = ({
         setSelectedHotelId(result.items[0].id);
       }
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to load hotels.");
+      notify.error(error instanceof Error ? error.message : "Failed to load hotels.");
     } finally {
       setLoadingHotels(false);
     }
@@ -355,7 +364,7 @@ export const AccommodationManagementView = ({
         setRoomTypes(rt.value);
       } else {
         setRoomTypes([]);
-        toast.error("Failed to load room types.");
+        notify.error("Failed to load room types.");
       }
 
       if (rh.status === "fulfilled") {
@@ -434,7 +443,7 @@ export const AccommodationManagementView = ({
 
   const openHotelDialog = (mode: DialogMode, row: Hotel | null = null) => {
     if (mode === "create" && isReadOnly) {
-      toast.error("View only mode: adding records is disabled.");
+      notify.warning("View only mode: adding records is disabled.");
       return;
     }
     setHotelDialog({ open: true, mode, row });
@@ -454,7 +463,7 @@ export const AccommodationManagementView = ({
 
   const openRoomTypeDialog = (mode: DialogMode, row: RoomType | null = null) => {
     if (mode === "create" && isReadOnly) {
-      toast.error("View only mode: adding records is disabled.");
+      notify.warning("View only mode: adding records is disabled.");
       return;
     }
     setRoomTypeDialog({ open: true, mode, row });
@@ -474,7 +483,7 @@ export const AccommodationManagementView = ({
 
   const openRoomRateDialog = (mode: DialogMode, row: RoomRate | null = null) => {
     if (mode === "create" && isReadOnly) {
-      toast.error("View only mode: adding records is disabled.");
+      notify.warning("View only mode: adding records is disabled.");
       return;
     }
     setRoomRateDialog({ open: true, mode, row });
@@ -494,13 +503,13 @@ export const AccommodationManagementView = ({
     row: RoomRateHeader | null = null
   ) => {
     if (mode === "create" && isReadOnly) {
-      toast.error("View only mode: adding records is disabled.");
+      notify.warning("View only mode: adding records is disabled.");
       return;
     }
     try {
       await loadSeasonsForRoomRates();
     } catch {
-      toast.error("Failed to load seasons from master data.");
+      notify.error("Failed to load seasons from master data.");
     }
     setRoomRateHeaderDialog({ open: true, mode, row });
     setRoomRateHeaderForm({
@@ -525,7 +534,7 @@ export const AccommodationManagementView = ({
 
   const openAvailabilityDialog = (mode: DialogMode, row: Availability | null = null) => {
     if (mode === "create" && isReadOnly) {
-      toast.error("View only mode: adding records is disabled.");
+      notify.warning("View only mode: adding records is disabled.");
       return;
     }
     setAvailabilityDialog({ open: true, mode, row });
@@ -542,7 +551,7 @@ export const AccommodationManagementView = ({
 
   const openImageDialog = (mode: DialogMode, row: HotelImage | null = null) => {
     if (mode === "create" && isReadOnly) {
-      toast.error("View only mode: adding records is disabled.");
+      notify.warning("View only mode: adding records is disabled.");
       return;
     }
     setImageDialog({ open: true, mode, row });
@@ -557,7 +566,7 @@ export const AccommodationManagementView = ({
 
   const openSeasonDialog = (mode: DialogMode, row: SeasonOption | null = null) => {
     if (mode === "create" && isReadOnly) {
-      toast.error("View only mode: adding records is disabled.");
+      notify.warning("View only mode: adding records is disabled.");
       return;
     }
     setSeasonDialog({ open: true, mode, row });
@@ -581,7 +590,7 @@ export const AccommodationManagementView = ({
 
   const submitHotel = async () => {
     if (hotelDialog.mode === "create" && isReadOnly) {
-      toast.error("View only mode: adding records is disabled.");
+      notify.warning("View only mode: adding records is disabled.");
       return;
     }
     const parsed = createHotelSchema.safeParse({
@@ -591,16 +600,16 @@ export const AccommodationManagementView = ({
       contactPhone: hotelForm.contactPhone || null,
     });
     if (!parsed.success) {
-      toast.error(parsed.error.issues[0]?.message || "Invalid hotel data.");
+      notify.error(parsed.error.issues[0]?.message || "Invalid hotel data.");
       return;
     }
     await withSave(async () => {
       if (hotelDialog.mode === "create") {
         await createHotel(parsed.data);
-        toast.success("Hotel created.");
+        notify.success("Hotel created.");
       } else if (hotelDialog.row) {
         await updateHotel(hotelDialog.row.id, parsed.data);
-        toast.success("Hotel updated.");
+        notify.success("Hotel updated.");
       }
       setHotelDialog({ open: false, mode: "create", row: null });
       await loadHotels();
@@ -610,7 +619,7 @@ export const AccommodationManagementView = ({
   const submitRoomType = async () => {
     if (!selectedHotelId) return;
     if (roomTypeDialog.mode === "create" && isReadOnly) {
-      toast.error("View only mode: adding records is disabled.");
+      notify.warning("View only mode: adding records is disabled.");
       return;
     }
     const parsed = createRoomTypeSchema.safeParse({
@@ -623,16 +632,16 @@ export const AccommodationManagementView = ({
         .filter(Boolean),
     });
     if (!parsed.success) {
-      toast.error(parsed.error.issues[0]?.message || "Invalid room type data.");
+      notify.error(parsed.error.issues[0]?.message || "Invalid room type data.");
       return;
     }
     await withSave(async () => {
       if (roomTypeDialog.mode === "create") {
         await createRoomType(selectedHotelId, parsed.data);
-        toast.success("Room type created.");
+        notify.success("Room type created.");
       } else if (roomTypeDialog.row) {
         await updateRoomType(selectedHotelId, roomTypeDialog.row.id, parsed.data);
-        toast.success("Room type updated.");
+        notify.success("Room type updated.");
       }
       setRoomTypeDialog({ open: false, mode: "create", row: null });
       await loadDetails();
@@ -642,21 +651,21 @@ export const AccommodationManagementView = ({
   const submitRoomRate = async () => {
     if (!selectedHotelId) return;
     if (roomRateDialog.mode === "create" && isReadOnly) {
-      toast.error("View only mode: adding records is disabled.");
+      notify.warning("View only mode: adding records is disabled.");
       return;
     }
     const parsed = createRoomRateSchema.safeParse(roomRateForm);
     if (!parsed.success) {
-      toast.error(parsed.error.issues[0]?.message || "Invalid room rate data.");
+      notify.error(parsed.error.issues[0]?.message || "Invalid room rate data.");
       return;
     }
     await withSave(async () => {
       if (roomRateDialog.mode === "create") {
         await createRoomRate(selectedHotelId, parsed.data);
-        toast.success("Room rate created.");
+        notify.success("Room rate created.");
       } else if (roomRateDialog.row) {
         await updateRoomRate(selectedHotelId, roomRateDialog.row.id, parsed.data);
-        toast.success("Room rate updated.");
+        notify.success("Room rate updated.");
       }
       setRoomRateDialog({ open: false, mode: "create", row: null });
       await loadDetails();
@@ -666,7 +675,7 @@ export const AccommodationManagementView = ({
   const submitRoomRateHeader = async () => {
     if (!selectedHotelId) return;
     if (roomRateHeaderDialog.mode === "create" && isReadOnly) {
-      toast.error("View only mode: adding records is disabled.");
+      notify.warning("View only mode: adding records is disabled.");
       return;
     }
     const parsed = createRoomRateHeaderSchema.safeParse({
@@ -674,17 +683,17 @@ export const AccommodationManagementView = ({
       seasonId: roomRateHeaderForm.seasonId || null,
     });
     if (!parsed.success) {
-      toast.error(parsed.error.issues[0]?.message || "Invalid room rate header data.");
+      notify.error(parsed.error.issues[0]?.message || "Invalid room rate header data.");
       return;
     }
     await withSave(async () => {
       if (roomRateHeaderDialog.mode === "create") {
         const created = await createRoomRateHeader(selectedHotelId, parsed.data);
         setSelectedRoomRateHeaderId(created.id);
-        toast.success("Room rate header created.");
+        notify.success("Room rate header created.");
       } else if (roomRateHeaderDialog.row) {
         await updateRoomRateHeader(selectedHotelId, roomRateHeaderDialog.row.id, parsed.data);
-        toast.success("Room rate header updated.");
+        notify.success("Room rate header updated.");
       }
       setRoomRateHeaderDialog({ open: false, mode: "create", row: null });
       await loadDetails();
@@ -694,7 +703,7 @@ export const AccommodationManagementView = ({
   const submitAvailability = async () => {
     if (!selectedHotelId) return;
     if (availabilityDialog.mode === "create" && isReadOnly) {
-      toast.error("View only mode: adding records is disabled.");
+      notify.warning("View only mode: adding records is disabled.");
       return;
     }
     const parsed = createAvailabilitySchema.safeParse({
@@ -702,16 +711,16 @@ export const AccommodationManagementView = ({
       blockReason: availabilityForm.blockReason || null,
     });
     if (!parsed.success) {
-      toast.error(parsed.error.issues[0]?.message || "Invalid availability data.");
+      notify.error(parsed.error.issues[0]?.message || "Invalid availability data.");
       return;
     }
     await withSave(async () => {
       if (availabilityDialog.mode === "create") {
         await createAvailability(selectedHotelId, parsed.data);
-        toast.success("Availability created.");
+        notify.success("Availability created.");
       } else if (availabilityDialog.row) {
         await updateAvailability(selectedHotelId, availabilityDialog.row.id, parsed.data);
-        toast.success("Availability updated.");
+        notify.success("Availability updated.");
       }
       setAvailabilityDialog({ open: false, mode: "create", row: null });
       await loadDetails();
@@ -721,7 +730,7 @@ export const AccommodationManagementView = ({
   const submitImage = async () => {
     if (!selectedHotelId) return;
     if (imageDialog.mode === "create" && isReadOnly) {
-      toast.error("View only mode: adding records is disabled.");
+      notify.warning("View only mode: adding records is disabled.");
       return;
     }
     const parsed = createHotelImageSchema.safeParse({
@@ -729,16 +738,16 @@ export const AccommodationManagementView = ({
       caption: imageForm.caption || null,
     });
     if (!parsed.success) {
-      toast.error(parsed.error.issues[0]?.message || "Invalid image data.");
+      notify.error(parsed.error.issues[0]?.message || "Invalid image data.");
       return;
     }
     await withSave(async () => {
       if (imageDialog.mode === "create") {
         await createHotelImage(selectedHotelId, parsed.data);
-        toast.success("Image created.");
+        notify.success("Image created.");
       } else if (imageDialog.row) {
         await updateHotelImage(selectedHotelId, imageDialog.row.id, parsed.data);
-        toast.success("Image updated.");
+        notify.success("Image updated.");
       }
       setImageDialog({ open: false, mode: "create", row: null });
       await loadDetails();
@@ -747,7 +756,7 @@ export const AccommodationManagementView = ({
 
   const submitSeason = async () => {
     if (seasonDialog.mode === "create" && isReadOnly) {
-      toast.error("View only mode: adding records is disabled.");
+      notify.warning("View only mode: adding records is disabled.");
       return;
     }
     const parsed = createSeasonSchema.safeParse({
@@ -755,17 +764,17 @@ export const AccommodationManagementView = ({
       description: seasonForm.description || null,
     });
     if (!parsed.success) {
-      toast.error(parsed.error.issues[0]?.message || "Invalid season data.");
+      notify.error(parsed.error.issues[0]?.message || "Invalid season data.");
       return;
     }
 
     await withSave(async () => {
       if (seasonDialog.mode === "create") {
         await createSeason(parsed.data);
-        toast.success("Season created.");
+        notify.success("Season created.");
       } else if (seasonDialog.row) {
         await updateSeason(seasonDialog.row.id, parsed.data);
-        toast.success("Season updated.");
+        notify.success("Season updated.");
       }
       setSeasonDialog({ open: false, mode: "create", row: null });
       const refreshed = await listSeasons({ limit: 100 });
@@ -774,7 +783,14 @@ export const AccommodationManagementView = ({
   };
 
   const onDelete = async (message: string, callback: () => Promise<void>) => {
-    if (!window.confirm(message)) return;
+    const confirmed = await confirm({
+      title: "Delete Record",
+      description: `${message} This action cannot be undone.`,
+      confirmText: "Yes",
+      cancelText: "No",
+      destructive: true,
+    });
+    if (!confirmed) return;
     await withSave(async () => {
       await callback();
       await loadDetails();
@@ -924,7 +940,7 @@ export const AccommodationManagementView = ({
                             event.stopPropagation();
                             void onDelete("Delete this hotel?", async () => {
                               await deleteHotel(hotel.id);
-                              toast.success("Hotel deleted.");
+                              notify.success("Hotel deleted.");
                             });
                           }}
                         >
@@ -1044,7 +1060,7 @@ export const AccommodationManagementView = ({
                                 onClick={() =>
                                   void onDelete("Delete room type?", async () => {
                                     await deleteRoomType(selectedHotel.id, item.id);
-                                    toast.success("Room type deleted.");
+                                    notify.success("Room type deleted.");
                                   })
                                 }
                               >
@@ -1139,7 +1155,7 @@ export const AccommodationManagementView = ({
                                         setSelectedRoomRateHeaderId(null);
                                         setRoomRateLinesDialog({ open: false, headerId: null });
                                       }
-                                      toast.success("Room rate header deleted.");
+                                      notify.success("Room rate header deleted.");
                                     })
                                   }
                                 >
@@ -1213,7 +1229,7 @@ export const AccommodationManagementView = ({
                                 onClick={() =>
                                   void onDelete("Delete availability record?", async () => {
                                     await deleteAvailability(selectedHotel.id, item.id);
-                                    toast.success("Availability deleted.");
+                                    notify.success("Availability deleted.");
                                   })
                                 }
                               >
@@ -1285,7 +1301,7 @@ export const AccommodationManagementView = ({
                                 onClick={() =>
                                   void onDelete("Delete image?", async () => {
                                     await deleteHotelImage(selectedHotel.id, item.id);
-                                    toast.success("Image deleted.");
+                                    notify.success("Image deleted.");
                                   })
                                 }
                               >
@@ -1618,7 +1634,7 @@ export const AccommodationManagementView = ({
                             void onDelete("Delete room rate line?", async () => {
                               if (!selectedHotelId) return;
                               await deleteRoomRate(selectedHotelId, item.id);
-                              toast.success("Room rate line deleted.");
+                              notify.success("Room rate line deleted.");
                             })
                           }
                         >
@@ -1827,7 +1843,7 @@ export const AccommodationManagementView = ({
                                 "Delete this season? Linked room rates may be deleted due cascade.",
                                 async () => {
                                   await deleteSeason(season.id);
-                                  toast.success("Season deleted.");
+                                  notify.success("Season deleted.");
                                   const refreshed = await listSeasons({ limit: 100 });
                                   setSeasons(refreshed.items);
                                 }

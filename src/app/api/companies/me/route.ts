@@ -213,6 +213,8 @@ export async function PATCH(request: Request) {
           companyId: existingCompany.id,
           role: canBeManager ? "MANAGER" : "USER",
           readOnly: canBeManager ? false : true,
+          canWriteMasterData: canBeManager ? true : false,
+          canWritePreTour: canBeManager ? true : false,
           updatedAt: new Date(),
         })
         .where(eq(user.id, session.user.id));
@@ -247,6 +249,8 @@ export async function PATCH(request: Request) {
         companyId: created.id,
         role: "ADMIN",
         readOnly: false,
+        canWriteMasterData: true,
+        canWritePreTour: true,
         updatedAt: new Date(),
       })
       .where(eq(user.id, session.user.id));

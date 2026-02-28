@@ -8,6 +8,8 @@ import { auth } from "@/lib/auth";
 const updateUserAccessSchema = z.object({
   role: z.enum(["ADMIN", "MANAGER", "USER"]).optional(),
   readOnly: z.boolean().optional(),
+  canWriteMasterData: z.boolean().optional(),
+  canWritePreTour: z.boolean().optional(),
   isActive: z.boolean().optional(),
 });
 
@@ -114,6 +116,8 @@ export async function PATCH(
     const updatePayload: {
       role?: "ADMIN" | "MANAGER" | "USER";
       readOnly?: boolean;
+      canWriteMasterData?: boolean;
+      canWritePreTour?: boolean;
       isActive?: boolean;
       companyId?: string | null;
       updatedAt: Date;
@@ -122,11 +126,20 @@ export async function PATCH(
       updatedAt: new Date(),
     };
 
+    const nextRole = parsed.data.role ?? targetUser.role;
+    if (nextRole === "ADMIN" || nextRole === "MANAGER") {
+      updatePayload.readOnly = false;
+      updatePayload.canWriteMasterData = true;
+      updatePayload.canWritePreTour = true;
+    }
+
     if (parsed.data.isActive === false) {
       updatePayload.isActive = false;
       updatePayload.companyId = null;
       updatePayload.role = "USER";
       updatePayload.readOnly = true;
+      updatePayload.canWriteMasterData = false;
+      updatePayload.canWritePreTour = false;
     }
 
     const [updated] = await db
@@ -139,6 +152,8 @@ export async function PATCH(
         id: user.id,
         role: user.role,
         readOnly: user.readOnly,
+        canWriteMasterData: user.canWriteMasterData,
+        canWritePreTour: user.canWritePreTour,
         isActive: user.isActive,
         companyId: user.companyId,
       });

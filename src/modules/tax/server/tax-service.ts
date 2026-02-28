@@ -1,4 +1,4 @@
-import { and, desc, eq, ilike, or } from "drizzle-orm";
+import { and, desc, eq, ilike, ne, or } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
 import * as schema from "@/db/schema";
@@ -58,11 +58,21 @@ async function getAccess(headers: Headers) {
   if (!session?.user) {
     throw new TaxError(401, "UNAUTHORIZED", "You are not authenticated.");
   }
-  const user = session.user as { companyId?: string | null; readOnly?: boolean };
+  const user = session.user as {
+    companyId?: string | null;
+    role?: string | null;
+    readOnly?: boolean;
+    canWriteMasterData?: boolean;
+  };
   if (!user.companyId) {
     throw new TaxError(403, "COMPANY_REQUIRED", "User is not linked to a company.");
   }
-  return { companyId: user.companyId, readOnly: Boolean(user.readOnly) };
+  return {
+    companyId: user.companyId,
+    role: user.role ?? "USER",
+    readOnly: Boolean(user.readOnly),
+    canWriteMasterData: Boolean(user.canWriteMasterData),
+  };
 }
 
 async function ensureWritable(headers: Headers) {
@@ -73,6 +83,10 @@ async function ensureWritable(headers: Headers) {
       "READ_ONLY_MODE",
       "You are in read-only mode. Contact a manager for edit access."
     );
+  }
+  const elevated = access.role === "ADMIN" || access.role === "MANAGER";
+  if (!elevated && !access.canWriteMasterData) {
+    throw new TaxError(403, "PERMISSION_DENIED", "You do not have write access for Master Data.");
   }
   return access;
 }
@@ -147,6 +161,56 @@ async function ensureRule(companyId: string, id: string) {
     .where(and(eq(schema.taxRule.id, id), eq(schema.taxRule.companyId, companyId)))
     .limit(1);
   if (!record) throw new TaxError(400, "RULE_NOT_FOUND", "Tax rule not found in this company.");
+}
+
+async function ensureTaxRuleTaxCodeUnique(companyId: string, code: string, excludeId?: string) {
+  const [existing] = await db
+    .select({ id: schema.taxRuleTax.id })
+    .from(schema.taxRuleTax)
+    .where(
+      and(
+        eq(schema.taxRuleTax.companyId, companyId),
+        eq(schema.taxRuleTax.code, code),
+        excludeId ? ne(schema.taxRuleTax.id, excludeId) : undefined
+      )
+    )
+    .limit(1);
+
+  if (existing) {
+    throw new TaxError(
+      409,
+      "DUPLICATE_RECORD",
+      "Tax rule tax code already exists in this company."
+    );
+  }
+}
+
+async function ensureTaxRuleTaxPairUnique(
+  companyId: string,
+  ruleId: string,
+  taxId: string,
+  excludeId?: string
+) {
+  const [existing] = await db
+    .select({ id: schema.taxRuleTax.id })
+    .from(schema.taxRuleTax)
+    .where(
+      and(
+        eq(schema.taxRuleTax.companyId, companyId),
+        eq(schema.taxRuleTax.ruleId, ruleId),
+        eq(schema.taxRuleTax.taxId, taxId),
+        excludeId ? ne(schema.taxRuleTax.id, excludeId) : undefined
+      )
+    )
+    .limit(1);
+
+  if (existing) {
+    throw new TaxError(
+      409,
+      "DUPLICATE_RECORD",
+      "This tax is already linked to the selected tax rule."
+    );
+  }
 }
 
 async function ensureSnapshot(companyId: string, id: string) {
@@ -484,6 +548,8 @@ export async function createTaxRecord(
       }
       await ensureRule(companyId, parsed.data.ruleId);
       await ensureTax(companyId, parsed.data.taxId);
+      await ensureTaxRuleTaxCodeUnique(companyId, parsed.data.code);
+      await ensureTaxRuleTaxPairUnique(companyId, parsed.data.ruleId, parsed.data.taxId);
 
       const [created] = await db
         .insert(schema.taxRuleTax)
@@ -690,8 +756,26 @@ export async function updateTaxRecord(
       if (!parsed.success) {
         throw new TaxError(400, "VALIDATION_ERROR", normalizeZodError(parsed.error));
       }
+      const [current] = await db
+        .select({
+          id: schema.taxRuleTax.id,
+          ruleId: schema.taxRuleTax.ruleId,
+          taxId: schema.taxRuleTax.taxId,
+          code: schema.taxRuleTax.code,
+        })
+        .from(schema.taxRuleTax)
+        .where(and(eq(schema.taxRuleTax.id, id), eq(schema.taxRuleTax.companyId, companyId)))
+        .limit(1);
+      if (!current) throw new TaxError(404, "RECORD_NOT_FOUND", "Tax rule tax not found.");
+
       if (parsed.data.ruleId) await ensureRule(companyId, parsed.data.ruleId);
       if (parsed.data.taxId) await ensureTax(companyId, parsed.data.taxId);
+      if (parsed.data.code !== undefined) {
+        await ensureTaxRuleTaxCodeUnique(companyId, parsed.data.code, id);
+      }
+      const nextRuleId = parsed.data.ruleId ?? current.ruleId;
+      const nextTaxId = parsed.data.taxId ?? current.taxId;
+      await ensureTaxRuleTaxPairUnique(companyId, nextRuleId, nextTaxId, id);
       const [updated] = await db
         .update(schema.taxRuleTax)
         .set(parsed.data)
@@ -909,6 +993,28 @@ export async function deleteTaxRecord(resourceInput: string, id: string, headers
 export function toTaxErrorResponse(error: unknown) {
   if (error instanceof TaxError) {
     return { status: error.status, body: { code: error.code, message: error.message } };
+  }
+
+  if (error && typeof error === "object") {
+    const dbError = error as { code?: string; constraint?: string; detail?: string };
+    if (dbError.code === "23505") {
+      return {
+        status: 409,
+        body: {
+          code: "DUPLICATE_RECORD",
+          message: "Record already exists for given unique fields.",
+        },
+      };
+    }
+    if (dbError.code === "23503") {
+      return {
+        status: 400,
+        body: {
+          code: "FOREIGN_KEY_ERROR",
+          message: "Invalid relation provided.",
+        },
+      };
+    }
   }
 
   if (error instanceof Error) {

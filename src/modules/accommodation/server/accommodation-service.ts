@@ -90,12 +90,25 @@ async function ensureWritable(requestHeaders: Headers) {
   if (!session?.user) {
     throw new AccommodationError(401, "UNAUTHORIZED", "You are not authenticated.");
   }
-  const readOnly = Boolean((session.user as { readOnly?: boolean }).readOnly);
+  const accessUser = session.user as {
+    readOnly?: boolean;
+    role?: string | null;
+    canWriteMasterData?: boolean;
+  };
+  const readOnly = Boolean(accessUser.readOnly);
   if (readOnly) {
     throw new AccommodationError(
       403,
       "READ_ONLY_MODE",
       "You are in read-only mode. Contact a manager for edit access."
+    );
+  }
+  const elevated = accessUser.role === "ADMIN" || accessUser.role === "MANAGER";
+  if (!elevated && !Boolean(accessUser.canWriteMasterData)) {
+    throw new AccommodationError(
+      403,
+      "PERMISSION_DENIED",
+      "You do not have write access for Master Data."
     );
   }
 }

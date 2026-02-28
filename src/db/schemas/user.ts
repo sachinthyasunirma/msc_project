@@ -20,6 +20,8 @@ export const user = pgTable(
     companyId: text("company_id").references(() => company.id, { onDelete: "cascade" }),
     role: userRole("role").notNull().default("USER"),
     readOnly: boolean("read_only").notNull().default(true),
+    canWriteMasterData: boolean("can_write_master_data").notNull().default(false),
+    canWritePreTour: boolean("can_write_pre_tour").notNull().default(false),
     isActive: boolean("is_active").notNull().default(true),
     emailVerified: boolean("email_verified")
       .$defaultFn(() => false)

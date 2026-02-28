@@ -9,7 +9,7 @@ export const currencyResourceSchema = z.enum([
 
 export const currencyListQuerySchema = z.object({
   q: z.string().trim().max(120).optional(),
-  limit: z.coerce.number().int().min(1).max(200).default(100),
+  limit: z.coerce.number().int().min(1).max(500).default(100),
   currencyId: z.string().trim().min(1).optional(),
 });
 

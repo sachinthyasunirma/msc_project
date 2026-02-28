@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { toast } from "sonner";
+import { useConfirm } from "@/components/app-confirm-provider";
+import { notify } from "@/lib/notify";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { authClient } from "@/lib/auth-client";
@@ -12,6 +13,7 @@ import {
   updateTaxRecord,
 } from "@/modules/tax/lib/tax-api";
 import {
+  TAX_META,
   type TaxField,
   type TaxResourceKey,
 } from "@/modules/tax/ui/components/tax-management/tax-management-config";
@@ -31,8 +33,22 @@ export function TaxManagementView({
   initialResource?: TaxResourceKey;
   managedTaxId?: string;
 }) {
+  const confirm = useConfirm();
   const { data: session } = authClient.useSession();
-  const isReadOnly = Boolean((session?.user as { readOnly?: boolean } | undefined)?.readOnly);
+  const accessUser = session?.user as
+    | {
+        readOnly?: boolean;
+        role?: string | null;
+        canWriteMasterData?: boolean;
+      }
+    | undefined;
+  const canWrite =
+    Boolean(accessUser) &&
+    !Boolean(accessUser?.readOnly) &&
+    (accessUser?.role === "ADMIN" ||
+      accessUser?.role === "MANAGER" ||
+      Boolean(accessUser?.canWriteMasterData));
+  const isReadOnly = !canWrite;
 
   const [resource, setResource] = useState<TaxResourceKey>(initialResource);
   const [query, setQuery] = useState("");
@@ -502,7 +518,7 @@ export function TaxManagementView({
       });
       setRecords(rows);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to load records.");
+      notify.error(error instanceof Error ? error.message : "Failed to load records.");
     } finally {
       setLoading(false);
     }
@@ -524,7 +540,7 @@ export function TaxManagementView({
 
   const openDialog = (mode: "create" | "edit", row?: Record<string, unknown>) => {
     if (mode === "create" && isReadOnly) {
-      toast.error("View only mode: adding records is disabled.");
+      notify.warning("View only mode: adding records is disabled.");
       return;
     }
     const next: Record<string, unknown> = {};
@@ -578,15 +594,15 @@ export function TaxManagementView({
 
       if (dialog.mode === "create") {
         await createTaxRecord(resource, payload);
-        toast.success("Record created.");
+        notify.success("Record created.");
       } else if (dialog.row?.id) {
         await updateTaxRecord(resource, String(dialog.row.id), payload);
-        toast.success("Record updated.");
+        notify.success("Record updated.");
       }
       setDialog({ open: false, mode: "create", row: null });
       await Promise.all([load(), loadLookups(), loadCurrencies()]);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to save record.");
+      notify.error(error instanceof Error ? error.message : "Failed to save record.");
     } finally {
       setSaving(false);
     }
@@ -594,18 +610,25 @@ export function TaxManagementView({
 
   const onDelete = async (row: Record<string, unknown>) => {
     if (isReadOnly) {
-      toast.error("View only mode: deleting records is disabled.");
+      notify.warning("View only mode: deleting records is disabled.");
       return;
     }
     if (!row.id) return;
-    if (!window.confirm("Delete this record?")) return;
+    const confirmed = await confirm({
+      title: "Delete Record",
+      description: "Delete this record? This action cannot be undone.",
+      confirmText: "Yes",
+      cancelText: "No",
+      destructive: true,
+    });
+    if (!confirmed) return;
     try {
       setSaving(true);
       await deleteTaxRecord(resource, String(row.id));
-      toast.success("Record deleted.");
+      notify.success("Record deleted.");
       await Promise.all([load(), loadLookups(), loadCurrencies()]);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to delete record.");
+      notify.error(error instanceof Error ? error.message : "Failed to delete record.");
     } finally {
       setSaving(false);
     }
@@ -643,6 +666,7 @@ export function TaxManagementView({
       </CardContent>
       <TaxRecordDialog
         dialog={dialog}
+        resourceTitle={TAX_META[resource].title}
         visibleFields={visibleFields}
         form={form}
         saving={saving}
