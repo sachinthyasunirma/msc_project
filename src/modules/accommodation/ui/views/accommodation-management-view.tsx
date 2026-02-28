@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { Edit3, ImageIcon, Loader2, Plus, RefreshCw, Trash2 } from "lucide-react";
+import { Edit3, ImageIcon, Loader2, Plus, RefreshCw, Settings2, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -808,9 +808,10 @@ export const AccommodationManagementView = ({
               onClick={() => openHotelDialog("create")}
               disabled={isReadOnly}
               title={isReadOnly ? "View only mode" : undefined}
+              className="master-add-btn"
             >
               <Plus className="mr-2 size-4" />
-              Add Hotel
+              Add Record
             </Button>
           </div>
         </CardHeader>
@@ -895,8 +896,14 @@ export const AccommodationManagementView = ({
                     </TableCell>
                     <TableCell className="text-right">
                       <div className="flex justify-end gap-2">
-                        <Button size="sm" asChild>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="master-manage-btn"
+                          asChild
+                        >
                           <Link href={`/master-data/accommodations/${hotel.id}`}>
+                            <Settings2 className="mr-1 size-4" />
                             Manage
                           </Link>
                         </Button>
@@ -970,12 +977,14 @@ export const AccommodationManagementView = ({
             <p className="text-sm text-muted-foreground">Select a hotel to manage related data.</p>
           ) : (
             <Tabs defaultValue="room-types">
-              <TabsList>
-                <TabsTrigger value="room-types">Room Types</TabsTrigger>
-                <TabsTrigger value="room-rates">Room Rates</TabsTrigger>
-                <TabsTrigger value="availability">Availability</TabsTrigger>
-                <TabsTrigger value="images">Images</TabsTrigger>
-              </TabsList>
+              <div className="master-tabs-scroll">
+                <TabsList className="master-tabs-list">
+                  <TabsTrigger value="room-types" className="master-tab-trigger">Room Types</TabsTrigger>
+                  <TabsTrigger value="room-rates" className="master-tab-trigger">Room Rates</TabsTrigger>
+                  <TabsTrigger value="availability" className="master-tab-trigger">Availability</TabsTrigger>
+                  <TabsTrigger value="images" className="master-tab-trigger">Images</TabsTrigger>
+                </TabsList>
+              </div>
 
               <TabsContent value="room-types" className="mt-4 space-y-3">
                 <div className="flex justify-end">

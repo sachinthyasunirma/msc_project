@@ -3,6 +3,7 @@
 import * as React from "react";
 import Link from "next/link";
 import {
+  CalendarRange,
   Command,
   LifeBuoy,
   Send,
@@ -57,6 +58,33 @@ const data = {
         {
           title: "Transport",
           url: "/master-data/transports",
+        },
+        {
+          title: "Guides",
+          url: "/master-data/guides",
+        },
+        {
+          title: "Currency",
+          url: "/master-data/currencies",
+        },
+        {
+          title: "Taxes",
+          url: "/master-data/taxes",
+        },
+        {
+          title: "Operator & Market",
+          url: "/master-data/business-network",
+        },
+      ],
+    },
+    {
+      title: "Tours",
+      url: "/master-data/pre-tours",
+      icon: CalendarRange,
+      items: [
+        {
+          title: "Pre-Tours",
+          url: "/master-data/pre-tours",
         },
       ],
     },

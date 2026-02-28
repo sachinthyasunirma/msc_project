@@ -478,21 +478,24 @@ export function TransportManagementView({
             onClick={() => openDialog("create")}
             disabled={isReadOnly}
             title={isReadOnly ? "View only mode" : undefined}
+            className="master-add-btn"
           >
             <Plus className="mr-2 size-4" />
-            Add
+            Add Record
           </Button>
         </div>
       </CardHeader>
       <CardContent className="space-y-4">
         <Tabs value={resource} onValueChange={(value) => setResource(value as TransportResourceKey)}>
-          <TabsList className="flex h-auto w-full flex-wrap justify-start gap-2 bg-transparent p-0">
-            {(Object.keys(RESOURCE_META) as TransportResourceKey[]).map((key) => (
-              <TabsTrigger key={key} value={key} className="border">
-                {RESOURCE_META[key].title.replace("Transport ", "")}
-              </TabsTrigger>
-            ))}
-          </TabsList>
+          <div className="master-tabs-scroll">
+            <TabsList className="master-tabs-list">
+              {(Object.keys(RESOURCE_META) as TransportResourceKey[]).map((key) => (
+                <TabsTrigger key={key} value={key} className="master-tab-trigger">
+                  {RESOURCE_META[key].title.replace("Transport ", "")}
+                </TabsTrigger>
+              ))}
+            </TabsList>
+          </div>
         </Tabs>
         <Input
           placeholder="Search..."

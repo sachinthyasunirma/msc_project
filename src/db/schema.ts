@@ -4,3 +4,9 @@ export * from "@/db/schemas/hotel";
 export * from "@/db/schemas/season";
 export * from "@/db/schemas/transport";
 export * from "@/db/schemas/activity";
+export * from "@/db/schemas/business-network";
+export * from "@/db/schemas/currency";
+export * from "@/db/schemas/guides";
+export * from "@/db/schemas/tax";
+
+export * from "@/db/schemas/pre-tour";

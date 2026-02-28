@@ -618,22 +618,25 @@ export function ActivityManagementView({ activityId, showActivityList = true }: 
               onClick={() => openDialog("create")}
               disabled={isReadOnly}
               title={isReadOnly ? "View only mode" : undefined}
+              className="master-add-btn"
             >
               <Plus className="mr-2 size-4" />
-              Add
+              Add Record
             </Button>
           </div>
         </div>
 
         {resourceTabs.length > 1 ? (
           <Tabs value={resource} onValueChange={(value) => setResource(value as ResourceKey)}>
-            <TabsList className="flex h-auto w-full flex-wrap justify-start gap-2 bg-transparent p-0">
-              {resourceTabs.map((key) => (
-                <TabsTrigger key={key} value={key} className="border">
-                  {META[key].title.replace("Activity ", "")}
-                </TabsTrigger>
-              ))}
-            </TabsList>
+            <div className="master-tabs-scroll">
+              <TabsList className="master-tabs-list">
+                {resourceTabs.map((key) => (
+                  <TabsTrigger key={key} value={key} className="master-tab-trigger">
+                    {META[key].title.replace("Activity ", "")}
+                  </TabsTrigger>
+                ))}
+              </TabsList>
+            </div>
           </Tabs>
         ) : null}
       </CardHeader>
@@ -702,7 +705,12 @@ export function ActivityManagementView({ activityId, showActivityList = true }: 
                   <TableCell className="text-right">
                     <div className="flex justify-end gap-2">
                       {resource === "activities" && showActivityList ? (
-                        <Button size="sm" variant="secondary" asChild>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="master-manage-btn"
+                          asChild
+                        >
                           <Link href={`/master-data/activities/${row.id}`}>
                             <Settings2 className="mr-1 size-4" />
                             Manage

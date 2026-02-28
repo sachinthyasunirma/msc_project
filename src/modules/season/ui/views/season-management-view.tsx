@@ -195,9 +195,10 @@ export const SeasonManagementView = () => {
             onClick={() => openDialog("create")}
             disabled={isReadOnly}
             title={isReadOnly ? "View only mode" : undefined}
+            className="master-add-btn"
           >
             <Plus className="mr-2 size-4" />
-            Add Season
+            Add Record
           </Button>
         </div>
       </CardHeader>

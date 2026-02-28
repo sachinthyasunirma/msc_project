@@ -120,3 +120,58 @@
     @apply bg-background text-foreground antialiased;
   }
 }
+
+@layer components {
+  .master-tabs-scroll {
+    @apply overflow-x-auto pb-1;
+  }
+
+  .master-tabs-list {
+    @apply inline-flex h-auto w-auto flex-nowrap justify-start gap-2 bg-transparent p-0;
+  }
+
+  .master-tab-trigger {
+    @apply border bg-card px-3 py-1.5 text-sm;
+  }
+
+  .master-add-btn {
+    @apply h-9 px-3;
+  }
+
+  .master-manage-btn {
+    @apply h-8 border-primary/30 bg-primary/5 text-primary hover:bg-primary/10;
+  }
+
+  .pretour-item-accent {
+    @apply border-l-4 border-border bg-card;
+  }
+
+  .pretour-item-accent--transport {
+    border-left-color: var(--chart-2);
+    background-color: color-mix(in oklab, var(--chart-2) 10%, var(--card));
+  }
+
+  .pretour-item-accent--activity {
+    border-left-color: var(--chart-1);
+    background-color: color-mix(in oklab, var(--chart-1) 10%, var(--card));
+  }
+
+  .pretour-item-accent--accommodation {
+    border-left-color: var(--chart-4);
+    background-color: color-mix(in oklab, var(--chart-4) 10%, var(--card));
+  }
+
+  .pretour-item-accent--guide {
+    border-left-color: var(--chart-3);
+    background-color: color-mix(in oklab, var(--chart-3) 10%, var(--card));
+  }
+
+  .pretour-item-accent--supplement {
+    border-left-color: var(--chart-5);
+    background-color: color-mix(in oklab, var(--chart-5) 10%, var(--card));
+  }
+
+  .pretour-item-accent--default {
+    @apply border-border bg-muted/40;
+  }
+}
