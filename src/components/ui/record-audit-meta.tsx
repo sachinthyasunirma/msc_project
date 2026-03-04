@@ -1,5 +1,7 @@
 "use client";
 
+import { authClient } from "@/lib/auth-client";
+
 type Props = {
   row?: object | null;
   className?: string;
@@ -25,17 +27,36 @@ function formatDateTime(value: unknown) {
 }
 
 export function RecordAuditMeta({ row, className }: Props) {
+  const { data: session } = authClient.useSession();
   if (!row) return null;
   const value = row as Record<string, unknown>;
+  const sessionUser = session?.user as
+    | { name?: string | null; email?: string | null; id?: string | null }
+    | undefined;
+
+  const sessionName = readString(sessionUser?.name) || readString(sessionUser?.email);
 
   const updatedBy =
     readString(value.updatedByName) ||
+    readString(value.updatedByUserName) ||
+    readString(value.updatedByDisplayName) ||
     readString(value.updatedBy) ||
     readString(value.updatedByEmail) ||
+    readString(value.updatedByUserEmail) ||
     readString(value.updated_by_name) ||
+    readString(value.updated_by_user_name) ||
     readString(value.updated_by) ||
+    readString(value.updated_by_email) ||
     readString(value.createdByName) ||
+    readString(value.createdByUserName) ||
+    readString(value.createdByDisplayName) ||
     readString(value.createdBy) ||
+    readString(value.createdByEmail) ||
+    readString(value.created_by_name) ||
+    readString(value.created_by_user_name) ||
+    readString(value.created_by) ||
+    readString(value.created_by_email) ||
+    sessionName ||
     "System";
 
   const updatedAt =

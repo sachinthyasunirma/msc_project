@@ -33,6 +33,7 @@ class TransportError extends Error {
 }
 
 type TransportResource = z.infer<typeof transportResourceSchema>;
+type TransportRateBasis = "VEHICLE_CATEGORY" | "VEHICLE_TYPE";
 
 function normalizeZodError(error: z.ZodError) {
   return error.issues[0]?.message || "Validation failed.";
@@ -142,6 +143,64 @@ async function ensureVehicleTypeInCompany(companyId: string, id: string) {
       "Vehicle type not found in this company."
     );
   }
+}
+
+async function getTransportRateBasis(companyId: string): Promise<TransportRateBasis> {
+  const [record] = await db
+    .select({ transportRateBasis: schema.company.transportRateBasis })
+    .from(schema.company)
+    .where(eq(schema.company.id, companyId))
+    .limit(1);
+  return record?.transportRateBasis === "VEHICLE_CATEGORY"
+    ? "VEHICLE_CATEGORY"
+    : "VEHICLE_TYPE";
+}
+
+async function enforceVehicleBasis(
+  companyId: string,
+  values: {
+    vehicleCategoryId?: string | null;
+    vehicleTypeId?: string | null;
+  }
+) {
+  const basis = await getTransportRateBasis(companyId);
+  const categoryId = values.vehicleCategoryId ?? null;
+  const typeId = values.vehicleTypeId ?? null;
+
+  if (basis === "VEHICLE_CATEGORY") {
+    if (!categoryId) {
+      throw new TransportError(
+        400,
+        "VALIDATION_ERROR",
+        "Vehicle Category is required by current company transport rate basis."
+      );
+    }
+    if (typeId) {
+      throw new TransportError(
+        400,
+        "VALIDATION_ERROR",
+        "Vehicle Type is not allowed when company transport rate basis is Vehicle Category."
+      );
+    }
+    await ensureVehicleCategoryInCompany(companyId, categoryId);
+    return;
+  }
+
+  if (!typeId) {
+    throw new TransportError(
+      400,
+      "VALIDATION_ERROR",
+      "Vehicle Type is required by current company transport rate basis."
+    );
+  }
+  if (categoryId) {
+    throw new TransportError(
+      400,
+      "VALIDATION_ERROR",
+      "Vehicle Category is not allowed when company transport rate basis is Vehicle Type."
+    );
+  }
+  await ensureVehicleTypeInCompany(companyId, typeId);
 }
 
 function parseResource(input: string): TransportResource {
@@ -348,12 +407,10 @@ export async function createTransportRecord(
       }
       await ensureLocationInCompany(companyId, parsed.data.fromLocationId);
       await ensureLocationInCompany(companyId, parsed.data.toLocationId);
-      if (parsed.data.vehicleCategoryId) {
-        await ensureVehicleCategoryInCompany(companyId, parsed.data.vehicleCategoryId);
-      }
-      if (parsed.data.vehicleTypeId) {
-        await ensureVehicleTypeInCompany(companyId, parsed.data.vehicleTypeId);
-      }
+      await enforceVehicleBasis(companyId, {
+        vehicleCategoryId: parsed.data.vehicleCategoryId ?? null,
+        vehicleTypeId: parsed.data.vehicleTypeId ?? null,
+      });
       const [created] = await db
         .insert(schema.transportLocationRate)
         .values({
@@ -376,12 +433,10 @@ export async function createTransportRecord(
         throw new TransportError(400, "VALIDATION_ERROR", normalizeZodError(parsed.error));
       }
       await ensureLocationInCompany(companyId, parsed.data.locationId);
-      if (parsed.data.vehicleCategoryId) {
-        await ensureVehicleCategoryInCompany(companyId, parsed.data.vehicleCategoryId);
-      }
-      if (parsed.data.vehicleTypeId) {
-        await ensureVehicleTypeInCompany(companyId, parsed.data.vehicleTypeId);
-      }
+      await enforceVehicleBasis(companyId, {
+        vehicleCategoryId: parsed.data.vehicleCategoryId ?? null,
+        vehicleTypeId: parsed.data.vehicleTypeId ?? null,
+      });
       const [created] = await db
         .insert(schema.transportLocationExpense)
         .values({
@@ -401,12 +456,10 @@ export async function createTransportRecord(
       }
       await ensureLocationInCompany(companyId, parsed.data.fromLocationId);
       await ensureLocationInCompany(companyId, parsed.data.toLocationId);
-      if (parsed.data.vehicleCategoryId) {
-        await ensureVehicleCategoryInCompany(companyId, parsed.data.vehicleCategoryId);
-      }
-      if (parsed.data.vehicleTypeId) {
-        await ensureVehicleTypeInCompany(companyId, parsed.data.vehicleTypeId);
-      }
+      await enforceVehicleBasis(companyId, {
+        vehicleCategoryId: parsed.data.vehicleCategoryId ?? null,
+        vehicleTypeId: parsed.data.vehicleTypeId ?? null,
+      });
       const [created] = await db
         .insert(schema.transportPaxVehicleRate)
         .values({
@@ -427,12 +480,10 @@ export async function createTransportRecord(
       }
       await ensureLocationInCompany(companyId, parsed.data.fromLocationId);
       await ensureLocationInCompany(companyId, parsed.data.toLocationId);
-      if (parsed.data.vehicleCategoryId) {
-        await ensureVehicleCategoryInCompany(companyId, parsed.data.vehicleCategoryId);
-      }
-      if (parsed.data.vehicleTypeId) {
-        await ensureVehicleTypeInCompany(companyId, parsed.data.vehicleTypeId);
-      }
+      await enforceVehicleBasis(companyId, {
+        vehicleCategoryId: parsed.data.vehicleCategoryId ?? null,
+        vehicleTypeId: parsed.data.vehicleTypeId ?? null,
+      });
       const [created] = await db
         .insert(schema.transportBaggageRate)
         .values({
@@ -518,18 +569,34 @@ export async function updateTransportRecord(
       if (!parsed.success) {
         throw new TransportError(400, "VALIDATION_ERROR", normalizeZodError(parsed.error));
       }
+      const [current] = await db
+        .select({
+          vehicleCategoryId: schema.transportLocationRate.vehicleCategoryId,
+          vehicleTypeId: schema.transportLocationRate.vehicleTypeId,
+        })
+        .from(schema.transportLocationRate)
+        .where(
+          and(eq(schema.transportLocationRate.id, id), eq(schema.transportLocationRate.companyId, companyId))
+        )
+        .limit(1);
+      if (!current) throw new TransportError(404, "RECORD_NOT_FOUND", "Location rate not found.");
+
       if (parsed.data.fromLocationId) {
         await ensureLocationInCompany(companyId, parsed.data.fromLocationId);
       }
       if (parsed.data.toLocationId) {
         await ensureLocationInCompany(companyId, parsed.data.toLocationId);
       }
-      if (parsed.data.vehicleCategoryId) {
-        await ensureVehicleCategoryInCompany(companyId, parsed.data.vehicleCategoryId);
-      }
-      if (parsed.data.vehicleTypeId) {
-        await ensureVehicleTypeInCompany(companyId, parsed.data.vehicleTypeId);
-      }
+      await enforceVehicleBasis(companyId, {
+        vehicleCategoryId:
+          parsed.data.vehicleCategoryId !== undefined
+            ? (parsed.data.vehicleCategoryId ?? null)
+            : (current.vehicleCategoryId ?? null),
+        vehicleTypeId:
+          parsed.data.vehicleTypeId !== undefined
+            ? (parsed.data.vehicleTypeId ?? null)
+            : (current.vehicleTypeId ?? null),
+      });
       const [updated] = await db
         .update(schema.transportLocationRate)
         .set({
@@ -563,15 +630,36 @@ export async function updateTransportRecord(
       if (!parsed.success) {
         throw new TransportError(400, "VALIDATION_ERROR", normalizeZodError(parsed.error));
       }
+      const [current] = await db
+        .select({
+          vehicleCategoryId: schema.transportLocationExpense.vehicleCategoryId,
+          vehicleTypeId: schema.transportLocationExpense.vehicleTypeId,
+        })
+        .from(schema.transportLocationExpense)
+        .where(
+          and(
+            eq(schema.transportLocationExpense.id, id),
+            eq(schema.transportLocationExpense.companyId, companyId)
+          )
+        )
+        .limit(1);
+      if (!current) {
+        throw new TransportError(404, "RECORD_NOT_FOUND", "Location expense not found.");
+      }
+
       if (parsed.data.locationId) {
         await ensureLocationInCompany(companyId, parsed.data.locationId);
       }
-      if (parsed.data.vehicleCategoryId) {
-        await ensureVehicleCategoryInCompany(companyId, parsed.data.vehicleCategoryId);
-      }
-      if (parsed.data.vehicleTypeId) {
-        await ensureVehicleTypeInCompany(companyId, parsed.data.vehicleTypeId);
-      }
+      await enforceVehicleBasis(companyId, {
+        vehicleCategoryId:
+          parsed.data.vehicleCategoryId !== undefined
+            ? (parsed.data.vehicleCategoryId ?? null)
+            : (current.vehicleCategoryId ?? null),
+        vehicleTypeId:
+          parsed.data.vehicleTypeId !== undefined
+            ? (parsed.data.vehicleTypeId ?? null)
+            : (current.vehicleTypeId ?? null),
+      });
       const [updated] = await db
         .update(schema.transportLocationExpense)
         .set({
@@ -601,18 +689,39 @@ export async function updateTransportRecord(
       if (!parsed.success) {
         throw new TransportError(400, "VALIDATION_ERROR", normalizeZodError(parsed.error));
       }
+      const [current] = await db
+        .select({
+          vehicleCategoryId: schema.transportPaxVehicleRate.vehicleCategoryId,
+          vehicleTypeId: schema.transportPaxVehicleRate.vehicleTypeId,
+        })
+        .from(schema.transportPaxVehicleRate)
+        .where(
+          and(
+            eq(schema.transportPaxVehicleRate.id, id),
+            eq(schema.transportPaxVehicleRate.companyId, companyId)
+          )
+        )
+        .limit(1);
+      if (!current) {
+        throw new TransportError(404, "RECORD_NOT_FOUND", "Pax vehicle rate not found.");
+      }
+
       if (parsed.data.fromLocationId) {
         await ensureLocationInCompany(companyId, parsed.data.fromLocationId);
       }
       if (parsed.data.toLocationId) {
         await ensureLocationInCompany(companyId, parsed.data.toLocationId);
       }
-      if (parsed.data.vehicleCategoryId) {
-        await ensureVehicleCategoryInCompany(companyId, parsed.data.vehicleCategoryId);
-      }
-      if (parsed.data.vehicleTypeId) {
-        await ensureVehicleTypeInCompany(companyId, parsed.data.vehicleTypeId);
-      }
+      await enforceVehicleBasis(companyId, {
+        vehicleCategoryId:
+          parsed.data.vehicleCategoryId !== undefined
+            ? (parsed.data.vehicleCategoryId ?? null)
+            : (current.vehicleCategoryId ?? null),
+        vehicleTypeId:
+          parsed.data.vehicleTypeId !== undefined
+            ? (parsed.data.vehicleTypeId ?? null)
+            : (current.vehicleTypeId ?? null),
+      });
       const [updated] = await db
         .update(schema.transportPaxVehicleRate)
         .set({
@@ -646,18 +755,37 @@ export async function updateTransportRecord(
       if (!parsed.success) {
         throw new TransportError(400, "VALIDATION_ERROR", normalizeZodError(parsed.error));
       }
+      const [current] = await db
+        .select({
+          vehicleCategoryId: schema.transportBaggageRate.vehicleCategoryId,
+          vehicleTypeId: schema.transportBaggageRate.vehicleTypeId,
+        })
+        .from(schema.transportBaggageRate)
+        .where(
+          and(
+            eq(schema.transportBaggageRate.id, id),
+            eq(schema.transportBaggageRate.companyId, companyId)
+          )
+        )
+        .limit(1);
+      if (!current) throw new TransportError(404, "RECORD_NOT_FOUND", "Baggage rate not found.");
+
       if (parsed.data.fromLocationId) {
         await ensureLocationInCompany(companyId, parsed.data.fromLocationId);
       }
       if (parsed.data.toLocationId) {
         await ensureLocationInCompany(companyId, parsed.data.toLocationId);
       }
-      if (parsed.data.vehicleCategoryId) {
-        await ensureVehicleCategoryInCompany(companyId, parsed.data.vehicleCategoryId);
-      }
-      if (parsed.data.vehicleTypeId) {
-        await ensureVehicleTypeInCompany(companyId, parsed.data.vehicleTypeId);
-      }
+      await enforceVehicleBasis(companyId, {
+        vehicleCategoryId:
+          parsed.data.vehicleCategoryId !== undefined
+            ? (parsed.data.vehicleCategoryId ?? null)
+            : (current.vehicleCategoryId ?? null),
+        vehicleTypeId:
+          parsed.data.vehicleTypeId !== undefined
+            ? (parsed.data.vehicleTypeId ?? null)
+            : (current.vehicleTypeId ?? null),
+      });
       const [updated] = await db
         .update(schema.transportBaggageRate)
         .set({

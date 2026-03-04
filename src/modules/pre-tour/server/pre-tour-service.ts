@@ -1,20 +1,24 @@
-import { and, desc, eq, gte, ilike, isNull, lte, or } from "drizzle-orm";
+import { and, desc, eq, gte, ilike, isNull, lte, ne, or } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
 import * as schema from "@/db/schema";
 import { auth } from "@/lib/auth";
 import {
+  createPreTourCategorySchema,
   createPreTourDaySchema,
   createPreTourItemAddonSchema,
   createPreTourItemSchema,
   createPreTourSchema,
+  createPreTourTechnicalVisitSchema,
   createPreTourTotalSchema,
   preTourListQuerySchema,
   preTourResourceSchema,
+  updatePreTourCategorySchema,
   updatePreTourDaySchema,
   updatePreTourItemAddonSchema,
   updatePreTourItemSchema,
   updatePreTourSchema,
+  updatePreTourTechnicalVisitSchema,
   updatePreTourTotalSchema,
 } from "@/modules/pre-tour/shared/pre-tour-schemas";
 
@@ -60,6 +64,9 @@ async function getAccess(headers: Headers) {
   }
 
   const user = session.user as {
+    id?: string | null;
+    name?: string | null;
+    email?: string | null;
     companyId?: string | null;
     role?: string | null;
     readOnly?: boolean;
@@ -70,6 +77,8 @@ async function getAccess(headers: Headers) {
   }
 
   return {
+    userId: user.id ?? null,
+    userName: user.name || user.email || "System",
     companyId: user.companyId,
     role: user.role ?? "USER",
     readOnly: Boolean(user.readOnly),
@@ -135,6 +144,200 @@ async function ensureItem(companyId: string, id: string) {
   }
 
   return record;
+}
+
+async function ensureTechnicalVisit(companyId: string, id: string) {
+  const [record] = await db
+    .select({ id: schema.technicalVisit.id })
+    .from(schema.technicalVisit)
+    .where(and(eq(schema.technicalVisit.id, id), eq(schema.technicalVisit.companyId, companyId)))
+    .limit(1);
+
+  if (!record) {
+    throw new PreTourError(400, "TECHNICAL_VISIT_NOT_FOUND", "Technical visit not found in this company.");
+  }
+}
+
+async function ensureTourCategoryType(companyId: string, id: string) {
+  const [record] = await db
+    .select({
+      id: schema.tourCategoryType.id,
+      allowMultiple: schema.tourCategoryType.allowMultiple,
+    })
+    .from(schema.tourCategoryType)
+    .where(
+      and(
+        eq(schema.tourCategoryType.id, id),
+        eq(schema.tourCategoryType.companyId, companyId),
+        eq(schema.tourCategoryType.isActive, true)
+      )
+    )
+    .limit(1);
+
+  if (!record) {
+    throw new PreTourError(
+      400,
+      "TOUR_CATEGORY_TYPE_NOT_FOUND",
+      "Tour category type not found in this company."
+    );
+  }
+  return record;
+}
+
+async function ensureTourCategory(companyId: string, id: string) {
+  const [record] = await db
+    .select({
+      id: schema.tourCategory.id,
+      typeId: schema.tourCategory.typeId,
+    })
+    .from(schema.tourCategory)
+    .where(
+      and(
+        eq(schema.tourCategory.id, id),
+        eq(schema.tourCategory.companyId, companyId),
+        eq(schema.tourCategory.isActive, true)
+      )
+    )
+    .limit(1);
+
+  if (!record) {
+    throw new PreTourError(
+      400,
+      "TOUR_CATEGORY_NOT_FOUND",
+      "Tour category not found in this company."
+    );
+  }
+  return record;
+}
+
+async function ensurePreTourCategoryTypeLimit(
+  companyId: string,
+  input: { planId: string; typeId: string; categoryId: string; currentRecordId?: string }
+) {
+  const type = await ensureTourCategoryType(companyId, input.typeId);
+  const category = await ensureTourCategory(companyId, input.categoryId);
+  if (String(category.typeId) !== String(input.typeId)) {
+    throw new PreTourError(
+      400,
+      "VALIDATION_ERROR",
+      "Selected category does not belong to selected category type."
+    );
+  }
+
+  if (!type.allowMultiple) {
+    const [existing] = await db
+      .select({ id: schema.preTourPlanCategory.id })
+      .from(schema.preTourPlanCategory)
+      .where(
+        and(
+          eq(schema.preTourPlanCategory.companyId, companyId),
+          eq(schema.preTourPlanCategory.planId, input.planId),
+          eq(schema.preTourPlanCategory.typeId, input.typeId),
+          input.currentRecordId ? ne(schema.preTourPlanCategory.id, input.currentRecordId) : undefined
+        )
+      )
+      .limit(1);
+
+    if (existing && String(existing.id) !== String(input.currentRecordId ?? "")) {
+      throw new PreTourError(
+        400,
+        "VALIDATION_ERROR",
+        "This category type allows only one category per pre-tour plan."
+      );
+    }
+  }
+}
+
+function extractVehicleTypeIdFromTransportItem(input: {
+  serviceId?: string | null;
+  pricingSnapshot?: unknown;
+}) {
+  if (input.serviceId && input.serviceId.trim().length > 0) {
+    return input.serviceId.trim();
+  }
+  if (!input.pricingSnapshot || typeof input.pricingSnapshot !== "object") {
+    return null;
+  }
+  const snapshot = input.pricingSnapshot as Record<string, unknown>;
+  const vehicleTypeId = snapshot.vehicleTypeId;
+  if (typeof vehicleTypeId === "string" && vehicleTypeId.trim().length > 0) {
+    return vehicleTypeId.trim();
+  }
+  return null;
+}
+
+function resolveGuideSeatCount(pricingSnapshot: unknown) {
+  if (!pricingSnapshot || typeof pricingSnapshot !== "object") return 0;
+  const snapshot = pricingSnapshot as Record<string, unknown>;
+  const flags = ["includeGuide", "hasGuide", "guideRequired"];
+  for (const flag of flags) {
+    if (snapshot[flag] === true) return 1;
+  }
+  const numeric = ["guideCount", "assignedGuideCount"];
+  for (const key of numeric) {
+    const value = snapshot[key];
+    const n = typeof value === "number" ? value : Number(value);
+    if (Number.isFinite(n) && n > 0) return Math.trunc(n);
+  }
+  const assigned = snapshot.assignedGuideIds;
+  if (Array.isArray(assigned) && assigned.length > 0) return 1;
+  return 0;
+}
+
+async function validateTransportPaxCapacity(
+  companyId: string,
+  input: {
+    itemType?: string | null;
+    serviceId?: string | null;
+    pax?: number | null;
+    pricingSnapshot?: unknown;
+  }
+) {
+  if (String(input.itemType || "").toUpperCase() !== "TRANSPORT") {
+    return;
+  }
+
+  const vehicleTypeId = extractVehicleTypeIdFromTransportItem({
+    serviceId: input.serviceId ?? null,
+    pricingSnapshot: input.pricingSnapshot,
+  });
+  if (!vehicleTypeId) return;
+
+  const [vehicleType] = await db
+    .select({
+      paxCapacity: schema.transportVehicleType.paxCapacity,
+    })
+    .from(schema.transportVehicleType)
+    .where(
+      and(
+        eq(schema.transportVehicleType.id, vehicleTypeId),
+        eq(schema.transportVehicleType.companyId, companyId),
+        eq(schema.transportVehicleType.isActive, true)
+      )
+    )
+    .limit(1);
+
+  if (!vehicleType) {
+    throw new PreTourError(
+      400,
+      "VALIDATION_ERROR",
+      "Selected transport vehicle type is invalid or inactive."
+    );
+  }
+
+  const touristPax = Number(input.pax ?? 0);
+  const safeTouristPax = Number.isFinite(touristPax) ? Math.max(0, touristPax) : 0;
+  const driverSeats = 1;
+  const guideSeats = resolveGuideSeatCount(input.pricingSnapshot);
+  const occupiedSeats = safeTouristPax + driverSeats + guideSeats;
+
+  if (occupiedSeats > Number(vehicleType.paxCapacity)) {
+    throw new PreTourError(
+      400,
+      "VALIDATION_ERROR",
+      `Vehicle capacity exceeded. Tourists (${safeTouristPax}) + driver (${driverSeats}) + guide (${guideSeats}) cannot exceed vehicle pax capacity (${vehicleType.paxCapacity}).`
+    );
+  }
 }
 
 async function ensureOrganizationType(
@@ -340,6 +543,82 @@ async function generatePreTourReferenceNo(companyId: string) {
   return `${prefix}${nextCounter}`;
 }
 
+async function generateUniquePreTourDayCode(companyId: string, requestedCode: string) {
+  const normalizedBase = requestedCode.trim().toUpperCase().slice(0, 80);
+  if (!normalizedBase) {
+    throw new PreTourError(400, "VALIDATION_ERROR", "Day code is required.");
+  }
+
+  for (let attempt = 0; attempt < 1000; attempt += 1) {
+    const suffix = attempt === 0 ? "" : `_${String(attempt + 1).padStart(2, "0")}`;
+    const nextCode = `${normalizedBase}${suffix}`.slice(0, 80);
+
+    const [existing] = await db
+      .select({ id: schema.preTourPlanDay.id })
+      .from(schema.preTourPlanDay)
+      .where(
+        and(
+          eq(schema.preTourPlanDay.companyId, companyId),
+          eq(schema.preTourPlanDay.code, nextCode)
+        )
+      )
+      .limit(1);
+
+    if (!existing) return nextCode;
+  }
+
+  throw new PreTourError(
+    400,
+    "VALIDATION_ERROR",
+    "Unable to generate a unique day code. Please use a different code."
+  );
+}
+
+async function cleanupExpiredPreTourBins(companyId: string) {
+  const threshold = new Date();
+  threshold.setDate(threshold.getDate() - 30);
+
+  const expired = await db
+    .select({ id: schema.preTourPlanBin.id, planId: schema.preTourPlanBin.planId })
+    .from(schema.preTourPlanBin)
+    .where(
+      and(
+        eq(schema.preTourPlanBin.companyId, companyId),
+        lte(schema.preTourPlanBin.deletedAt, threshold)
+      )
+    )
+    .limit(1000);
+
+  if (expired.length === 0) return 0;
+
+  await db.transaction(async (tx) => {
+    for (const row of expired) {
+      await tx
+        .delete(schema.preTourPlanBin)
+        .where(and(eq(schema.preTourPlanBin.id, String(row.id))));
+      await tx
+        .delete(schema.preTourPlan)
+        .where(
+          and(
+            eq(schema.preTourPlan.id, String(row.planId)),
+            eq(schema.preTourPlan.companyId, companyId)
+          )
+        );
+    }
+  });
+
+  return expired.length;
+}
+
+export async function runPreTourBinCleanupForAllCompanies() {
+  const companies = await db.select({ id: schema.company.id }).from(schema.company);
+  let totalDeleted = 0;
+  for (const row of companies) {
+    totalDeleted += await cleanupExpiredPreTourBins(String(row.id));
+  }
+  return totalDeleted;
+}
+
 export async function listPreTourRecords(
   resourceInput: string,
   searchParams: URLSearchParams,
@@ -357,6 +636,7 @@ export async function listPreTourRecords(
   const planId = parsed.data.planId;
   const dayId = parsed.data.dayId;
   const itemId = parsed.data.itemId;
+  const visitId = parsed.data.visitId;
 
   switch (resource) {
     case "pre-tours":
@@ -366,6 +646,7 @@ export async function listPreTourRecords(
         .where(
           and(
             eq(schema.preTourPlan.companyId, companyId),
+            isNull(schema.preTourPlan.deletedAt),
             q
                 ? or(
                     ilike(schema.preTourPlan.code, q),
@@ -379,6 +660,28 @@ export async function listPreTourRecords(
           )
         )
         .orderBy(desc(schema.preTourPlan.createdAt))
+        .limit(limit);
+
+    case "pre-tour-bins":
+      await cleanupExpiredPreTourBins(companyId);
+      return db
+        .select()
+        .from(schema.preTourPlanBin)
+        .where(
+          and(
+            eq(schema.preTourPlanBin.companyId, companyId),
+            q
+              ? or(
+                  ilike(schema.preTourPlanBin.code, q),
+                  ilike(schema.preTourPlanBin.referenceNo, q),
+                  ilike(schema.preTourPlanBin.planCode, q),
+                  ilike(schema.preTourPlanBin.title, q),
+                  ilike(schema.preTourPlanBin.deletedByName, q)
+                )
+              : undefined
+          )
+        )
+        .orderBy(desc(schema.preTourPlanBin.deletedAt))
         .limit(limit);
 
     case "pre-tour-days":
@@ -462,6 +765,46 @@ export async function listPreTourRecords(
         .orderBy(desc(schema.preTourPlanTotal.createdAt))
         .limit(limit);
 
+    case "pre-tour-categories":
+      return db
+        .select()
+        .from(schema.preTourPlanCategory)
+        .where(
+          and(
+            eq(schema.preTourPlanCategory.companyId, companyId),
+            planId ? eq(schema.preTourPlanCategory.planId, planId) : undefined,
+            q
+              ? or(
+                  ilike(schema.preTourPlanCategory.code, q),
+                  ilike(schema.preTourPlanCategory.notes, q)
+                )
+              : undefined
+          )
+        )
+        .orderBy(desc(schema.preTourPlanCategory.createdAt))
+        .limit(limit);
+
+    case "pre-tour-technical-visits":
+      return db
+        .select()
+        .from(schema.preTourPlanTechnicalVisit)
+        .where(
+          and(
+            eq(schema.preTourPlanTechnicalVisit.companyId, companyId),
+            planId ? eq(schema.preTourPlanTechnicalVisit.planId, planId) : undefined,
+            dayId ? eq(schema.preTourPlanTechnicalVisit.dayId, dayId) : undefined,
+            visitId ? eq(schema.preTourPlanTechnicalVisit.technicalVisitId, visitId) : undefined,
+            q
+              ? or(
+                  ilike(schema.preTourPlanTechnicalVisit.code, q),
+                  ilike(schema.preTourPlanTechnicalVisit.notes, q)
+                )
+              : undefined
+          )
+        )
+        .orderBy(desc(schema.preTourPlanTechnicalVisit.createdAt))
+        .limit(limit);
+
     default:
       throw new PreTourError(404, "RESOURCE_NOT_FOUND", "Pre-tour resource not found.");
   }
@@ -473,7 +816,7 @@ export async function createPreTourRecord(
   headers: Headers
 ) {
   const resource = parseResource(resourceInput);
-  const { companyId } = await ensureWritable(headers);
+  const { companyId, userId, userName, role } = await ensureWritable(headers);
 
   switch (resource) {
     case "pre-tours": {
@@ -519,6 +862,8 @@ export async function createPreTourRecord(
         .values({
           ...parsed.data,
           companyId,
+          updatedByUserId: userId,
+          updatedByName: userName,
           referenceNo,
           startDate: toDate(parsed.data.startDate)!,
           endDate: toDate(parsed.data.endDate)!,
@@ -542,11 +887,13 @@ export async function createPreTourRecord(
       }
 
       await ensurePlan(companyId, parsed.data.planId);
+      const uniqueCode = await generateUniquePreTourDayCode(companyId, parsed.data.code);
 
       const [created] = await db
         .insert(schema.preTourPlanDay)
         .values({
           ...parsed.data,
+          code: uniqueCode,
           companyId,
           date: toDate(parsed.data.date)!,
         } as any)
@@ -570,6 +917,12 @@ export async function createPreTourRecord(
           "Selected day does not belong to the selected pre-tour plan."
         );
       }
+      await validateTransportPaxCapacity(companyId, {
+        itemType: parsed.data.itemType,
+        serviceId: parsed.data.serviceId ?? null,
+        pax: parsed.data.pax ?? null,
+        pricingSnapshot: parsed.data.pricingSnapshot ?? null,
+      });
 
       const [created] = await db
         .insert(schema.preTourPlanItem)
@@ -641,6 +994,58 @@ export async function createPreTourRecord(
       return created;
     }
 
+    case "pre-tour-categories": {
+      const parsed = createPreTourCategorySchema.safeParse(payload);
+      if (!parsed.success) {
+        throw new PreTourError(400, "VALIDATION_ERROR", normalizeZodError(parsed.error));
+      }
+
+      await ensurePlan(companyId, parsed.data.planId);
+      await ensurePreTourCategoryTypeLimit(companyId, {
+        planId: parsed.data.planId,
+        typeId: parsed.data.typeId,
+        categoryId: parsed.data.categoryId,
+      });
+
+      const [created] = await db
+        .insert(schema.preTourPlanCategory)
+        .values({
+          ...parsed.data,
+          companyId,
+        } as any)
+        .returning();
+
+      return created;
+    }
+
+    case "pre-tour-technical-visits": {
+      const parsed = createPreTourTechnicalVisitSchema.safeParse(payload);
+      if (!parsed.success) {
+        throw new PreTourError(400, "VALIDATION_ERROR", normalizeZodError(parsed.error));
+      }
+      await ensurePlan(companyId, parsed.data.planId);
+      if (parsed.data.dayId) {
+        const day = await ensureDay(companyId, parsed.data.dayId);
+        if (String(day.planId) !== String(parsed.data.planId)) {
+          throw new PreTourError(
+            400,
+            "VALIDATION_ERROR",
+            "Selected day does not belong to selected pre-tour plan."
+          );
+        }
+      }
+      await ensureTechnicalVisit(companyId, parsed.data.technicalVisitId);
+
+      const [created] = await db
+        .insert(schema.preTourPlanTechnicalVisit)
+        .values({
+          ...parsed.data,
+          companyId,
+        } as any)
+        .returning();
+      return created;
+    }
+
     default:
       throw new PreTourError(404, "RESOURCE_NOT_FOUND", "Pre-tour resource not found.");
   }
@@ -653,7 +1058,7 @@ export async function updatePreTourRecord(
   headers: Headers
 ) {
   const resource = parseResource(resourceInput);
-  const { companyId } = await ensureWritable(headers);
+  const { companyId, userId, userName, role } = await ensureWritable(headers);
 
   switch (resource) {
     case "pre-tours": {
@@ -753,6 +1158,8 @@ export async function updatePreTourRecord(
         .update(schema.preTourPlan)
         .set({
           ...parsed.data,
+          updatedByUserId: userId,
+          updatedByName: userName,
           startDate: parsed.data.startDate ? toDate(parsed.data.startDate) : undefined,
           endDate: parsed.data.endDate ? toDate(parsed.data.endDate) : undefined,
           baseCurrencyCode: currencyContext.baseCurrencyCode,
@@ -816,6 +1223,30 @@ export async function updatePreTourRecord(
       if (parsed.data.dayId) {
         await ensureDay(companyId, parsed.data.dayId);
       }
+
+      const [current] = await db
+        .select({
+          itemType: schema.preTourPlanItem.itemType,
+          serviceId: schema.preTourPlanItem.serviceId,
+          pax: schema.preTourPlanItem.pax,
+          pricingSnapshot: schema.preTourPlanItem.pricingSnapshot,
+        })
+        .from(schema.preTourPlanItem)
+        .where(and(eq(schema.preTourPlanItem.id, id), eq(schema.preTourPlanItem.companyId, companyId)))
+        .limit(1);
+      if (!current) {
+        throw new PreTourError(404, "NOT_FOUND", "Pre-tour item not found.");
+      }
+
+      await validateTransportPaxCapacity(companyId, {
+        itemType: (parsed.data.itemType ?? current.itemType) as string,
+        serviceId: (parsed.data.serviceId ?? current.serviceId) as string | null,
+        pax:
+          parsed.data.pax !== undefined
+            ? (parsed.data.pax ?? null)
+            : (typeof current.pax === "number" ? current.pax : Number(current.pax ?? 0)),
+        pricingSnapshot: parsed.data.pricingSnapshot ?? current.pricingSnapshot ?? null,
+      });
 
       const [updated] = await db
         .update(schema.preTourPlanItem)
@@ -913,6 +1344,180 @@ export async function updatePreTourRecord(
       return updated;
     }
 
+    case "pre-tour-categories": {
+      const parsed = updatePreTourCategorySchema.safeParse(payload);
+      if (!parsed.success) {
+        throw new PreTourError(400, "VALIDATION_ERROR", normalizeZodError(parsed.error));
+      }
+
+      const [current] = await db
+        .select({
+          planId: schema.preTourPlanCategory.planId,
+          typeId: schema.preTourPlanCategory.typeId,
+          categoryId: schema.preTourPlanCategory.categoryId,
+        })
+        .from(schema.preTourPlanCategory)
+        .where(
+          and(
+            eq(schema.preTourPlanCategory.id, id),
+            eq(schema.preTourPlanCategory.companyId, companyId)
+          )
+        )
+        .limit(1);
+      if (!current) {
+        throw new PreTourError(404, "NOT_FOUND", "Pre-tour category not found.");
+      }
+
+      const nextPlanId = parsed.data.planId ?? current.planId;
+      const nextTypeId = parsed.data.typeId ?? current.typeId;
+      const nextCategoryId = parsed.data.categoryId ?? current.categoryId;
+
+      if (parsed.data.planId) await ensurePlan(companyId, parsed.data.planId);
+      await ensurePreTourCategoryTypeLimit(companyId, {
+        planId: String(nextPlanId),
+        typeId: String(nextTypeId),
+        categoryId: String(nextCategoryId),
+        currentRecordId: id,
+      });
+
+      const [updated] = await db
+        .update(schema.preTourPlanCategory)
+        .set({
+          ...parsed.data,
+          updatedAt: new Date(),
+        } as any)
+        .where(
+          and(
+            eq(schema.preTourPlanCategory.id, id),
+            eq(schema.preTourPlanCategory.companyId, companyId)
+          )
+        )
+        .returning();
+
+      if (!updated) {
+        throw new PreTourError(404, "NOT_FOUND", "Pre-tour category not found.");
+      }
+      return updated;
+    }
+
+    case "pre-tour-technical-visits": {
+      const parsed = updatePreTourTechnicalVisitSchema.safeParse(payload);
+      if (!parsed.success) {
+        throw new PreTourError(400, "VALIDATION_ERROR", normalizeZodError(parsed.error));
+      }
+
+      const [current] = await db
+        .select({
+          planId: schema.preTourPlanTechnicalVisit.planId,
+          dayId: schema.preTourPlanTechnicalVisit.dayId,
+          technicalVisitId: schema.preTourPlanTechnicalVisit.technicalVisitId,
+        })
+        .from(schema.preTourPlanTechnicalVisit)
+        .where(
+          and(
+            eq(schema.preTourPlanTechnicalVisit.id, id),
+            eq(schema.preTourPlanTechnicalVisit.companyId, companyId)
+          )
+        )
+        .limit(1);
+
+      if (!current) {
+        throw new PreTourError(404, "NOT_FOUND", "Pre-tour technical visit not found.");
+      }
+
+      const nextPlanId = parsed.data.planId ?? current.planId;
+      const nextDayId = parsed.data.dayId === null ? null : (parsed.data.dayId ?? current.dayId);
+      const nextTechnicalVisitId = parsed.data.technicalVisitId ?? current.technicalVisitId;
+
+      if (parsed.data.planId) await ensurePlan(companyId, parsed.data.planId);
+      if (nextDayId) {
+        const day = await ensureDay(companyId, String(nextDayId));
+        if (String(day.planId) !== String(nextPlanId)) {
+          throw new PreTourError(
+            400,
+            "VALIDATION_ERROR",
+            "Selected day does not belong to selected pre-tour plan."
+          );
+        }
+      }
+      await ensureTechnicalVisit(companyId, String(nextTechnicalVisitId));
+
+      const [updated] = await db
+        .update(schema.preTourPlanTechnicalVisit)
+        .set({
+          ...parsed.data,
+          updatedAt: new Date(),
+        } as any)
+        .where(
+          and(
+            eq(schema.preTourPlanTechnicalVisit.id, id),
+            eq(schema.preTourPlanTechnicalVisit.companyId, companyId)
+          )
+        )
+        .returning();
+      if (!updated) {
+        throw new PreTourError(404, "NOT_FOUND", "Pre-tour technical visit not found.");
+      }
+      return updated;
+    }
+
+    case "pre-tour-bins": {
+      if (role !== "ADMIN") {
+        throw new PreTourError(
+          403,
+          "PERMISSION_DENIED",
+          "Only Admin can restore records from bin."
+        );
+      }
+      const parsed = z
+        .object({ action: z.enum(["RESTORE"]) })
+        .safeParse(payload);
+      if (!parsed.success) {
+        throw new PreTourError(400, "VALIDATION_ERROR", normalizeZodError(parsed.error));
+      }
+
+      const [binRecord] = await db
+        .select()
+        .from(schema.preTourPlanBin)
+        .where(and(eq(schema.preTourPlanBin.id, id), eq(schema.preTourPlanBin.companyId, companyId)))
+        .limit(1);
+      if (!binRecord) {
+        throw new PreTourError(404, "NOT_FOUND", "Pre-tour bin record not found.");
+      }
+
+      const [restored] = await db.transaction(async (tx) => {
+        const [updatedPlan] = await tx
+          .update(schema.preTourPlan)
+          .set({
+            deletedAt: null,
+            deletedByUserId: null,
+            deletedByName: null,
+            isActive: true,
+            updatedByUserId: userId,
+            updatedByName: userName,
+            updatedAt: new Date(),
+          } as any)
+          .where(
+            and(
+              eq(schema.preTourPlan.id, String(binRecord.planId)),
+              eq(schema.preTourPlan.companyId, companyId)
+            )
+          )
+          .returning();
+
+        await tx
+          .delete(schema.preTourPlanBin)
+          .where(eq(schema.preTourPlanBin.id, id));
+
+        return [updatedPlan];
+      });
+
+      if (!restored) {
+        throw new PreTourError(404, "NOT_FOUND", "Original pre-tour plan not found.");
+      }
+      return restored;
+    }
+
     default:
       throw new PreTourError(404, "RESOURCE_NOT_FOUND", "Pre-tour resource not found.");
   }
@@ -924,15 +1529,87 @@ export async function deletePreTourRecord(
   headers: Headers
 ) {
   const resource = parseResource(resourceInput);
-  const { companyId } = await ensureWritable(headers);
+  const access = await ensureWritable(headers);
+  const { companyId, userId, userName } = access;
 
   switch (resource) {
     case "pre-tours": {
-      const [deleted] = await db
-        .delete(schema.preTourPlan)
-        .where(and(eq(schema.preTourPlan.id, id), eq(schema.preTourPlan.companyId, companyId)))
-        .returning({ id: schema.preTourPlan.id });
-      if (!deleted) throw new PreTourError(404, "NOT_FOUND", "Pre-tour plan not found.");
+      const [current] = await db
+        .select()
+        .from(schema.preTourPlan)
+        .where(
+          and(
+            eq(schema.preTourPlan.id, id),
+            eq(schema.preTourPlan.companyId, companyId),
+            isNull(schema.preTourPlan.deletedAt)
+          )
+        )
+        .limit(1);
+      if (!current) throw new PreTourError(404, "NOT_FOUND", "Pre-tour plan not found.");
+
+      const deletedAt = new Date();
+
+      await db.transaction(async (tx) => {
+        await tx
+          .update(schema.preTourPlan)
+          .set({
+            isActive: false,
+            deletedAt,
+            deletedByUserId: userId,
+            deletedByName: userName,
+            updatedByUserId: userId,
+            updatedByName: userName,
+            updatedAt: deletedAt,
+          } as any)
+          .where(and(eq(schema.preTourPlan.id, id), eq(schema.preTourPlan.companyId, companyId)));
+
+        await tx.insert(schema.preTourPlanBin).values({
+          companyId,
+          planId: id,
+          programCode: "PRE_TOUR",
+          code: String(current.code),
+          referenceNo: String(current.referenceNo),
+          planCode: String(current.planCode),
+          title: String(current.title),
+          deletedByUserId: userId,
+          deletedByName: userName,
+          deletedAt,
+          snapshot: current as Record<string, unknown>,
+        } as any).onConflictDoNothing({ target: [schema.preTourPlanBin.planId] });
+      });
+      return;
+    }
+    case "pre-tour-bins": {
+      if (access.role !== "ADMIN") {
+        throw new PreTourError(
+          403,
+          "PERMISSION_DENIED",
+          "Only Admin can permanently delete records from bin."
+        );
+      }
+
+      const [binRecord] = await db
+        .select({ id: schema.preTourPlanBin.id, planId: schema.preTourPlanBin.planId })
+        .from(schema.preTourPlanBin)
+        .where(and(eq(schema.preTourPlanBin.id, id), eq(schema.preTourPlanBin.companyId, companyId)))
+        .limit(1);
+      if (!binRecord) {
+        throw new PreTourError(404, "NOT_FOUND", "Pre-tour bin record not found.");
+      }
+
+      await db.transaction(async (tx) => {
+        await tx
+          .delete(schema.preTourPlanBin)
+          .where(eq(schema.preTourPlanBin.id, id));
+        await tx
+          .delete(schema.preTourPlan)
+          .where(
+            and(
+              eq(schema.preTourPlan.id, String(binRecord.planId)),
+              eq(schema.preTourPlan.companyId, companyId)
+            )
+          );
+      });
       return;
     }
     case "pre-tour-days": {
@@ -972,12 +1649,62 @@ export async function deletePreTourRecord(
       if (!deleted) throw new PreTourError(404, "NOT_FOUND", "Pre-tour total not found.");
       return;
     }
+    case "pre-tour-categories": {
+      const [deleted] = await db
+        .delete(schema.preTourPlanCategory)
+        .where(
+          and(
+            eq(schema.preTourPlanCategory.id, id),
+            eq(schema.preTourPlanCategory.companyId, companyId)
+          )
+        )
+        .returning({ id: schema.preTourPlanCategory.id });
+      if (!deleted) throw new PreTourError(404, "NOT_FOUND", "Pre-tour category not found.");
+      return;
+    }
+    case "pre-tour-technical-visits": {
+      const [deleted] = await db
+        .delete(schema.preTourPlanTechnicalVisit)
+        .where(
+          and(
+            eq(schema.preTourPlanTechnicalVisit.id, id),
+            eq(schema.preTourPlanTechnicalVisit.companyId, companyId)
+          )
+        )
+        .returning({ id: schema.preTourPlanTechnicalVisit.id });
+      if (!deleted) {
+        throw new PreTourError(404, "NOT_FOUND", "Pre-tour technical visit not found.");
+      }
+      return;
+    }
     default:
       throw new PreTourError(404, "RESOURCE_NOT_FOUND", "Pre-tour resource not found.");
   }
 }
 
 export function toPreTourErrorResponse(error: unknown) {
+  if (error && typeof error === "object") {
+    const dbError = error as { code?: string; constraint?: string; detail?: string };
+    if (dbError.code === "23505") {
+      if (dbError.constraint === "uq_pre_tour_plan_day_company_code") {
+        return {
+          status: 400,
+          body: {
+            code: "VALIDATION_ERROR",
+            message: "Day code already exists in this company. Please use a unique code.",
+          },
+        };
+      }
+      return {
+        status: 400,
+        body: {
+          code: "VALIDATION_ERROR",
+          message: dbError.detail || "Duplicate record found. Please use unique values.",
+        },
+      };
+    }
+  }
+
   if (error instanceof PreTourError) {
     return {
       status: error.status,

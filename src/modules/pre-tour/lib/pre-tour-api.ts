@@ -10,7 +10,14 @@ async function parseResponse<T>(response: Response): Promise<T> {
 
 export async function listPreTourRecords(
   resource: string,
-  params?: { q?: string; limit?: number; planId?: string; dayId?: string; itemId?: string }
+  params?: {
+    q?: string;
+    limit?: number;
+    planId?: string;
+    dayId?: string;
+    itemId?: string;
+    visitId?: string;
+  }
 ) {
   const search = new URLSearchParams();
   if (params?.q) search.set("q", params.q);
@@ -18,6 +25,7 @@ export async function listPreTourRecords(
   if (params?.planId) search.set("planId", params.planId);
   if (params?.dayId) search.set("dayId", params.dayId);
   if (params?.itemId) search.set("itemId", params.itemId);
+  if (params?.visitId) search.set("visitId", params.visitId);
   const response = await fetch(`/api/pre-tours/${resource}?${search.toString()}`, {
     cache: "no-store",
   });

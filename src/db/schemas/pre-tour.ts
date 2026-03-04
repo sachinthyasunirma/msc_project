@@ -12,6 +12,8 @@ import {
 import { nanoid } from "nanoid";
 import { businessOrganization } from "@/db/schemas/business-network";
 import { company } from "@/db/schemas/company";
+import { technicalVisit } from "@/db/schemas/technical-visit";
+import { tourCategory, tourCategoryType } from "@/db/schemas/tour-category";
 
 export const preTourPlan = pgTable(
   "pre_tour_plan",
@@ -67,6 +69,11 @@ export const preTourPlan = pgTable(
     version: integer("version").notNull().default(1),
     isLocked: boolean("is_locked").notNull().default(false),
     isActive: boolean("is_active").notNull().default(true),
+    updatedByUserId: text("updated_by_user_id"),
+    updatedByName: text("updated_by_name"),
+    deletedAt: timestamp("deleted_at"),
+    deletedByUserId: text("deleted_by_user_id"),
+    deletedByName: text("deleted_by_name"),
     createdAt: timestamp("created_at").notNull().defaultNow(),
     updatedAt: timestamp("updated_at").notNull().defaultNow(),
   },
@@ -83,7 +90,38 @@ export const preTourPlan = pgTable(
     index("idx_pre_tour_plan_operator_org").on(table.operatorOrgId),
     index("idx_pre_tour_plan_market_org").on(table.marketOrgId),
     index("idx_pre_tour_plan_status").on(table.status),
+    index("idx_pre_tour_plan_deleted_at").on(table.deletedAt),
     index("idx_pre_tour_plan_date_range").on(table.startDate, table.endDate),
+  ]
+);
+
+export const preTourPlanBin = pgTable(
+  "pre_tour_plan_bin",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => nanoid()),
+    companyId: text("company_id")
+      .notNull()
+      .references(() => company.id, { onDelete: "cascade" }),
+    planId: text("plan_id")
+      .notNull()
+      .references(() => preTourPlan.id, { onDelete: "cascade" }),
+    programCode: text("program_code").notNull().default("PRE_TOUR"),
+    code: text("code").notNull(),
+    referenceNo: text("reference_no").notNull(),
+    planCode: text("plan_code").notNull(),
+    title: text("title").notNull(),
+    deletedByUserId: text("deleted_by_user_id"),
+    deletedByName: text("deleted_by_name"),
+    deletedAt: timestamp("deleted_at").notNull().defaultNow(),
+    snapshot: jsonb("snapshot").$type<Record<string, unknown> | null>(),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (table) => [
+    unique("uq_pre_tour_plan_bin_plan").on(table.planId),
+    index("idx_pre_tour_plan_bin_company").on(table.companyId),
+    index("idx_pre_tour_plan_bin_deleted_at").on(table.deletedAt),
   ]
 );
 
@@ -257,5 +295,75 @@ export const preTourPlanTotal = pgTable(
     unique("uq_pre_tour_plan_total_plan").on(table.planId),
     index("idx_pre_tour_plan_total_company").on(table.companyId),
     index("idx_pre_tour_plan_total_plan").on(table.planId),
+  ]
+);
+
+export const preTourPlanCategory = pgTable(
+  "pre_tour_plan_category",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => nanoid()),
+    companyId: text("company_id")
+      .notNull()
+      .references(() => company.id, { onDelete: "cascade" }),
+    code: text("code").notNull(),
+    planId: text("plan_id")
+      .notNull()
+      .references(() => preTourPlan.id, { onDelete: "cascade" }),
+    typeId: text("type_id")
+      .notNull()
+      .references(() => tourCategoryType.id, { onDelete: "restrict" }),
+    categoryId: text("category_id")
+      .notNull()
+      .references(() => tourCategory.id, { onDelete: "restrict" }),
+    notes: text("notes"),
+    isActive: boolean("is_active").notNull().default(true),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (table) => [
+    unique("uq_pre_tour_plan_category_company_code").on(table.companyId, table.code),
+    unique("uq_pre_tour_plan_category_plan_type_category").on(
+      table.planId,
+      table.typeId,
+      table.categoryId
+    ),
+    index("idx_pre_tour_plan_category_company").on(table.companyId),
+    index("idx_pre_tour_plan_category_plan").on(table.planId),
+    index("idx_pre_tour_plan_category_type").on(table.typeId),
+    index("idx_pre_tour_plan_category_category").on(table.categoryId),
+  ]
+);
+
+export const preTourPlanTechnicalVisit = pgTable(
+  "pre_tour_plan_technical_visit",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => nanoid()),
+    companyId: text("company_id")
+      .notNull()
+      .references(() => company.id, { onDelete: "cascade" }),
+    code: text("code").notNull(),
+    planId: text("plan_id")
+      .notNull()
+      .references(() => preTourPlan.id, { onDelete: "cascade" }),
+    dayId: text("day_id").references(() => preTourPlanDay.id, { onDelete: "set null" }),
+    technicalVisitId: text("technical_visit_id")
+      .notNull()
+      .references(() => technicalVisit.id, { onDelete: "restrict" }),
+    notes: text("notes"),
+    isActive: boolean("is_active").notNull().default(true),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (table) => [
+    unique("uq_pre_tour_plan_technical_visit_company_code").on(table.companyId, table.code),
+    unique("uq_pre_tour_plan_technical_visit_plan_visit").on(table.planId, table.technicalVisitId),
+    index("idx_pre_tour_plan_technical_visit_company").on(table.companyId),
+    index("idx_pre_tour_plan_technical_visit_plan").on(table.planId),
+    index("idx_pre_tour_plan_technical_visit_day").on(table.dayId),
+    index("idx_pre_tour_plan_technical_visit_visit").on(table.technicalVisitId),
   ]
 );

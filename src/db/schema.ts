@@ -8,5 +8,7 @@ export * from "@/db/schemas/business-network";
 export * from "@/db/schemas/currency";
 export * from "@/db/schemas/guides";
 export * from "@/db/schemas/tax";
+export * from "@/db/schemas/tour-category";
+export * from "@/db/schemas/technical-visit";
 
 export * from "@/db/schemas/pre-tour";

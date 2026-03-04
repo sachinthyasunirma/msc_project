@@ -4,11 +4,17 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { Edit3, Plus, RefreshCw, Settings2, Trash2 } from "lucide-react";
 import { useConfirm } from "@/components/app-confirm-provider";
+import {
+  activityImportConfig,
+  activityRateImportConfig,
+} from "@/components/batch-import/master-batch-import-config";
+import { MasterBatchImportDialog } from "@/components/batch-import/master-batch-import-dialog";
 import { notify } from "@/lib/notify";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { RecordAuditMeta } from "@/components/ui/record-audit-meta";
+import { TablePagination } from "@/components/ui/table-pagination";
 import {
   Dialog,
   DialogContent,
@@ -82,6 +88,13 @@ const META: Record<ResourceKey, { title: string; description: string }> = {
     title: "Activity Supplements",
     description: "Configure supplements linked to this activity.",
   },
+};
+
+const TAB_LABELS: Record<ResourceKey, string> = {
+  activities: "Activities",
+  "activity-availability": "Availability",
+  "activity-rates": "Rates",
+  "activity-supplements": "Supplements",
 };
 
 const COLUMNS: Record<ResourceKey, Array<{ key: string; label: string }>> = {
@@ -186,6 +199,9 @@ export function ActivityManagementView({ activityId, showActivityList = true }: 
     row: Record<string, unknown> | null;
   }>({ open: false, mode: "create", row: null });
   const [form, setForm] = useState<Record<string, unknown>>({});
+  const [batchOpen, setBatchOpen] = useState(false);
+  const [pageSize, setPageSize] = useState(25);
+  const [currentPage, setCurrentPage] = useState(1);
 
   const selectedActivity = useMemo(() => {
     if (!activityId) return null;
@@ -212,6 +228,32 @@ export function ActivityManagementView({ activityId, showActivityList = true }: 
     });
     return Object.fromEntries(items);
   }, [activities, locations]);
+
+  const activityExistingCodes = useMemo(() => {
+    return new Set(
+      activities
+        .map((row) => String(row.code ?? "").trim().toUpperCase())
+        .filter((value) => value.length > 0)
+    );
+  }, [activities]);
+
+  const locationByCode = useMemo(() => {
+    return new Map(
+      locations.map((location) => [
+        String(location.code ?? "").trim().toUpperCase(),
+        String(location.id ?? ""),
+      ])
+    );
+  }, [locations]);
+
+  const activityByCode = useMemo(() => {
+    return new Map(
+      activities.map((activity) => [
+        String(activity.code ?? "").trim().toUpperCase(),
+        String(activity.id ?? ""),
+      ])
+    );
+  }, [activities]);
 
   const fields = useMemo<Field[]>(() => {
     const supplementOptions = activities
@@ -385,8 +427,8 @@ export function ActivityManagementView({ activityId, showActivityList = true }: 
   const loadLookups = useCallback(async () => {
     try {
       const [acts, locs] = await Promise.all([
-        listActivityRecords("activities", { limit: 200 }),
-        listTransportRecords("locations", { limit: 200 }),
+        listActivityRecords("activities", { limit: 500 }),
+        listTransportRecords("locations", { limit: 500 }),
       ]);
       setActivities(acts);
       setLocations(locs);
@@ -400,7 +442,7 @@ export function ActivityManagementView({ activityId, showActivityList = true }: 
   const loadImages = useCallback(async () => {
     try {
       const rows = await listActivityRecords("activity-images", {
-        limit: 200,
+        limit: 500,
         activityId: activityId || undefined,
       });
       setImages(rows);
@@ -414,7 +456,7 @@ export function ActivityManagementView({ activityId, showActivityList = true }: 
     try {
       const params: { q?: string; limit?: number; activityId?: string; parentActivityId?: string } = {
         q: query || undefined,
-        limit: 200,
+        limit: 500,
       };
       if (!showActivityList && activityId) {
         if (resource === "activity-supplements") {
@@ -440,6 +482,16 @@ export function ActivityManagementView({ activityId, showActivityList = true }: 
     }
   }, [activityId, coverImageMap, query, resource, showActivityList]);
 
+  const totalPages = useMemo(
+    () => Math.max(1, Math.ceil(records.length / pageSize)),
+    [records.length, pageSize]
+  );
+
+  const pagedRecords = useMemo(() => {
+    const start = (currentPage - 1) * pageSize;
+    return records.slice(start, start + pageSize);
+  }, [records, currentPage, pageSize]);
+
   useEffect(() => {
     void loadLookups();
     void loadImages();
@@ -448,6 +500,16 @@ export function ActivityManagementView({ activityId, showActivityList = true }: 
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [resource, query, pageSize, showActivityList, activityId]);
+
+  useEffect(() => {
+    if (currentPage > totalPages) {
+      setCurrentPage(totalPages);
+    }
+  }, [currentPage, totalPages]);
 
   const upsertCoverImage = useCallback(
     async (targetActivityId: string, imageUrlRaw: unknown, altTextRaw: unknown) => {
@@ -611,6 +673,50 @@ export function ActivityManagementView({ activityId, showActivityList = true }: 
     }
   };
 
+  const refreshActivityExistingCodes = async () => {
+    const rows = await listActivityRecords("activities", { limit: 500 });
+    return new Set(
+      rows
+        .map((row) => String(row.code ?? "").trim().toUpperCase())
+        .filter((value) => value.length > 0)
+    );
+  };
+
+  const refreshActivityRateExistingCodes = async () => {
+    const rows = await listActivityRecords("activity-rates", {
+      limit: 500,
+      activityId: showActivityList ? undefined : activityId || undefined,
+    });
+    return new Set(
+      rows
+        .map((row) => String(row.code ?? "").trim().toUpperCase())
+        .filter((value) => value.length > 0)
+    );
+  };
+
+  const activityRateBatchConfig = useMemo(() => {
+    const activityCodeOptions = activities.map((item) => ({
+      value: String(item.code ?? "").trim().toUpperCase(),
+      label: `${String(item.code ?? "").trim().toUpperCase()} - ${String(item.name ?? "")}`,
+    }));
+    const fields = showActivityList
+      ? activityRateImportConfig.fields.map((field) =>
+          field.key === "activityCode" ? { ...field, options: activityCodeOptions } : field
+        )
+      : activityRateImportConfig.fields.filter((field) => field.key !== "activityCode");
+
+    return {
+      ...activityRateImportConfig,
+      fields,
+      lookupHints: [
+        {
+          label: "Available Activity Codes",
+          values: activityCodeOptions.map((item) => item.value).slice(0, 20),
+        },
+      ],
+    };
+  }, [activities, showActivityList]);
+
   const resourceTabs = showActivityList
     ? (["activities"] as ResourceKey[])
     : (["activity-rates", "activity-availability", "activity-supplements"] as ResourceKey[]);
@@ -638,6 +744,11 @@ export function ActivityManagementView({ activityId, showActivityList = true }: 
               <RefreshCw className="mr-2 size-4" />
               Refresh
             </Button>
+            {(showActivityList && resource === "activities") || resource === "activity-rates" ? (
+              <Button variant="outline" onClick={() => setBatchOpen(true)}>
+                Batch Upload
+              </Button>
+            ) : null}
             <Button
               onClick={() => openDialog("create")}
               disabled={isReadOnly}
@@ -656,7 +767,7 @@ export function ActivityManagementView({ activityId, showActivityList = true }: 
               <TabsList className="master-tabs-list">
                 {resourceTabs.map((key) => (
                   <TabsTrigger key={key} value={key} className="master-tab-trigger">
-                    {META[key].title.replace("Activity ", "")}
+                    {TAB_LABELS[key]}
                   </TabsTrigger>
                 ))}
               </TabsList>
@@ -696,7 +807,7 @@ export function ActivityManagementView({ activityId, showActivityList = true }: 
                 </TableCell>
               </TableRow>
             ) : (
-              records.map((row) => (
+              pagedRecords.map((row) => (
                 <TableRow key={String(row.id)}>
                   {COLUMNS[resource].map((column) => (
                     <TableCell key={column.key}>
@@ -754,6 +865,15 @@ export function ActivityManagementView({ activityId, showActivityList = true }: 
             )}
           </TableBody>
         </Table>
+        {!loading && records.length > 0 ? (
+          <TablePagination
+            totalItems={records.length}
+            page={currentPage}
+            pageSize={pageSize}
+            onPageChange={setCurrentPage}
+            onPageSizeChange={setPageSize}
+          />
+        ) : null}
       </CardContent>
 
       <Dialog open={dialog.open} onOpenChange={(open) => setDialog((prev) => ({ ...prev, open }))}>
@@ -846,6 +966,62 @@ export function ActivityManagementView({ activityId, showActivityList = true }: 
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <MasterBatchImportDialog
+        open={batchOpen}
+        onOpenChange={setBatchOpen}
+        config={
+          resource === "activity-rates"
+            ? activityRateBatchConfig
+            : {
+                ...activityImportConfig,
+                fields: activityImportConfig.fields.map((field) =>
+                  field.key === "locationCode"
+                    ? {
+                        ...field,
+                        options: locations.map((item) => ({
+                          value: String(item.code ?? "").trim().toUpperCase(),
+                          label: `${String(item.code ?? "").trim().toUpperCase()} - ${String(item.name ?? "")}`,
+                        })),
+                      }
+                    : field
+                ),
+                lookupHints: [
+                  {
+                    label: "Available Location Codes",
+                    values: locations
+                      .map((item) => String(item.code ?? "").trim().toUpperCase())
+                      .filter((value) => value.length > 0)
+                      .slice(0, 20),
+                  },
+                ],
+              }
+        }
+        readOnly={isReadOnly}
+        context={{
+          locationByCode,
+          currencyByCode: new Map(),
+          activityByCode,
+          vehicleCategoryByCode: new Map(),
+          vehicleTypeByCode: new Map(),
+          vehicleTypeCategoryCodeByCode: new Map(),
+          defaultActivityId: showActivityList ? null : activityId || null,
+        }}
+        existingCodes={resource === "activity-rates" ? new Set(
+          records.map((row) => String(row.code ?? "").trim().toUpperCase()).filter((value) => value.length > 0)
+        ) : activityExistingCodes}
+        onRefreshExistingCodes={resource === "activity-rates" ? refreshActivityRateExistingCodes : refreshActivityExistingCodes}
+        onUploadRow={async (payload) => {
+          if (resource === "activity-rates") {
+            await createActivityRecord("activity-rates", payload);
+            return;
+          }
+          await createActivityRecord("activities", payload);
+        }}
+        onCompleted={async () => {
+          await Promise.all([load(), loadImages(), loadLookups()]);
+        }}
+      />
     </Card>
   );
 }

@@ -40,6 +40,7 @@ type CompanyUsersResponse = {
     code: string;
     name: string;
     baseCurrencyCode: string;
+    transportRateBasis: "VEHICLE_CATEGORY" | "VEHICLE_TYPE";
     helpEnabled: boolean;
     joinSecretCode: string | null;
     managerPrivilegeCode: string | null;
@@ -85,6 +86,9 @@ export function CompanyConfigurationView() {
   const [payload, setPayload] = useState<CompanyUsersResponse | null>(null);
   const [helpEnabled, setHelpEnabled] = useState(true);
   const [baseCurrencyCode, setBaseCurrencyCode] = useState("USD");
+  const [transportRateBasis, setTransportRateBasis] = useState<
+    "VEHICLE_CATEGORY" | "VEHICLE_TYPE"
+  >("VEHICLE_TYPE");
   const [currencyOptions, setCurrencyOptions] = useState<Array<{ code: string; name: string }>>([]);
   const [drafts, setDrafts] = useState<Record<string, UserDraft>>({});
 
@@ -107,6 +111,7 @@ export function CompanyConfigurationView() {
       setPayload(typed);
       setHelpEnabled(Boolean(typed.company.helpEnabled));
       setBaseCurrencyCode(typed.company.baseCurrencyCode || "USD");
+      setTransportRateBasis(typed.company.transportRateBasis || "VEHICLE_TYPE");
       setDrafts(
         Object.fromEntries(
           typed.users.map((user) => [
@@ -175,6 +180,7 @@ export function CompanyConfigurationView() {
           name?: string;
           email?: string;
           baseCurrencyCode?: string;
+          transportRateBasis?: "VEHICLE_CATEGORY" | "VEHICLE_TYPE";
           joinSecretCode?: string | null;
           managerPrivilegeCode?: string | null;
           country?: string | null;
@@ -194,6 +200,11 @@ export function CompanyConfigurationView() {
           email: currentBody.company.email || "",
           baseCurrencyCode:
             baseCurrencyCode || currentBody.company.baseCurrencyCode || payload.company.baseCurrencyCode || "USD",
+          transportRateBasis:
+            transportRateBasis ||
+            currentBody.company.transportRateBasis ||
+            payload.company.transportRateBasis ||
+            "VEHICLE_TYPE",
           secretCode: currentBody.company.joinSecretCode || payload.company.joinSecretCode || "",
           privilegeCode:
             currentBody.company.managerPrivilegeCode ||
@@ -340,6 +351,27 @@ export function CompanyConfigurationView() {
               </div>
             </div>
             <div className="space-y-2">
+              <Label>Transport Rate Basis</Label>
+              <Select
+                value={transportRateBasis}
+                onValueChange={(value) =>
+                  setTransportRateBasis(value as "VEHICLE_CATEGORY" | "VEHICLE_TYPE")
+                }
+                disabled={!canManageUsers || savingHelp}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="VEHICLE_TYPE">Vehicle Type</SelectItem>
+                  <SelectItem value="VEHICLE_CATEGORY">Vehicle Category</SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                Controls whether transport rates are configured by vehicle type or category.
+              </p>
+            </div>
+            <div className="space-y-2">
               <Label>Manager Privilege Code</Label>
               <Input value={payload?.company.managerPrivilegeCode || "-"} readOnly />
             </div>
@@ -351,7 +383,7 @@ export function CompanyConfigurationView() {
               disabled={!canManageUsers || savingHelp}
               onClick={() => void onSaveHelpSetting()}
             >
-              {savingHelp ? "Saving..." : "Save Help Setting"}
+              {savingHelp ? "Saving..." : "Save Company Settings"}
             </Button>
           </CardContent>
         </Card>

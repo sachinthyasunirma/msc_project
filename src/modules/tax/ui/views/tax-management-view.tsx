@@ -5,6 +5,7 @@ import { useConfirm } from "@/components/app-confirm-provider";
 import { notify } from "@/lib/notify";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { TablePagination } from "@/components/ui/table-pagination";
 import { authClient } from "@/lib/auth-client";
 import {
   createTaxRecord,
@@ -67,6 +68,8 @@ export function TaxManagementView({
     row: Record<string, unknown> | null;
   }>({ open: false, mode: "create", row: null });
   const [form, setForm] = useState<Record<string, unknown>>({});
+  const [pageSize, setPageSize] = useState(25);
+  const [currentPage, setCurrentPage] = useState(1);
   const isTaxManageMode = Boolean(managedTaxId);
   const taxScopedResources: TaxResourceKey[] = useMemo(
     () => ["tax-rates", "tax-rule-taxes"],
@@ -538,6 +541,26 @@ export function TaxManagementView({
     }
   }, [resource, visibleResources]);
 
+  const totalPages = useMemo(
+    () => Math.max(1, Math.ceil(records.length / pageSize)),
+    [records.length, pageSize]
+  );
+
+  const pagedRecords = useMemo(() => {
+    const start = (currentPage - 1) * pageSize;
+    return records.slice(start, start + pageSize);
+  }, [records, currentPage, pageSize]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [resource, query, pageSize, managedTaxId]);
+
+  useEffect(() => {
+    if (currentPage > totalPages) {
+      setCurrentPage(totalPages);
+    }
+  }, [currentPage, totalPages]);
+
   const openDialog = (mode: "create" | "edit", row?: Record<string, unknown>) => {
     if (mode === "create" && isReadOnly) {
       notify.warning("View only mode: adding records is disabled.");
@@ -661,13 +684,22 @@ export function TaxManagementView({
         />
         <TaxRecordsTable
           resource={resource}
-          records={records}
+          records={pagedRecords}
           loading={loading}
           isReadOnly={isReadOnly}
           lookups={lookups}
           onEdit={(row) => openDialog("edit", row)}
           onDelete={(row) => void onDelete(row)}
         />
+        {!loading && records.length > 0 ? (
+          <TablePagination
+            totalItems={records.length}
+            page={currentPage}
+            pageSize={pageSize}
+            onPageChange={setCurrentPage}
+            onPageSizeChange={setPageSize}
+          />
+        ) : null}
       </CardContent>
       <TaxRecordDialog
         dialog={dialog}

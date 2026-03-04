@@ -3,11 +3,25 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Edit3, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { useConfirm } from "@/components/app-confirm-provider";
+import {
+  locationImportConfig,
+  transportBaggageRateImportConfig,
+  transportLocationExpenseImportConfig,
+  transportLocationRateImportConfig,
+  transportPaxVehicleRateImportConfig,
+  transportVehicleCategoryImportConfig,
+  transportVehicleTypeImportConfig,
+} from "@/components/batch-import/master-batch-import-config";
+import {
+  MasterBatchImportDialog,
+  type ImportEntityConfig,
+} from "@/components/batch-import/master-batch-import-dialog";
 import { notify } from "@/lib/notify";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { RecordAuditMeta } from "@/components/ui/record-audit-meta";
+import { TablePagination } from "@/components/ui/table-pagination";
 import {
   Dialog,
   DialogContent,
@@ -62,6 +76,12 @@ type FormField = {
   placeholder?: string;
   defaultValue?: string | number | boolean;
   nullable?: boolean;
+};
+
+type CompanySettingsResponse = {
+  company?: {
+    transportRateBasis?: "VEHICLE_CATEGORY" | "VEHICLE_TYPE" | null;
+  } | null;
 };
 
 const RESOURCE_META: Record<TransportResourceKey, { title: string; description: string }> = {
@@ -220,6 +240,12 @@ export function TransportManagementView({
     row: Record<string, unknown> | null;
   }>({ open: false, mode: "create", row: null });
   const [form, setForm] = useState<Record<string, unknown>>({});
+  const [batchOpen, setBatchOpen] = useState(false);
+  const [pageSize, setPageSize] = useState(25);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [transportRateBasis, setTransportRateBasis] = useState<
+    "VEHICLE_CATEGORY" | "VEHICLE_TYPE"
+  >("VEHICLE_TYPE");
 
   const meta = RESOURCE_META[resource];
 
@@ -237,6 +263,133 @@ export function TransportManagementView({
     return Object.fromEntries(pairs);
   }, [catalogs]);
 
+  const locationExistingCodes = useMemo(() => {
+    return new Set(
+      records
+        .map((row) => String(row.code ?? "").trim().toUpperCase())
+        .filter((value) => value.length > 0)
+    );
+  }, [records]);
+
+  const locationByCode = useMemo(() => {
+    return new Map(
+      catalogs.locations.map((row) => [
+        String(row.code ?? "").trim().toUpperCase(),
+        String(row.id ?? ""),
+      ])
+    );
+  }, [catalogs.locations]);
+
+  const vehicleCategoryByCode = useMemo(() => {
+    return new Map(
+      catalogs.vehicleCategories.map((row) => [
+        String(row.code ?? "").trim().toUpperCase(),
+        String(row.id ?? ""),
+      ])
+    );
+  }, [catalogs.vehicleCategories]);
+
+  const vehicleTypeByCode = useMemo(() => {
+    return new Map(
+      catalogs.vehicleTypes.map((row) => [
+        String(row.code ?? "").trim().toUpperCase(),
+        String(row.id ?? ""),
+      ])
+    );
+  }, [catalogs.vehicleTypes]);
+
+  const vehicleTypeCategoryCodeByCode = useMemo(() => {
+    const categoryCodeById = new Map(
+      catalogs.vehicleCategories.map((row) => [
+        String(row.id ?? ""),
+        String(row.code ?? "").trim().toUpperCase(),
+      ])
+    );
+    return new Map(
+      catalogs.vehicleTypes.map((row) => [
+        String(row.code ?? "").trim().toUpperCase(),
+        categoryCodeById.get(String(row.categoryId ?? "")) ?? "",
+      ])
+    );
+  }, [catalogs.vehicleCategories, catalogs.vehicleTypes]);
+
+  const batchConfig = useMemo<ImportEntityConfig>(() => {
+    const locationCodeOptions = catalogs.locations.map((row) => ({
+      value: String(row.code ?? "").trim().toUpperCase(),
+      label: `${String(row.code ?? "").trim().toUpperCase()} - ${String(row.name ?? "")}`,
+    }));
+    const vehicleCategoryCodeOptions = catalogs.vehicleCategories.map((row) => ({
+      value: String(row.code ?? "").trim().toUpperCase(),
+      label: `${String(row.code ?? "").trim().toUpperCase()} - ${String(row.name ?? "")}`,
+    }));
+    const vehicleTypeCodeOptions = catalogs.vehicleTypes.map((row) => ({
+      value: String(row.code ?? "").trim().toUpperCase(),
+      label: `${String(row.code ?? "").trim().toUpperCase()} - ${String(row.name ?? "")}`,
+    }));
+
+    const replaceCodeOptions = (config: ImportEntityConfig) => {
+      let nextFields = config.fields.map((field) => {
+        if (field.key === "locationCode" || field.key === "fromLocationCode" || field.key === "toLocationCode") {
+          return { ...field, options: locationCodeOptions };
+        }
+        if (field.key === "categoryCode" || field.key === "vehicleCategoryCode") {
+          return { ...field, options: vehicleCategoryCodeOptions };
+        }
+        if (field.key === "vehicleTypeCode") {
+          return { ...field, options: vehicleTypeCodeOptions };
+        }
+        return field;
+      });
+
+      if (["location-rates", "location-expenses", "pax-vehicle-rates", "baggage-rates"].includes(config.key)) {
+        nextFields = nextFields.filter((field) =>
+          transportRateBasis === "VEHICLE_CATEGORY"
+            ? field.key !== "vehicleTypeCode"
+            : field.key !== "vehicleCategoryCode"
+        );
+      }
+
+      return {
+        ...config,
+        fields: nextFields,
+        lookupHints: [
+        { label: "Location Codes", values: locationCodeOptions.map((item) => item.value).slice(0, 20) },
+        ...(transportRateBasis === "VEHICLE_CATEGORY"
+          ? [
+              {
+                label: "Vehicle Category Codes",
+                values: vehicleCategoryCodeOptions.map((item) => item.value).slice(0, 20),
+              },
+            ]
+          : [
+              {
+                label: "Vehicle Type Codes",
+                values: vehicleTypeCodeOptions.map((item) => item.value).slice(0, 20),
+              },
+            ]),
+      ],
+      };
+    };
+
+    switch (resource) {
+      case "locations":
+        return locationImportConfig;
+      case "vehicle-categories":
+        return transportVehicleCategoryImportConfig;
+      case "vehicle-types":
+        return replaceCodeOptions(transportVehicleTypeImportConfig);
+      case "location-rates":
+        return replaceCodeOptions(transportLocationRateImportConfig);
+      case "location-expenses":
+        return replaceCodeOptions(transportLocationExpenseImportConfig);
+      case "pax-vehicle-rates":
+        return replaceCodeOptions(transportPaxVehicleRateImportConfig);
+      case "baggage-rates":
+      default:
+        return replaceCodeOptions(transportBaggageRateImportConfig);
+    }
+  }, [resource, catalogs, transportRateBasis]);
+
   const fields = useMemo<FormField[]>(() => {
     const locationOptions = catalogs.locations.map((item) => ({
       value: String(item.id),
@@ -250,6 +403,23 @@ export function TransportManagementView({
       value: String(item.id),
       label: `${item.code} - ${item.name}`,
     }));
+
+    const vehicleBasisField =
+      transportRateBasis === "VEHICLE_CATEGORY"
+        ? ({
+            key: "vehicleCategoryId",
+            label: "Vehicle Category",
+            type: "select",
+            options: vehicleCategoryOptions,
+            required: true,
+          } as FormField)
+        : ({
+            key: "vehicleTypeId",
+            label: "Vehicle Type",
+            type: "select",
+            options: vehicleTypeOptions,
+            required: true,
+          } as FormField);
 
     if (resource === "locations") {
       return [
@@ -292,8 +462,7 @@ export function TransportManagementView({
         { key: "code", label: "Code", type: "text", required: true },
         { key: "fromLocationId", label: "From Location", type: "select", required: true, options: locationOptions },
         { key: "toLocationId", label: "To Location", type: "select", required: true, options: locationOptions },
-        { key: "vehicleCategoryId", label: "Vehicle Category", type: "select", options: vehicleCategoryOptions, nullable: true },
-        { key: "vehicleTypeId", label: "Vehicle Type", type: "select", options: vehicleTypeOptions, nullable: true },
+        vehicleBasisField,
         { key: "distanceKm", label: "Distance (km)", type: "number" },
         { key: "durationMin", label: "Duration (min)", type: "number" },
         { key: "currency", label: "Currency", type: "text", defaultValue: "LKR" },
@@ -318,8 +487,7 @@ export function TransportManagementView({
         { key: "expenseType", label: "Expense Type", type: "select", options: [{ label: "FIXED", value: "FIXED" }, { label: "PER_DAY", value: "PER_DAY" }, { label: "PER_HOUR", value: "PER_HOUR" }, { label: "PER_PAX", value: "PER_PAX" }, { label: "PER_VEHICLE", value: "PER_VEHICLE" }], defaultValue: "FIXED" },
         { key: "amount", label: "Amount", type: "number", required: true },
         { key: "currency", label: "Currency", type: "text", defaultValue: "LKR" },
-        { key: "vehicleCategoryId", label: "Vehicle Category", type: "select", options: vehicleCategoryOptions, nullable: true },
-        { key: "vehicleTypeId", label: "Vehicle Type", type: "select", options: vehicleTypeOptions, nullable: true },
+        vehicleBasisField,
         { key: "effectiveFrom", label: "Effective From", type: "datetime" },
         { key: "effectiveTo", label: "Effective To", type: "datetime" },
         { key: "notes", label: "Notes", type: "text" },
@@ -332,8 +500,7 @@ export function TransportManagementView({
         { key: "code", label: "Code", type: "text", required: true },
         { key: "fromLocationId", label: "From Location", type: "select", required: true, options: locationOptions },
         { key: "toLocationId", label: "To Location", type: "select", required: true, options: locationOptions },
-        { key: "vehicleCategoryId", label: "Vehicle Category", type: "select", options: vehicleCategoryOptions, nullable: true },
-        { key: "vehicleTypeId", label: "Vehicle Type", type: "select", options: vehicleTypeOptions, nullable: true },
+        vehicleBasisField,
         { key: "currency", label: "Currency", type: "text", defaultValue: "LKR" },
         { key: "pricingModel", label: "Pricing Model", type: "select", options: [{ label: "PER_PAX", value: "PER_PAX" }, { label: "TIERED", value: "TIERED" }], defaultValue: "PER_PAX" },
         { key: "perPaxRate", label: "Per Pax Rate", type: "number" },
@@ -350,8 +517,7 @@ export function TransportManagementView({
       { key: "code", label: "Code", type: "text", required: true },
       { key: "fromLocationId", label: "From Location", type: "select", required: true, options: locationOptions },
       { key: "toLocationId", label: "To Location", type: "select", required: true, options: locationOptions },
-      { key: "vehicleCategoryId", label: "Vehicle Category", type: "select", options: vehicleCategoryOptions, nullable: true },
-      { key: "vehicleTypeId", label: "Vehicle Type", type: "select", options: vehicleTypeOptions, nullable: true },
+      vehicleBasisField,
       { key: "currency", label: "Currency", type: "text", defaultValue: "LKR" },
       { key: "unit", label: "Unit", type: "select", options: [{ label: "BAG", value: "BAG" }, { label: "KG", value: "KG" }], defaultValue: "BAG" },
       { key: "pricingModel", label: "Pricing Model", type: "select", options: [{ label: "PER_UNIT", value: "PER_UNIT" }, { label: "TIERED", value: "TIERED" }, { label: "FIXED", value: "FIXED" }], defaultValue: "PER_UNIT" },
@@ -364,7 +530,7 @@ export function TransportManagementView({
       { key: "notes", label: "Notes", type: "text" },
       { key: "isActive", label: "Active", type: "boolean", defaultValue: true },
     ];
-  }, [catalogs, resource]);
+  }, [catalogs, resource, transportRateBasis]);
 
   const loadCatalogs = useCallback(async () => {
     const [locations, vehicleCategories, vehicleTypes] = await Promise.all([
@@ -387,6 +553,16 @@ export function TransportManagementView({
     }
   }, [query, resource]);
 
+  const totalPages = useMemo(
+    () => Math.max(1, Math.ceil(records.length / pageSize)),
+    [records.length, pageSize]
+  );
+
+  const pagedRecords = useMemo(() => {
+    const start = (currentPage - 1) * pageSize;
+    return records.slice(start, start + pageSize);
+  }, [records, currentPage, pageSize]);
+
   useEffect(() => {
     void loadCatalogs();
   }, [loadCatalogs]);
@@ -396,8 +572,39 @@ export function TransportManagementView({
   }, [load]);
 
   useEffect(() => {
+    let active = true;
+    (async () => {
+      try {
+        const response = await fetch("/api/companies/me", { cache: "no-store" });
+        if (!response.ok) return;
+        const body = (await response.json()) as CompanySettingsResponse;
+        if (!active) return;
+        const basis = body.company?.transportRateBasis;
+        setTransportRateBasis(
+          basis === "VEHICLE_CATEGORY" ? "VEHICLE_CATEGORY" : "VEHICLE_TYPE"
+        );
+      } catch {
+        if (active) setTransportRateBasis("VEHICLE_TYPE");
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
     setResource(initialResource);
   }, [initialResource]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [resource, query, pageSize]);
+
+  useEffect(() => {
+    if (currentPage > totalPages) {
+      setCurrentPage(totalPages);
+    }
+  }, [currentPage, totalPages]);
 
   const openDialog = (mode: "create" | "edit", row?: Record<string, unknown>) => {
     if (mode === "create" && isReadOnly) {
@@ -485,6 +692,15 @@ export function TransportManagementView({
     }
   };
 
+  const refreshLocationExistingCodes = async () => {
+    const rows = await listTransportRecords(resource, { limit: 500 });
+    return new Set(
+      rows
+        .map((row) => String(row.code ?? "").trim().toUpperCase())
+        .filter((value) => value.length > 0)
+    );
+  };
+
   return (
     <Card>
       <CardHeader className="flex flex-row items-center justify-between">
@@ -496,6 +712,9 @@ export function TransportManagementView({
           <Button variant="outline" onClick={() => void Promise.all([load(), loadCatalogs()])}>
             <RefreshCw className="mr-2 size-4" />
             Refresh
+          </Button>
+          <Button variant="outline" onClick={() => setBatchOpen(true)}>
+            Batch Upload
           </Button>
           <Button
             onClick={() => openDialog("create")}
@@ -555,7 +774,7 @@ export function TransportManagementView({
                 </TableCell>
               </TableRow>
             ) : (
-              records.map((row) => (
+              pagedRecords.map((row) => (
                 <TableRow key={String(row.id)}>
                   {RESOURCE_COLUMNS[resource].map((column) => (
                     <TableCell key={column.key}>
@@ -583,6 +802,15 @@ export function TransportManagementView({
             )}
           </TableBody>
         </Table>
+        {!loading && records.length > 0 ? (
+          <TablePagination
+            totalItems={records.length}
+            page={currentPage}
+            pageSize={pageSize}
+            onPageChange={setCurrentPage}
+            onPageSizeChange={setPageSize}
+          />
+        ) : null}
       </CardContent>
 
       <Dialog open={dialog.open} onOpenChange={(open) => setDialog((prev) => ({ ...prev, open }))}>
@@ -669,6 +897,29 @@ export function TransportManagementView({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <MasterBatchImportDialog
+        open={batchOpen}
+        onOpenChange={setBatchOpen}
+        config={batchConfig}
+        readOnly={isReadOnly}
+        context={{
+          locationByCode,
+          currencyByCode: new Map(),
+          vehicleCategoryByCode,
+          vehicleTypeByCode,
+          vehicleTypeCategoryCodeByCode,
+          transportRateBasis,
+        }}
+        existingCodes={locationExistingCodes}
+        onRefreshExistingCodes={refreshLocationExistingCodes}
+        onUploadRow={async (payload) => {
+          await createTransportRecord(resource, payload);
+        }}
+        onCompleted={async () => {
+          await Promise.all([load(), loadCatalogs()]);
+        }}
+      />
     </Card>
   );
 }

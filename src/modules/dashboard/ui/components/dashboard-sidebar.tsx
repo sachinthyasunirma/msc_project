@@ -10,6 +10,7 @@ import {
   Settings2,
   ShieldCheck,
   SquareTerminal,
+  Trash2,
 } from "lucide-react";
 import {
   Sidebar,
@@ -72,6 +73,10 @@ const data = {
           url: "/master-data/taxes",
         },
         {
+          title: "Tour Categories",
+          url: "/master-data/tour-categories",
+        },
+        {
           title: "Operator & Market",
           url: "/master-data/business-network",
         },
@@ -85,6 +90,10 @@ const data = {
         {
           title: "Pre-Tours",
           url: "/master-data/pre-tours",
+        },
+        {
+          title: "Field Visits",
+          url: "/master-data/technical-visits",
         },
       ],
     },
@@ -101,6 +110,11 @@ const data = {
     },
   ],
   navSecondary: [
+    {
+      title: "Bin",
+      url: "/bin",
+      icon: Trash2,
+    },
     {
       title: "Support",
       url: "#",

@@ -5,6 +5,7 @@ import { useConfirm } from "@/components/app-confirm-provider";
 import { notify } from "@/lib/notify";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { TablePagination } from "@/components/ui/table-pagination";
 import { authClient } from "@/lib/auth-client";
 import {
   createCurrencyRecord,
@@ -64,6 +65,8 @@ export function CurrencyManagementView({
     row: Record<string, unknown> | null;
   }>({ open: false, mode: "create", row: null });
   const [form, setForm] = useState<Record<string, unknown>>({});
+  const [pageSize, setPageSize] = useState(25);
+  const [currentPage, setCurrentPage] = useState(1);
 
   const managedCurrency = useMemo(
     () => currencies.find((item) => String(item.id) === managedCurrencyId) ?? null,
@@ -256,6 +259,26 @@ export function CurrencyManagementView({
     }
   }, [resource, visibleResources]);
 
+  const totalPages = useMemo(
+    () => Math.max(1, Math.ceil(records.length / pageSize)),
+    [records.length, pageSize]
+  );
+
+  const pagedRecords = useMemo(() => {
+    const start = (currentPage - 1) * pageSize;
+    return records.slice(start, start + pageSize);
+  }, [records, currentPage, pageSize]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [resource, query, pageSize, managedCurrencyId]);
+
+  useEffect(() => {
+    if (currentPage > totalPages) {
+      setCurrentPage(totalPages);
+    }
+  }, [currentPage, totalPages]);
+
   const visibleFields = useMemo(
     () =>
       isCurrencyManageMode && (resource === "exchange-rates" || resource === "money-settings")
@@ -388,12 +411,21 @@ export function CurrencyManagementView({
         />
         <CurrencyRecordsTable
           resource={resource}
-          records={records}
+          records={pagedRecords}
           loading={loading}
           lookups={lookups}
           onEdit={(row) => openDialog("edit", row)}
           onDelete={(row) => void onDelete(row)}
         />
+        {!loading && records.length > 0 ? (
+          <TablePagination
+            totalItems={records.length}
+            page={currentPage}
+            pageSize={pageSize}
+            onPageChange={setCurrentPage}
+            onPageSizeChange={setPageSize}
+          />
+        ) : null}
       </CardContent>
 
       <CurrencyRecordDialog

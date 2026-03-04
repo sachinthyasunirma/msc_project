@@ -6,6 +6,9 @@ export const preTourResourceSchema = z.enum([
   "pre-tour-items",
   "pre-tour-item-addons",
   "pre-tour-totals",
+  "pre-tour-categories",
+  "pre-tour-technical-visits",
+  "pre-tour-bins",
 ]);
 
 export const preTourListQuerySchema = z.object({
@@ -14,6 +17,7 @@ export const preTourListQuerySchema = z.object({
   planId: z.string().trim().min(1).optional(),
   dayId: z.string().trim().min(1).optional(),
   itemId: z.string().trim().min(1).optional(),
+  visitId: z.string().trim().min(1).optional(),
 });
 
 const baseCodeSchema = z.object({
@@ -176,3 +180,30 @@ export const updatePreTourTotalSchema = createPreTourTotalSchema.partial().refin
     message: "At least one total field is required.",
   }
 );
+
+export const createPreTourCategorySchema = baseCodeSchema.extend({
+  planId: z.string().min(1),
+  typeId: z.string().min(1),
+  categoryId: z.string().min(1),
+  notes: z.string().trim().max(1000).optional().nullable(),
+});
+
+export const updatePreTourCategorySchema = createPreTourCategorySchema.partial().refine(
+  (value) => Object.keys(value).length > 0,
+  {
+    message: "At least one pre-tour category field is required.",
+  }
+);
+
+export const createPreTourTechnicalVisitSchema = baseCodeSchema.extend({
+  planId: z.string().min(1),
+  dayId: z.string().min(1).optional().nullable(),
+  technicalVisitId: z.string().min(1),
+  notes: z.string().trim().max(1000).optional().nullable(),
+});
+
+export const updatePreTourTechnicalVisitSchema = createPreTourTechnicalVisitSchema
+  .partial()
+  .refine((value) => Object.keys(value).length > 0, {
+    message: "At least one pre-tour technical visit field is required.",
+  });

@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { RecordAuditMeta } from "@/components/ui/record-audit-meta";
+import { TablePagination } from "@/components/ui/table-pagination";
 import {
   Dialog,
   DialogContent,
@@ -221,6 +222,8 @@ export function BusinessNetworkManagementViewContent({
     row: Record<string, unknown> | null;
   }>({ open: false, mode: "create", row: null });
   const [form, setForm] = useState<Record<string, unknown>>({});
+  const [pageSize, setPageSize] = useState(25);
+  const [currentPage, setCurrentPage] = useState(1);
 
   const organizationOptions = useMemo(
     () =>
@@ -577,6 +580,16 @@ export function BusinessNetworkManagementViewContent({
     }
   }, [query, resource]);
 
+  const totalPages = useMemo(
+    () => Math.max(1, Math.ceil(records.length / pageSize)),
+    [records.length, pageSize]
+  );
+
+  const pagedRecords = useMemo(() => {
+    const start = (currentPage - 1) * pageSize;
+    return records.slice(start, start + pageSize);
+  }, [records, currentPage, pageSize]);
+
   useEffect(() => {
     void loadLookups();
   }, [loadLookups]);
@@ -584,6 +597,16 @@ export function BusinessNetworkManagementViewContent({
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [resource, query, pageSize]);
+
+  useEffect(() => {
+    if (currentPage > totalPages) {
+      setCurrentPage(totalPages);
+    }
+  }, [currentPage, totalPages]);
 
   const openDialog = (mode: "create" | "edit", row?: Record<string, unknown>) => {
     if (mode === "create" && isReadOnly) {
@@ -737,7 +760,7 @@ export function BusinessNetworkManagementViewContent({
                 </TableCell>
               </TableRow>
             ) : (
-              records.map((row) => (
+              pagedRecords.map((row) => (
                 <TableRow key={String(row.id)}>
                   {COLUMNS[resource].map((column) => (
                     <TableCell key={column.key}>
@@ -769,6 +792,15 @@ export function BusinessNetworkManagementViewContent({
             )}
           </TableBody>
         </Table>
+        {!loading && records.length > 0 ? (
+          <TablePagination
+            totalItems={records.length}
+            page={currentPage}
+            pageSize={pageSize}
+            onPageChange={setCurrentPage}
+            onPageSizeChange={setPageSize}
+          />
+        ) : null}
       </CardContent>
 
       <Dialog open={dialog.open} onOpenChange={(open) => setDialog((prev) => ({ ...prev, open }))}>

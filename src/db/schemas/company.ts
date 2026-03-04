@@ -11,6 +11,9 @@ export const company = pgTable("company", {
   name: text("name").notNull(),
   email: text("email").notNull().unique(),
   baseCurrencyCode: text("base_currency_code").notNull().default("USD"),
+  transportRateBasis: text("transport_rate_basis")
+    .notNull()
+    .default("VEHICLE_TYPE"),
   helpEnabled: boolean("help_enabled").notNull().default(true),
   country: text("country"),
   isActive: boolean("is_active").notNull().default(true),

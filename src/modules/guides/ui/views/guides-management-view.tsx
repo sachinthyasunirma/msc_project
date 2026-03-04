@@ -4,11 +4,14 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { Edit3, Plus, RefreshCw, Settings2, Trash2 } from "lucide-react";
 import { useConfirm } from "@/components/app-confirm-provider";
+import { guideImportConfig } from "@/components/batch-import/master-batch-import-config";
+import { MasterBatchImportDialog } from "@/components/batch-import/master-batch-import-dialog";
 import { notify } from "@/lib/notify";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { RecordAuditMeta } from "@/components/ui/record-audit-meta";
+import { TablePagination } from "@/components/ui/table-pagination";
 import {
   Dialog,
   DialogContent,
@@ -231,6 +234,9 @@ export function GuidesManagementView({
   const [currencies, setCurrencies] = useState<Array<Record<string, unknown>>>([]);
   const [dialog, setDialog] = useState<{ open: boolean; mode: "create" | "edit"; row: Record<string, unknown> | null }>({ open: false, mode: "create", row: null });
   const [form, setForm] = useState<Record<string, unknown>>({});
+  const [batchOpen, setBatchOpen] = useState(false);
+  const [pageSize, setPageSize] = useState(25);
+  const [currentPage, setCurrentPage] = useState(1);
 
   const lookups = useMemo(() => {
     const items: Array<[string, string]> = [];
@@ -240,6 +246,23 @@ export function GuidesManagementView({
     currencies.forEach((item) => items.push([String(item.id), `${item.code} - ${item.name}`]));
     return Object.fromEntries(items);
   }, [guides, languages, locations, currencies]);
+
+  const guideExistingCodes = useMemo(() => {
+    return new Set(
+      guides
+        .map((row) => String(row.code ?? "").trim().toUpperCase())
+        .filter((value) => value.length > 0)
+    );
+  }, [guides]);
+
+  const currencyByCode = useMemo(() => {
+    return new Map(
+      currencies.map((currency) => [
+        String(currency.code ?? "").trim().toUpperCase(),
+        String(currency.id ?? ""),
+      ])
+    );
+  }, [currencies]);
 
   const guideScopedResources: GuideResourceKey[] = useMemo(
     () => [
@@ -469,6 +492,16 @@ export function GuidesManagementView({
     }
   }, [guideScopedResources, isGuideManageMode, managedGuideId, query, resource]);
 
+  const totalPages = useMemo(
+    () => Math.max(1, Math.ceil(records.length / pageSize)),
+    [records.length, pageSize]
+  );
+
+  const pagedRecords = useMemo(() => {
+    const start = (currentPage - 1) * pageSize;
+    return records.slice(start, start + pageSize);
+  }, [records, currentPage, pageSize]);
+
   useEffect(() => {
     void loadLookups();
   }, [loadLookups]);
@@ -482,6 +515,16 @@ export function GuidesManagementView({
       setResource(visibleResources[0]);
     }
   }, [resource, visibleResources]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [resource, query, pageSize, isGuideManageMode, managedGuideId]);
+
+  useEffect(() => {
+    if (currentPage > totalPages) {
+      setCurrentPage(totalPages);
+    }
+  }, [currentPage, totalPages]);
 
   const openDialog = (mode: "create" | "edit", row?: Record<string, unknown>) => {
     if (mode === "create" && isReadOnly) {
@@ -584,6 +627,15 @@ export function GuidesManagementView({
     }
   };
 
+  const refreshGuideExistingCodes = async () => {
+    const rows = await listGuideRecords("guides", { limit: 500 });
+    return new Set(
+      rows
+        .map((row) => String(row.code ?? "").trim().toUpperCase())
+        .filter((value) => value.length > 0)
+    );
+  };
+
   return (
     <Card>
       <CardHeader className="space-y-4">
@@ -607,6 +659,11 @@ export function GuidesManagementView({
               <RefreshCw className="mr-2 size-4" />
               Refresh
             </Button>
+            {!isGuideManageMode && resource === "guides" ? (
+              <Button variant="outline" onClick={() => setBatchOpen(true)}>
+                Batch Upload
+              </Button>
+            ) : null}
             <Button onClick={() => openDialog("create")} disabled={isReadOnly} className="master-add-btn">
               <Plus className="mr-2 size-4" />
               Add Record
@@ -648,7 +705,7 @@ export function GuidesManagementView({
                 <TableCell colSpan={COLUMNS[resource].length + 1} className="text-center text-muted-foreground">No records found.</TableCell>
               </TableRow>
             ) : (
-              records.map((row) => (
+              pagedRecords.map((row) => (
                 <TableRow key={String(row.id)}>
                   {COLUMNS[resource].map((column) => (
                     <TableCell key={column.key}>
@@ -695,6 +752,15 @@ export function GuidesManagementView({
             )}
           </TableBody>
         </Table>
+        {!loading && records.length > 0 ? (
+          <TablePagination
+            totalItems={records.length}
+            page={currentPage}
+            pageSize={pageSize}
+            onPageChange={setCurrentPage}
+            onPageSizeChange={setPageSize}
+          />
+        ) : null}
       </CardContent>
 
       <Dialog open={dialog.open} onOpenChange={(open) => setDialog((prev) => ({ ...prev, open }))}>
@@ -752,6 +818,50 @@ export function GuidesManagementView({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <MasterBatchImportDialog
+        open={batchOpen}
+        onOpenChange={setBatchOpen}
+        config={{
+          ...guideImportConfig,
+          fields: guideImportConfig.fields.map((field) =>
+            field.key === "baseCurrencyCode"
+              ? {
+                  ...field,
+                  options: currencies.map((item) => ({
+                    value: String(item.code ?? "").trim().toUpperCase(),
+                    label: `${String(item.code ?? "").trim().toUpperCase()} - ${String(item.name ?? "")}`,
+                  })),
+                }
+              : field
+          ),
+          lookupHints: [
+            {
+              label: "Available Currency Codes",
+              values: currencies
+                .map((item) => String(item.code ?? "").trim().toUpperCase())
+                .filter((value) => value.length > 0)
+                .slice(0, 20),
+            },
+          ],
+        }}
+        readOnly={isReadOnly}
+        context={{
+          locationByCode: new Map(),
+          currencyByCode,
+          vehicleCategoryByCode: new Map(),
+          vehicleTypeByCode: new Map(),
+          vehicleTypeCategoryCodeByCode: new Map(),
+        }}
+        existingCodes={guideExistingCodes}
+        onRefreshExistingCodes={refreshGuideExistingCodes}
+        onUploadRow={async (payload) => {
+          await createGuideRecord("guides", payload);
+        }}
+        onCompleted={async () => {
+          await Promise.all([load(), loadLookups()]);
+        }}
+      />
     </Card>
   );
 }

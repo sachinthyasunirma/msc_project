@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { company, user } from "@/db/schema";
@@ -34,6 +34,7 @@ export async function GET(request: Request) {
         code: company.code,
         name: company.name,
         baseCurrencyCode: company.baseCurrencyCode,
+        transportRateBasis: company.transportRateBasis,
         helpEnabled: company.helpEnabled,
         joinSecretCode: company.joinSecretCode,
         managerPrivilegeCode: company.managerPrivilegeCode,

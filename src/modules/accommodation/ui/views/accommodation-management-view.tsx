@@ -4,6 +4,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { Edit3, ImageIcon, Loader2, Plus, RefreshCw, Settings2, Trash2 } from "lucide-react";
 import { useConfirm } from "@/components/app-confirm-provider";
+import { hotelImportConfig } from "@/components/batch-import/master-batch-import-config";
+import { MasterBatchImportDialog } from "@/components/batch-import/master-batch-import-dialog";
 import { RecordAuditMeta } from "@/components/ui/record-audit-meta";
 import { notify } from "@/lib/notify";
 import { Badge } from "@/components/ui/badge";
@@ -174,6 +176,7 @@ export const AccommodationManagementView = ({
     mode: DialogMode;
     row: SeasonOption | null;
   }>({ open: false, mode: "create", row: null });
+  const [batchOpen, setBatchOpen] = useState(false);
 
   const [hotelForm, setHotelForm] = useState({
     code: "",
@@ -244,6 +247,14 @@ export const AccommodationManagementView = ({
   const [roomRateLineStatusFilter, setRoomRateLineStatusFilter] = useState("all");
   const [roomRateLinePageSize, setRoomRateLinePageSize] = useState("10");
   const [roomRateLinePage, setRoomRateLinePage] = useState(1);
+
+  const hotelExistingCodes = useMemo(() => {
+    return new Set(
+      hotels
+        .map((hotel) => String(hotel.code ?? "").trim().toUpperCase())
+        .filter((value) => value.length > 0)
+    );
+  }, [hotels]);
 
   const selectedHotel = useMemo(
     () => hotels.find((item) => item.id === selectedHotelId) || null,
@@ -810,6 +821,29 @@ export const AccommodationManagementView = ({
     setPageIndex((prev) => prev - 1);
   };
 
+  const refreshHotelExistingCodes = async () => {
+    const codes = new Set<string>();
+    let cursor: string | null = null;
+    let keepLoading = true;
+    let pageSafety = 0;
+
+    while (keepLoading && pageSafety < 100) {
+      const params = new URLSearchParams();
+      params.set("limit", "100");
+      if (cursor) params.set("cursor", cursor);
+      const response = await listHotels(params);
+      response.items.forEach((hotel) => {
+        const code = String(hotel.code ?? "").trim().toUpperCase();
+        if (code) codes.add(code);
+      });
+      keepLoading = response.hasNext && Boolean(response.nextCursor);
+      cursor = response.nextCursor;
+      pageSafety += 1;
+    }
+
+    return codes;
+  };
+
   return (
     <div className="space-y-6">
       {showHotelList ? (
@@ -820,6 +854,9 @@ export const AccommodationManagementView = ({
             <Button variant="outline" onClick={() => void loadHotels()} disabled={loadingHotels}>
               <RefreshCw className="mr-2 size-4" />
               Refresh
+            </Button>
+            <Button variant="outline" onClick={() => setBatchOpen(true)}>
+              Batch Upload
             </Button>
             <Button
               onClick={() => openHotelDialog("create")}
@@ -1870,6 +1907,28 @@ export const AccommodationManagementView = ({
           </div>
         </DialogContent>
       </Dialog>
+
+      <MasterBatchImportDialog
+        open={batchOpen}
+        onOpenChange={setBatchOpen}
+        config={hotelImportConfig}
+        readOnly={isReadOnly}
+        context={{
+          locationByCode: new Map(),
+          currencyByCode: new Map(),
+          vehicleCategoryByCode: new Map(),
+          vehicleTypeByCode: new Map(),
+          vehicleTypeCategoryCodeByCode: new Map(),
+        }}
+        existingCodes={hotelExistingCodes}
+        onRefreshExistingCodes={refreshHotelExistingCodes}
+        onUploadRow={async (payload) => {
+          await createHotel(payload);
+        }}
+        onCompleted={async () => {
+          await loadHotels();
+        }}
+      />
     </div>
   );
 };

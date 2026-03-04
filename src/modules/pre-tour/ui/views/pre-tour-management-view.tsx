@@ -6,6 +6,8 @@ import {
   ArrowLeft,
   CopyPlus,
   GripVertical,
+  MapPinned,
+  PanelLeftOpen,
   Plus,
   RefreshCw,
   Settings2,
@@ -43,6 +45,14 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
+import { TablePagination } from "@/components/ui/table-pagination";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
 import { authClient } from "@/lib/auth-client";
 import {
   createPreTourRecord,
@@ -55,14 +65,20 @@ import { listActivityRecords } from "@/modules/activity/lib/activity-api";
 import { listGuideRecords } from "@/modules/guides/lib/guides-api";
 import { listCurrencyRecords } from "@/modules/currency/lib/currency-api";
 import { listBusinessNetworkRecords } from "@/modules/business-network/lib/business-network-api";
+import { listTourCategoryRecords } from "@/modules/tour-category/lib/tour-category-api";
+import { listTechnicalVisitRecords } from "@/modules/technical-visit/lib/technical-visit-api";
 import { PreTourDayWorkspace } from "@/modules/pre-tour/ui/components/pre-tour-day-workspace";
+import { PreTourRouteMap } from "@/modules/pre-tour/ui/components/pre-tour-route-map";
 
 export type PreTourResourceKey =
   | "pre-tours"
   | "pre-tour-days"
   | "pre-tour-items"
   | "pre-tour-item-addons"
-  | "pre-tour-totals";
+  | "pre-tour-totals"
+  | "pre-tour-categories"
+  | "pre-tour-technical-visits"
+  | "pre-tour-bins";
 
 type FieldType = "text" | "number" | "boolean" | "select" | "datetime" | "json" | "textarea";
 
@@ -102,21 +118,30 @@ const META: Record<PreTourResourceKey, { title: string; description: string }> =
     title: "Plan Totals",
     description: "Aggregated totals and snapshot for the full pre-tour.",
   },
+  "pre-tour-categories": {
+    title: "Tour Categories",
+    description: "Assign category type and category mapping for this pre-tour.",
+  },
+  "pre-tour-technical-visits": {
+    title: "Field Visits",
+    description: "Attach technical/field visits into pre-tour planning context.",
+  },
+  "pre-tour-bins": {
+    title: "Recycle Bin",
+    description: "Soft deleted pre-tour records. Admin can permanently delete.",
+  },
 };
 
 const COLUMNS: Record<PreTourResourceKey, Array<{ key: string; label: string }>> = {
   "pre-tours": [
     { key: "code", label: "Code" },
     { key: "referenceNo", label: "Reference No" },
-    { key: "planCode", label: "Plan Code" },
     { key: "version", label: "Version" },
     { key: "title", label: "Title" },
-    { key: "operatorOrgId", label: "Operator" },
-    { key: "marketOrgId", label: "Market" },
     { key: "status", label: "Status" },
     { key: "currencyCode", label: "Currency" },
-    { key: "exchangeRateMode", label: "FX Mode" },
-    { key: "exchangeRate", label: "FX Rate" },
+    { key: "updatedByName", label: "Updated By" },
+    { key: "updatedAt", label: "Updated At" },
     { key: "isActive", label: "Active" },
   ],
   "pre-tour-days": [
@@ -152,6 +177,28 @@ const COLUMNS: Record<PreTourResourceKey, Array<{ key: string; label: string }>>
     { key: "grandTotal", label: "Grand" },
     { key: "isActive", label: "Active" },
   ],
+  "pre-tour-categories": [
+    { key: "code", label: "Code" },
+    { key: "typeId", label: "Category Type" },
+    { key: "categoryId", label: "Category" },
+    { key: "notes", label: "Notes" },
+    { key: "isActive", label: "Active" },
+  ],
+  "pre-tour-technical-visits": [
+    { key: "code", label: "Code" },
+    { key: "dayId", label: "Day" },
+    { key: "technicalVisitId", label: "Field Visit" },
+    { key: "notes", label: "Notes" },
+    { key: "isActive", label: "Active" },
+  ],
+  "pre-tour-bins": [
+    { key: "programCode", label: "Program" },
+    { key: "code", label: "Code" },
+    { key: "referenceNo", label: "Reference" },
+    { key: "planCode", label: "Plan Code" },
+    { key: "deletedByName", label: "Deleted By" },
+    { key: "deletedAt", label: "Deleted At" },
+  ],
 };
 
 function toLocalDateTime(value: unknown) {
@@ -171,9 +218,20 @@ function toIsoDateTime(value: unknown) {
   return date.toISOString();
 }
 
+function toNumericValue(value: string | number | null | undefined, fallback = 0) {
+  const numeric = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(numeric) ? numeric : fallback;
+}
+
 function formatCell(value: unknown, lookups: Record<string, string>) {
   if (typeof value === "boolean") return value ? "Yes" : "No";
   if (typeof value === "string" && lookups[value]) return lookups[value];
+  if (typeof value === "string" && value.includes("T")) {
+    const date = new Date(value);
+    if (!Number.isNaN(date.getTime())) {
+      return date.toLocaleString();
+    }
+  }
   if (Array.isArray(value)) return value.join(", ");
   if (value && typeof value === "object") return JSON.stringify(value);
   if (value === null || value === undefined || value === "") return "-";
@@ -252,6 +310,24 @@ function toDayCount(startDate: string, endDate: string) {
   return Math.floor(diff / (1000 * 60 * 60 * 24)) + 1;
 }
 
+function getCoordinatesFromGeo(geo: unknown): [number, number] | null {
+  let geoValue: unknown = geo;
+  if (typeof geoValue === "string") {
+    try {
+      geoValue = JSON.parse(geoValue);
+    } catch {
+      return null;
+    }
+  }
+  if (!geoValue || typeof geoValue !== "object") return null;
+  const coordinates = (geoValue as { coordinates?: unknown }).coordinates;
+  if (!Array.isArray(coordinates) || coordinates.length !== 2) return null;
+  const lon = Number(coordinates[0]);
+  const lat = Number(coordinates[1]);
+  if (!Number.isFinite(lon) || !Number.isFinite(lat)) return null;
+  return [lon, lat];
+}
+
 function sanitizeCodePart(value: string) {
   return value
     .toUpperCase()
@@ -287,6 +363,11 @@ function SectionTable({
   onCreateVersion,
   onCopyPlan,
   onAdd,
+  hideAdd,
+  onView,
+  hideEdit,
+  editLabel,
+  deleteLabel,
   onEdit,
   onDelete,
 }: {
@@ -298,10 +379,28 @@ function SectionTable({
   showManage?: boolean;
   onCreateVersion?: (row: Row) => void;
   onCopyPlan?: (row: Row) => void;
-  onAdd: () => void;
+  onAdd?: () => void;
+  hideAdd?: boolean;
+  onView?: (row: Row) => void;
+  hideEdit?: boolean;
+  editLabel?: string;
+  deleteLabel?: string;
   onEdit: (row: Row) => void;
   onDelete: (row: Row) => void;
 }) {
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+
+  useEffect(() => {
+    const totalPages = Math.max(1, Math.ceil(rows.length / pageSize));
+    if (page > totalPages) setPage(totalPages);
+  }, [page, pageSize, rows.length]);
+
+  const paginatedRows = useMemo(() => {
+    const start = (page - 1) * pageSize;
+    return rows.slice(start, start + pageSize);
+  }, [page, pageSize, rows]);
+
   return (
     <Card className="border-border/70 shadow-sm">
       <CardHeader className="flex flex-row items-start justify-between gap-2 space-y-0 px-4 py-3">
@@ -309,13 +408,16 @@ function SectionTable({
           <CardTitle className="text-sm">{META[resource].title}</CardTitle>
           <CardDescription className="text-xs">{META[resource].description}</CardDescription>
         </div>
-        <Button className="master-add-btn" size="sm" onClick={onAdd} disabled={isReadOnly}>
-          <Plus className="mr-1 size-4" />
-          Add
-        </Button>
+        {!hideAdd ? (
+          <Button className="master-add-btn" size="sm" onClick={onAdd} disabled={isReadOnly}>
+            <Plus className="mr-1 size-4" />
+            Add
+          </Button>
+        ) : null}
       </CardHeader>
-      <CardContent>
-        <Table>
+      <CardContent className="space-y-2">
+        <div className="overflow-x-auto">
+        <Table className="min-w-[920px]">
           <TableHeader>
             <TableRow>
               {COLUMNS[resource].map((column) => (
@@ -338,7 +440,7 @@ function SectionTable({
                 </TableCell>
               </TableRow>
             ) : (
-              rows.map((row) => (
+              paginatedRows.map((row) => (
                 <TableRow key={String(row.id)}>
                   {COLUMNS[resource].map((column) => (
                     <TableCell key={column.key}>
@@ -351,6 +453,12 @@ function SectionTable({
                   ))}
                   <TableCell className="py-1.5 text-right">
                     <div className="flex justify-end gap-1">
+                      {onView ? (
+                        <Button size="sm" variant="outline" onClick={() => onView(row)}>
+                          <PanelLeftOpen className="mr-1 size-4" />
+                          View
+                        </Button>
+                      ) : null}
                       {showManage && resource === "pre-tours" ? (
                         <Button size="sm" variant="outline" className="master-manage-btn" asChild>
                           <Link href={`/master-data/pre-tours/${row.id}`}>
@@ -380,17 +488,20 @@ function SectionTable({
                           Copy
                         </Button>
                       ) : null}
-                      <Button size="sm" variant="outline" onClick={() => onEdit(row)} disabled={isReadOnly}>
-                        <Settings2 className="mr-1 size-4" />
-                        Edit
-                      </Button>
+                      {!hideEdit ? (
+                        <Button size="sm" variant="outline" onClick={() => onEdit(row)} disabled={isReadOnly}>
+                          <Settings2 className="mr-1 size-4" />
+                          {editLabel || "Edit"}
+                        </Button>
+                      ) : null}
                       <Button
                         size="sm"
                         variant="outline"
                         onClick={() => onDelete(row)}
                         disabled={isReadOnly}
                       >
-                        <Trash2 className="size-4" />
+                        <Trash2 className="mr-1 size-4" />
+                        {deleteLabel || "Delete"}
                       </Button>
                     </div>
                   </TableCell>
@@ -399,6 +510,14 @@ function SectionTable({
             )}
           </TableBody>
         </Table>
+        </div>
+        <TablePagination
+          totalItems={rows.length}
+          page={page}
+          pageSize={pageSize}
+          onPageChange={setPage}
+          onPageSizeChange={setPageSize}
+        />
       </CardContent>
     </Card>
   );
@@ -407,9 +526,11 @@ function SectionTable({
 export function PreTourManagementView({
   initialResource = "pre-tours",
   managedPlanId = "",
+  showBinOnly = false,
 }: {
   initialResource?: PreTourResourceKey;
   managedPlanId?: string;
+  showBinOnly?: boolean;
 }) {
   const { data: session } = authClient.useSession();
   const accessUser = session?.user as
@@ -422,6 +543,7 @@ export function PreTourManagementView({
       accessUser?.role === "MANAGER" ||
       Boolean(accessUser?.canWritePreTour));
   const isReadOnly = !canWrite;
+  const isAdmin = accessUser?.role === "ADMIN";
 
   const isPlanManageMode = Boolean(managedPlanId);
 
@@ -435,12 +557,19 @@ export function PreTourManagementView({
   const [items, setItems] = useState<Row[]>([]);
   const [addons, setAddons] = useState<Row[]>([]);
   const [totals, setTotals] = useState<Row[]>([]);
+  const [planCategories, setPlanCategories] = useState<Row[]>([]);
+  const [planTechnicalVisits, setPlanTechnicalVisits] = useState<Row[]>([]);
+  const [planBins, setPlanBins] = useState<Row[]>([]);
 
   const [locations, setLocations] = useState<Row[]>([]);
+  const [vehicleTypes, setVehicleTypes] = useState<Row[]>([]);
   const [activities, setActivities] = useState<Row[]>([]);
   const [guides, setGuides] = useState<Row[]>([]);
   const [currencies, setCurrencies] = useState<Row[]>([]);
   const [organizations, setOrganizations] = useState<Row[]>([]);
+  const [tourCategoryTypes, setTourCategoryTypes] = useState<Row[]>([]);
+  const [tourCategories, setTourCategories] = useState<Row[]>([]);
+  const [technicalVisits, setTechnicalVisits] = useState<Row[]>([]);
   const [companyBaseCurrencyCode, setCompanyBaseCurrencyCode] = useState("USD");
 
   const [selectedDayId, setSelectedDayId] = useState("");
@@ -453,6 +582,43 @@ export function PreTourManagementView({
   const [copyDialogOpen, setCopyDialogOpen] = useState(false);
   const [copySourcePlan, setCopySourcePlan] = useState<Row | null>(null);
   const [copySaving, setCopySaving] = useState(false);
+  const [mapDialogOpen, setMapDialogOpen] = useState(false);
+  const [useRoadRoute, setUseRoadRoute] = useState(true);
+  const [routeMeta, setRouteMeta] = useState<{ distanceKm: number | null; durationMin: number | null }>({
+    distanceKm: null,
+    durationMin: null,
+  });
+  const [drawerRouteMeta, setDrawerRouteMeta] = useState<{
+    distanceKm: number | null;
+    durationMin: number | null;
+  }>({
+    distanceKm: null,
+    durationMin: null,
+  });
+  const [drawerShowMap, setDrawerShowMap] = useState(false);
+  const [dayTransportForm, setDayTransportForm] = useState<{
+    enabled: boolean;
+    serviceId: string;
+    startAt: string;
+    endAt: string;
+    pax: string;
+    baseAmount: string;
+    taxAmount: string;
+    totalAmount: string;
+    status: string;
+    notes: string;
+  }>({
+    enabled: false,
+    serviceId: "",
+    startAt: "",
+    endAt: "",
+    pax: "",
+    baseAmount: "0",
+    taxAmount: "0",
+    totalAmount: "0",
+    status: "PLANNED",
+    notes: "",
+  });
   const [copyForm, setCopyForm] = useState<{
     code: string;
     planCode: string;
@@ -490,6 +656,18 @@ export function PreTourManagementView({
     row: Row | null;
   }>({ open: false, mode: "create", resource: initialResource, row: null });
   const [form, setForm] = useState<Row>({});
+  const [dayPage, setDayPage] = useState(1);
+  const [dayPageSize, setDayPageSize] = useState(5);
+  const [detailSheet, setDetailSheet] = useState<{
+    open: boolean;
+    title: string;
+    description: string;
+    kind: "generic" | "pre-tour" | "day-item";
+    dayId?: string;
+    row: Row | null;
+  }>({ open: false, title: "", description: "", kind: "generic", row: null });
+  const [detailPreTourRouteIds, setDetailPreTourRouteIds] = useState<string[]>([]);
+  const [detailPreTourRouteLoading, setDetailPreTourRouteLoading] = useState(false);
 
   const selectedPlan = useMemo(
     () => plans.find((row) => String(row.id) === managedPlanId) ?? null,
@@ -502,7 +680,11 @@ export function PreTourManagementView({
   );
 
   const selectedDayItems = useMemo(
-    () => items.filter((item) => String(item.dayId) === selectedDayId),
+    () =>
+      items.filter(
+        (item) =>
+          String(item.dayId) === selectedDayId && String(item.itemType || "").toUpperCase() !== "TRANSPORT"
+      ),
     [items, selectedDayId]
   );
 
@@ -541,12 +723,50 @@ export function PreTourManagementView({
     [locations]
   );
 
+  const locationCoordinatesById = useMemo(() => {
+    const next = new Map<string, { name: string; coordinates: [number, number] }>();
+    locations.forEach((row) => {
+      const id = String(row.id || "");
+      if (!id) return;
+      const coordinates = getCoordinatesFromGeo(row.geo);
+      if (!coordinates) return;
+      next.set(id, {
+        name: String(row.name || row.code || id),
+        coordinates,
+      });
+    });
+    return next;
+  }, [locations]);
+
+  const locationNameById = useMemo(() => {
+    const next = new Map<string, string>();
+    locations.forEach((row) => {
+      const id = String(row.id || "");
+      if (!id) return;
+      next.set(id, String(row.name || row.code || id));
+    });
+    return next;
+  }, [locations]);
+
   const serviceOptions = useMemo(
     () => [
+      ...vehicleTypes.map((row) => ({
+        value: String(row.id),
+        label: `TRANSPORT • ${row.code} - ${row.name}`,
+      })),
       ...activities.map((row) => ({ value: String(row.id), label: `ACT • ${row.code} - ${row.name}` })),
       ...guides.map((row) => ({ value: String(row.id), label: `GUIDE • ${row.code} - ${row.fullName}` })),
     ],
-    [activities, guides]
+    [activities, guides, vehicleTypes]
+  );
+
+  const transportVehicleOptions = useMemo(
+    () =>
+      vehicleTypes.map((row) => ({
+        value: String(row.id),
+        label: `${row.code} - ${row.name}`,
+      })),
+    [vehicleTypes]
   );
 
   const currencyOptions = useMemo(
@@ -573,6 +793,49 @@ export function PreTourManagementView({
     [organizations]
   );
 
+  const tourCategoryTypeOptions = useMemo(
+    () =>
+      tourCategoryTypes.map((row) => ({
+        value: String(row.id),
+        label: `${String(row.code)} - ${String(row.name)}`,
+      })),
+    [tourCategoryTypes]
+  );
+
+  const selectedCategoryTypeId = useMemo(() => {
+    const formTypeId = form.typeId;
+    if (typeof formTypeId === "string" && formTypeId.trim().length > 0) {
+      return formTypeId;
+    }
+    const rowTypeId = dialog.row?.typeId;
+    if (typeof rowTypeId === "string" && rowTypeId.trim().length > 0) {
+      return rowTypeId;
+    }
+    return "";
+  }, [dialog.row?.typeId, form.typeId]);
+
+  const tourCategoryOptions = useMemo(() => {
+    const rows = selectedCategoryTypeId
+      ? tourCategories.filter((row) => String(row.typeId) === selectedCategoryTypeId)
+      : tourCategories;
+
+    return rows.map((row) => ({
+      value: String(row.id),
+      label: `${String(row.code)} - ${String(row.name)}`,
+    }));
+  }, [selectedCategoryTypeId, tourCategories]);
+
+  const technicalVisitOptions = useMemo(
+    () =>
+      technicalVisits.map((row) => ({
+        value: String(row.id),
+        label: `${String(row.code)} - ${String(row.visitType)} - ${new Date(
+          String(row.visitDate)
+        ).toLocaleDateString()}`,
+      })),
+    [technicalVisits]
+  );
+
   const lookups = useMemo(() => {
     const pairs: Array<[string, string]> = [];
     planOptions.forEach((o) => pairs.push([o.value, o.label]));
@@ -582,6 +845,9 @@ export function PreTourManagementView({
     serviceOptions.forEach((o) => pairs.push([o.value, o.label]));
     operatorOrganizationOptions.forEach((o) => pairs.push([o.value, o.label]));
     marketOrganizationOptions.forEach((o) => pairs.push([o.value, o.label]));
+    tourCategoryTypeOptions.forEach((o) => pairs.push([o.value, o.label]));
+    tourCategoryOptions.forEach((o) => pairs.push([o.value, o.label]));
+    technicalVisitOptions.forEach((o) => pairs.push([o.value, o.label]));
     return Object.fromEntries(pairs);
   }, [
     planOptions,
@@ -591,6 +857,9 @@ export function PreTourManagementView({
     serviceOptions,
     operatorOrganizationOptions,
     marketOrganizationOptions,
+    tourCategoryTypeOptions,
+    tourCategoryOptions,
+    technicalVisitOptions,
   ]);
 
   const fields = useMemo<Field[]>(() => {
@@ -722,7 +991,6 @@ export function PreTourManagementView({
             type: "select",
             defaultValue: "MISC",
             options: [
-              { label: "TRANSPORT", value: "TRANSPORT" },
               { label: "ACTIVITY", value: "ACTIVITY" },
               { label: "ACCOMMODATION", value: "ACCOMMODATION" },
               { label: "GUIDE", value: "GUIDE" },
@@ -740,21 +1008,8 @@ export function PreTourManagementView({
           { key: "units", label: "Units", type: "number", nullable: true },
           { key: "nights", label: "Nights", type: "number", nullable: true },
           { key: "rooms", label: "Rooms JSON", type: "json", nullable: true },
-          { key: "fromLocationId", label: "From", type: "select", nullable: true, options: locationOptions },
-          { key: "toLocationId", label: "To", type: "select", nullable: true, options: locationOptions },
           { key: "locationId", label: "Location", type: "select", nullable: true, options: locationOptions },
           { key: "rateId", label: "Rate Id", type: "text", nullable: true },
-          { key: "currencyCode", label: "Currency", type: "select", required: true, defaultValue: companyBaseCurrencyCode, options: currencyOptions },
-          {
-            key: "priceMode",
-            label: "Price Mode",
-            type: "select",
-            defaultValue: "EXCLUSIVE",
-            options: [
-              { label: "EXCLUSIVE", value: "EXCLUSIVE" },
-              { label: "INCLUSIVE", value: "INCLUSIVE" },
-            ],
-          },
           { key: "baseAmount", label: "Base Amount", type: "number", defaultValue: 0 },
           { key: "taxAmount", label: "Tax Amount", type: "number", defaultValue: 0 },
           { key: "totalAmount", label: "Total Amount", type: "number", defaultValue: 0 },
@@ -811,6 +1066,42 @@ export function PreTourManagementView({
           { key: "snapshot", label: "Snapshot JSON", type: "json", nullable: true },
           { key: "isActive", label: "Active", type: "boolean", defaultValue: true },
         ];
+      case "pre-tour-categories":
+        return [
+          { key: "code", label: "Code", type: "text", required: true },
+          { key: "planId", label: "Pre-Tour Plan", type: "select", required: true, options: planOptions },
+          {
+            key: "typeId",
+            label: "Category Type",
+            type: "select",
+            required: true,
+            options: tourCategoryTypeOptions,
+          },
+          {
+            key: "categoryId",
+            label: "Category",
+            type: "select",
+            required: true,
+            options: tourCategoryOptions,
+          },
+          { key: "notes", label: "Notes", type: "textarea", nullable: true },
+          { key: "isActive", label: "Active", type: "boolean", defaultValue: true },
+        ];
+      case "pre-tour-technical-visits":
+        return [
+          { key: "code", label: "Code", type: "text", required: true },
+          { key: "planId", label: "Pre-Tour Plan", type: "select", required: true, options: planOptions },
+          { key: "dayId", label: "Day", type: "select", nullable: true, options: dayOptions },
+          {
+            key: "technicalVisitId",
+            label: "Field Visit",
+            type: "select",
+            required: true,
+            options: technicalVisitOptions,
+          },
+          { key: "notes", label: "Notes", type: "textarea", nullable: true },
+          { key: "isActive", label: "Active", type: "boolean", defaultValue: true },
+        ];
       default:
         return [];
     }
@@ -824,6 +1115,9 @@ export function PreTourManagementView({
     currencyOptions,
     operatorOrganizationOptions,
     marketOrganizationOptions,
+    tourCategoryTypeOptions,
+    tourCategoryOptions,
+    technicalVisitOptions,
     companyBaseCurrencyCode,
   ]);
 
@@ -831,12 +1125,20 @@ export function PreTourManagementView({
     if (!isPlanManageMode) return fields;
     if (dialog.resource === "pre-tour-days") return fields.filter((field) => field.key !== "planId");
     if (dialog.resource === "pre-tour-items") {
-      return fields.filter((field) => field.key !== "planId" && field.key !== "dayId");
+      return fields.filter(
+        (field) =>
+          field.key !== "planId" &&
+          field.key !== "dayId" &&
+          field.key !== "currencyCode" &&
+          field.key !== "priceMode"
+      );
     }
     if (dialog.resource === "pre-tour-item-addons") {
       return fields.filter((field) => field.key !== "planId" && field.key !== "planItemId");
     }
     if (dialog.resource === "pre-tour-totals") return fields.filter((field) => field.key !== "planId");
+    if (dialog.resource === "pre-tour-categories") return fields.filter((field) => field.key !== "planId");
+    if (dialog.resource === "pre-tour-technical-visits") return fields.filter((field) => field.key !== "planId");
     return fields;
   }, [fields, isPlanManageMode, dialog.resource]);
 
@@ -849,21 +1151,40 @@ export function PreTourManagementView({
   );
 
   const loadMasters = useCallback(async () => {
-    const [locationRows, activityRows, guideRows, currencyRows, organizationRows, companyResponse] =
+    const [
+      locationRows,
+      vehicleTypeRows,
+      activityRows,
+      guideRows,
+      currencyRows,
+      organizationRows,
+      tourCategoryTypeRows,
+      tourCategoryRows,
+      technicalVisitRows,
+      companyResponse,
+    ] =
       await Promise.all([
         listTransportRecords("locations", { limit: 300 }),
+        listTransportRecords("vehicle-types", { limit: 300 }),
         listActivityRecords("activities", { limit: 300 }),
         listGuideRecords("guides", { limit: 300 }),
         listCurrencyRecords("currencies", { limit: 200 }),
         listBusinessNetworkRecords("organizations", { limit: 400 }),
+        listTourCategoryRecords("tour-category-types", { limit: 500 }),
+        listTourCategoryRecords("tour-categories", { limit: 500 }),
+        listTechnicalVisitRecords("technical-visits", { limit: 500 }),
         fetch("/api/companies/me", { cache: "no-store" }),
       ]);
 
     setLocations(locationRows);
+    setVehicleTypes(vehicleTypeRows);
     setActivities(activityRows);
     setGuides(guideRows);
     setCurrencies(currencyRows);
     setOrganizations(organizationRows);
+    setTourCategoryTypes(tourCategoryTypeRows);
+    setTourCategories(tourCategoryRows);
+    setTechnicalVisits(technicalVisitRows);
     if (companyResponse.ok) {
       const body = (await companyResponse.json()) as CompanySettingsResponse;
       const base = body.company?.baseCurrencyCode?.trim().toUpperCase();
@@ -881,30 +1202,48 @@ export function PreTourManagementView({
       setPlans(planRows);
 
       if (!isPlanManageMode) {
+        if (showBinOnly) {
+          const binRows = await listPreTourRecords("pre-tour-bins", {
+            limit: 200,
+            q: query || undefined,
+          });
+          setPlanBins(binRows);
+          setPlans([]);
+          return;
+        }
+        setPlanBins([]);
         setDays([]);
         setItems([]);
         setAddons([]);
         setTotals([]);
+        setPlanCategories([]);
+        setPlanTechnicalVisits([]);
         return;
       }
 
-      const [dayRows, itemRows, addonRows, totalRows] = await Promise.all([
+      const [dayRows, itemRows, addonRows, totalRows, categoryRows, technicalVisitRows] =
+        await Promise.all([
         listPreTourRecords("pre-tour-days", { limit: 500, planId: managedPlanId }),
         listPreTourRecords("pre-tour-items", { limit: 500, planId: managedPlanId }),
         listPreTourRecords("pre-tour-item-addons", { limit: 500, planId: managedPlanId }),
         listPreTourRecords("pre-tour-totals", { limit: 500, planId: managedPlanId }),
-      ]);
+        listPreTourRecords("pre-tour-categories", { limit: 500, planId: managedPlanId }),
+          listPreTourRecords("pre-tour-technical-visits", { limit: 500, planId: managedPlanId }),
+        ]);
 
       setDays(dayRows);
       setItems(itemRows);
       setAddons(addonRows);
       setTotals(totalRows);
+      setPlanCategories(categoryRows);
+      setPlanTechnicalVisits(technicalVisitRows);
+      setPlanBins([]);
     } catch (error) {
       notify.error(error instanceof Error ? error.message : "Failed to load records.");
     } finally {
       setLoading(false);
     }
-  }, [isPlanManageMode, managedPlanId, query]);
+  }, [isPlanManageMode, managedPlanId, query, showBinOnly]);
 
   useEffect(() => {
     void loadMasters().catch((error) => {
@@ -971,9 +1310,14 @@ export function PreTourManagementView({
 
     if (isPlanManageMode && dialog.mode === "create") {
       if (
-        ["pre-tour-days", "pre-tour-items", "pre-tour-item-addons", "pre-tour-totals"].includes(
-          dialog.resource
-        )
+        [
+          "pre-tour-days",
+          "pre-tour-items",
+          "pre-tour-item-addons",
+          "pre-tour-totals",
+          "pre-tour-categories",
+          "pre-tour-technical-visits",
+        ].includes(dialog.resource)
       ) {
         nextForm.planId = managedPlanId;
       }
@@ -995,9 +1339,46 @@ export function PreTourManagementView({
       if (dialog.resource === "pre-tour-item-addons" && selectedItemId) {
         nextForm.planItemId = selectedItemId;
       }
+
+      if (dialog.resource === "pre-tour-categories" && !nextForm.typeId && tourCategoryTypeOptions[0]) {
+        nextForm.typeId = tourCategoryTypeOptions[0].value;
+      }
+      if (dialog.resource === "pre-tour-technical-visits") {
+        if (selectedDayId) nextForm.dayId = selectedDayId;
+        if (!nextForm.technicalVisitId && technicalVisitOptions[0]) {
+          nextForm.technicalVisitId = technicalVisitOptions[0].value;
+        }
+      }
     }
 
     setForm(nextForm);
+
+    if (dialog.resource === "pre-tour-days") {
+      const currentDayId = dialog.mode === "edit" ? String(dialog.row?.id || "") : "";
+      const existingTransportItem = currentDayId
+        ? items.find(
+            (item) =>
+              String(item.dayId) === currentDayId &&
+              String(item.itemType || "").toUpperCase() === "TRANSPORT"
+          )
+        : null;
+
+      setDayTransportForm({
+        enabled: Boolean(existingTransportItem),
+        serviceId: String(existingTransportItem?.serviceId || ""),
+        startAt: toLocalDateTime(existingTransportItem?.startAt),
+        endAt: toLocalDateTime(existingTransportItem?.endAt),
+        pax:
+          existingTransportItem?.pax !== undefined && existingTransportItem?.pax !== null
+            ? String(existingTransportItem.pax)
+            : "",
+        baseAmount: String(existingTransportItem?.baseAmount ?? "0"),
+        taxAmount: String(existingTransportItem?.taxAmount ?? "0"),
+        totalAmount: String(existingTransportItem?.totalAmount ?? "0"),
+        status: String(existingTransportItem?.status || "PLANNED"),
+        notes: String(existingTransportItem?.notes || ""),
+      });
+    }
   }, [
     dialog.open,
     dialog.mode,
@@ -1009,8 +1390,76 @@ export function PreTourManagementView({
     selectedPlan,
     selectedDayId,
     selectedItemId,
+    items,
+    tourCategoryTypeOptions,
+    technicalVisitOptions,
     visibleFields,
   ]);
+
+  const upsertDayTransportItem = useCallback(
+    async (dayId: string, dayRow: Row) => {
+      const existingTransportItem = items.find(
+        (item) =>
+          String(item.dayId) === dayId && String(item.itemType || "").toUpperCase() === "TRANSPORT"
+      );
+
+      if (!dayTransportForm.enabled || !dayTransportForm.serviceId) {
+        if (existingTransportItem) {
+          await deletePreTourRecord("pre-tour-items", String(existingTransportItem.id));
+        }
+        return;
+      }
+
+      if (!selectedPlan) {
+        throw new Error("Pre-tour header is required before saving day transport details.");
+      }
+
+      const dayCode = sanitizeCodePart(String(dayRow.code || `DAY_${dayRow.dayNumber || "00"}`));
+      const transportCode = `${dayCode}_TRANSPORT`;
+      const startLabel = lookupLabel(dayRow.startLocationId);
+      const endLabel = lookupLabel(dayRow.endLocationId);
+      const title = `${startLabel} -> ${endLabel}`.replace(/\s+/g, " ").trim();
+
+      const payload: Record<string, unknown> = {
+        code: transportCode.slice(0, 80),
+        planId: managedPlanId,
+        dayId,
+        itemType: "TRANSPORT",
+        serviceId: dayTransportForm.serviceId || null,
+        startAt: toIsoDateTime(dayTransportForm.startAt),
+        endAt: toIsoDateTime(dayTransportForm.endAt),
+        sortOrder: 0,
+        pax: dayTransportForm.pax === "" ? null : toNumericValue(dayTransportForm.pax),
+        fromLocationId: dayRow.startLocationId ? String(dayRow.startLocationId) : null,
+        toLocationId: dayRow.endLocationId ? String(dayRow.endLocationId) : null,
+        locationId: null,
+        currencyCode: String(selectedPlan.currencyCode || companyBaseCurrencyCode),
+        priceMode: String(selectedPlan.priceMode || "EXCLUSIVE"),
+        baseAmount: toNumericValue(dayTransportForm.baseAmount),
+        taxAmount: toNumericValue(dayTransportForm.taxAmount),
+        totalAmount: toNumericValue(dayTransportForm.totalAmount),
+        title: title || "Day Transport",
+        description: null,
+        notes: dayTransportForm.notes || null,
+        status: dayTransportForm.status || "PLANNED",
+        isActive: true,
+      };
+
+      if (existingTransportItem) {
+        await updatePreTourRecord("pre-tour-items", String(existingTransportItem.id), payload);
+      } else {
+        await createPreTourRecord("pre-tour-items", payload);
+      }
+    },
+    [
+      companyBaseCurrencyCode,
+      dayTransportForm,
+      items,
+      lookupLabel,
+      managedPlanId,
+      selectedPlan,
+    ]
+  );
 
   const onSave = async () => {
     setSaving(true);
@@ -1029,13 +1478,44 @@ export function PreTourManagementView({
       if (isPlanManageMode && dialog.resource === "pre-tour-item-addons" && selectedItemId) {
         payload.planItemId = selectedItemId;
       }
+      if (dialog.resource === "pre-tour-items") {
+        payload.currencyCode = String(selectedPlan?.currencyCode || companyBaseCurrencyCode);
+        payload.priceMode = String(selectedPlan?.priceMode || "EXCLUSIVE");
+        if (!payload.itemType) payload.itemType = "MISC";
+      }
+      if (dialog.resource === "pre-tour-categories") {
+        const selectedTypeId = String(payload.typeId ?? "");
+        const selectedCategoryId = String(payload.categoryId ?? "");
+        const validCategory = tourCategories.some(
+          (row) => String(row.id) === selectedCategoryId && String(row.typeId) === selectedTypeId
+        );
+        if (!validCategory) {
+          throw new Error("Selected category does not match the selected category type.");
+        }
+      }
+      if (dialog.resource === "pre-tour-technical-visits") {
+        const selectedTechnicalVisitId = String(payload.technicalVisitId ?? "");
+        const exists = technicalVisits.some((row) => String(row.id) === selectedTechnicalVisitId);
+        if (!exists) {
+          throw new Error("Selected field visit is invalid.");
+        }
+      }
+      if (dialog.resource === "pre-tour-days" && dayTransportForm.enabled && !dayTransportForm.serviceId) {
+        throw new Error("Select vehicle type in Day Transport Details.");
+      }
 
       if (dialog.mode === "create") {
-        await createPreTourRecord(dialog.resource, payload);
+        const created = await createPreTourRecord(dialog.resource, payload);
+        if (dialog.resource === "pre-tour-days") {
+          await upsertDayTransportItem(String(created.id), created);
+        }
         notify.success("Record created.");
       } else {
         const id = String(dialog.row?.id || "");
-        await updatePreTourRecord(dialog.resource, id, payload);
+        const updated = await updatePreTourRecord(dialog.resource, id, payload);
+        if (dialog.resource === "pre-tour-days") {
+          await upsertDayTransportItem(id, updated);
+        }
         notify.success("Record updated.");
       }
 
@@ -1051,6 +1531,10 @@ export function PreTourManagementView({
   const onDelete = async (resource: PreTourResourceKey, row: Row) => {
     if (isReadOnly) {
       notify.warning("You are in read-only mode.");
+      return;
+    }
+    if (resource === "pre-tour-bins" && !isAdmin) {
+      notify.warning("Only Admin can permanently delete records from bin.");
       return;
     }
 
@@ -1168,12 +1652,15 @@ export function PreTourManagementView({
   const clonePlanChildren = useCallback(
     async (sourcePlan: Row, newPlanId: string, codePrefix: string) => {
       const sourcePlanId = String(sourcePlan.id);
-      const [sourceDays, sourceItems, sourceAddons, sourceTotals] = await Promise.all([
+      const [sourceDays, sourceItems, sourceAddons, sourceTotals, sourceCategories, sourceTechnicalVisits] =
+        await Promise.all([
         listPreTourRecords("pre-tour-days", { planId: sourcePlanId, limit: 1000 }),
         listPreTourRecords("pre-tour-items", { planId: sourcePlanId, limit: 2000 }),
         listPreTourRecords("pre-tour-item-addons", { planId: sourcePlanId, limit: 2000 }),
         listPreTourRecords("pre-tour-totals", { planId: sourcePlanId, limit: 10 }),
-      ]);
+          listPreTourRecords("pre-tour-categories", { planId: sourcePlanId, limit: 200 }),
+          listPreTourRecords("pre-tour-technical-visits", { planId: sourcePlanId, limit: 200 }),
+        ]);
 
       const dayIdMap = new Map<string, string>();
       const sortedSourceDays = [...sourceDays].sort(
@@ -1271,6 +1758,33 @@ export function PreTourManagementView({
           grandTotal: Number(sourceTotal.grandTotal || 0),
           snapshot: sourceTotal.snapshot ?? null,
           isActive: Boolean(sourceTotal.isActive ?? true),
+        });
+      }
+
+      for (const sourceCategory of sourceCategories) {
+        if (!sourceCategory.typeId || !sourceCategory.categoryId) continue;
+        await createPreTourRecord("pre-tour-categories", {
+          code: `${codePrefix}_CAT_${String(sourceCategory.id).slice(-6)}`.slice(0, 80),
+          planId: newPlanId,
+          typeId: String(sourceCategory.typeId),
+          categoryId: String(sourceCategory.categoryId),
+          notes: sourceCategory.notes ?? null,
+          isActive: Boolean(sourceCategory.isActive ?? true),
+        });
+      }
+
+      for (const sourceTechnicalVisit of sourceTechnicalVisits) {
+        if (!sourceTechnicalVisit.technicalVisitId) continue;
+        const mappedDayId = sourceTechnicalVisit.dayId
+          ? dayIdMap.get(String(sourceTechnicalVisit.dayId))
+          : null;
+        await createPreTourRecord("pre-tour-technical-visits", {
+          code: `${codePrefix}_TV_${String(sourceTechnicalVisit.id).slice(-6)}`.slice(0, 80),
+          planId: newPlanId,
+          dayId: mappedDayId ?? null,
+          technicalVisitId: String(sourceTechnicalVisit.technicalVisitId),
+          notes: sourceTechnicalVisit.notes ?? null,
+          isActive: Boolean(sourceTechnicalVisit.isActive ?? true),
         });
       }
     },
@@ -1497,12 +2011,29 @@ export function PreTourManagementView({
     [totals, query]
   );
 
+  const filteredCategoryRows = useMemo(
+    () => planCategories.filter((row) => matchesQuery("pre-tour-categories", row, query)),
+    [planCategories, query]
+  );
+
+  const filteredTechnicalVisitRows = useMemo(
+    () =>
+      planTechnicalVisits.filter((row) => matchesQuery("pre-tour-technical-visits", row, query)),
+    [planTechnicalVisits, query]
+  );
+
+  const filteredBinRows = useMemo(
+    () => planBins.filter((row) => matchesQuery("pre-tour-bins", row, query)),
+    [planBins, query]
+  );
+
   const dayCards = useMemo(() => {
     return sortedDays
       .map((day) => {
         const dayId = String(day.id);
         const dayItems = items
           .filter((item) => String(item.dayId) === dayId)
+          .filter((item) => String(item.itemType || "").toUpperCase() !== "TRANSPORT")
           .filter((item) => matchesQuery("pre-tour-items", item, query))
           .sort((a, b) => Number(a.sortOrder ?? 0) - Number(b.sortOrder ?? 0));
 
@@ -1518,14 +2049,196 @@ export function PreTourManagementView({
       .filter((entry): entry is { day: Row; dayItems: Row[] } => Boolean(entry));
   }, [sortedDays, items, query]);
 
+  const paginatedDayCards = useMemo(() => {
+    const start = (dayPage - 1) * dayPageSize;
+    return dayCards.slice(start, start + dayPageSize);
+  }, [dayCards, dayPage, dayPageSize]);
+
+  const routeLocationSequenceIds = useMemo(() => {
+    if (!isPlanManageMode) return [];
+
+    const orderedLocationIds: string[] = [];
+    const pushLocation = (locationId: unknown) => {
+      if (!locationId) return;
+      const id = String(locationId);
+      if (orderedLocationIds[orderedLocationIds.length - 1] === id) return;
+      orderedLocationIds.push(id);
+    };
+
+    sortedDays.forEach((day) => {
+      pushLocation(day.startLocationId);
+      pushLocation(day.endLocationId);
+    });
+
+    return orderedLocationIds;
+  }, [isPlanManageMode, sortedDays]);
+
+  const routeMapLocations = useMemo(() => {
+    return routeLocationSequenceIds
+      .map((id, index) => {
+        const location = locationCoordinatesById.get(id);
+        if (!location) return null;
+        return {
+          id: `${id}-${index}`,
+          name: location.name,
+          coordinates: location.coordinates,
+        };
+      })
+      .filter((location): location is { id: string; name: string; coordinates: [number, number] } =>
+        Boolean(location)
+      );
+  }, [locationCoordinatesById, routeLocationSequenceIds]);
+
+  const routePathLabel = useMemo(
+    () =>
+      routeLocationSequenceIds
+        .map((locationId) => locationNameById.get(locationId) || locationId)
+        .join(" -> "),
+    [locationNameById, routeLocationSequenceIds]
+  );
+
+  useEffect(() => {
+    if (routeMapLocations.length === 0) {
+      setRouteMeta({ distanceKm: null, durationMin: null });
+    }
+  }, [routeMapLocations.length]);
+
+  useEffect(() => {
+    const totalPages = Math.max(1, Math.ceil(dayCards.length / dayPageSize));
+    if (dayPage > totalPages) setDayPage(totalPages);
+  }, [dayCards.length, dayPage, dayPageSize]);
+
+  const openDetailSheet = useCallback(
+    (
+      title: string,
+      description: string,
+      row: Row,
+      options?: { kind?: "generic" | "pre-tour" | "day-item"; dayId?: string }
+    ) => {
+      setDetailSheet({
+        open: true,
+        title,
+        description,
+        row,
+        kind: options?.kind ?? "generic",
+        dayId: options?.dayId,
+      });
+      setDrawerShowMap(false);
+    },
+    []
+  );
+
+  const detailDay = useMemo(() => {
+    if (!detailSheet.open) return null;
+    if (detailSheet.kind === "day-item") {
+      const dayId = detailSheet.dayId || String(detailSheet.row?.dayId || "");
+      if (!dayId) return null;
+      return sortedDays.find((day) => String(day.id) === dayId) ?? null;
+    }
+    return null;
+  }, [detailSheet.dayId, detailSheet.kind, detailSheet.open, detailSheet.row?.dayId, sortedDays]);
+
+  const detailRouteLocationSequenceIds = useMemo(() => {
+    if (!detailSheet.open) return [];
+    if (detailSheet.kind === "pre-tour") return detailPreTourRouteIds;
+    if (detailSheet.kind === "day-item" && detailDay) {
+      const ids = [detailDay.startLocationId, detailDay.endLocationId]
+        .filter(Boolean)
+        .map((value) => String(value));
+      return ids.filter((id, index) => id !== ids[index - 1]);
+    }
+    return [];
+  }, [detailDay, detailPreTourRouteIds, detailSheet.kind, detailSheet.open]);
+
+  const detailRouteMapLocations = useMemo(
+    () =>
+      detailRouteLocationSequenceIds
+        .map((id, index) => {
+          const location = locationCoordinatesById.get(id);
+          if (!location) return null;
+          return {
+            id: `${id}-${index}`,
+            name: location.name,
+            coordinates: location.coordinates,
+          };
+        })
+        .filter((row): row is { id: string; name: string; coordinates: [number, number] } =>
+          Boolean(row)
+        ),
+    [detailRouteLocationSequenceIds, locationCoordinatesById]
+  );
+
+  const detailRoutePathLabel = useMemo(
+    () =>
+      detailRouteLocationSequenceIds
+        .map((locationId) => locationNameById.get(locationId) || locationId)
+        .join(" -> "),
+    [detailRouteLocationSequenceIds, locationNameById]
+  );
+
+  useEffect(() => {
+    if (!detailSheet.open || detailRouteMapLocations.length === 0) {
+      setDrawerRouteMeta({ distanceKm: null, durationMin: null });
+    }
+  }, [detailRouteMapLocations.length, detailSheet.open]);
+
+  useEffect(() => {
+    const loadDetailPreTourRoute = async () => {
+      if (!detailSheet.open || detailSheet.kind !== "pre-tour" || !detailSheet.row?.id) {
+        setDetailPreTourRouteIds([]);
+        setDetailPreTourRouteLoading(false);
+        return;
+      }
+
+      if (isPlanManageMode) {
+        setDetailPreTourRouteIds(routeLocationSequenceIds);
+        setDetailPreTourRouteLoading(false);
+        return;
+      }
+
+      setDetailPreTourRouteLoading(true);
+      try {
+        const dayRows = await listPreTourRecords("pre-tour-days", {
+          planId: String(detailSheet.row.id),
+          limit: 500,
+        });
+        const sorted = [...dayRows].sort(
+          (a, b) => Number(a.dayNumber ?? 0) - Number(b.dayNumber ?? 0)
+        );
+        const ids: string[] = [];
+        const pushId = (value: unknown) => {
+          if (!value) return;
+          const id = String(value);
+          if (ids[ids.length - 1] === id) return;
+          ids.push(id);
+        };
+        sorted.forEach((day) => {
+          pushId(day.startLocationId);
+          pushId(day.endLocationId);
+        });
+        setDetailPreTourRouteIds(ids);
+      } catch {
+        setDetailPreTourRouteIds([]);
+      } finally {
+        setDetailPreTourRouteLoading(false);
+      }
+    };
+
+    void loadDetailPreTourRoute();
+  }, [detailSheet.kind, detailSheet.open, detailSheet.row?.id, isPlanManageMode, routeLocationSequenceIds]);
+
   return (
     <Card className="border-border/70 shadow-sm">
       <CardHeader className="space-y-3 px-4 py-3">
         <div className="flex flex-wrap items-start justify-between gap-2">
           <div>
-            <CardTitle>{isPlanManageMode ? "Pre-Tour Workspace" : "Pre-Tour Plans"}</CardTitle>
+            <CardTitle>
+              {showBinOnly ? "Pre-Tour Bin" : isPlanManageMode ? "Pre-Tour Workspace" : "Pre-Tour Plans"}
+            </CardTitle>
             <CardDescription>
-              {isPlanManageMode
+              {showBinOnly
+                ? "Deleted pre-tour records bin. Admin can restore or permanently purge."
+                : isPlanManageMode
                 ? "Complete day-wise planning view for this pre-tour."
                 : "Initialize pre-tour headers and manage each plan."}
             </CardDescription>
@@ -1557,7 +2270,17 @@ export function PreTourManagementView({
                 {syncingDays ? "Syncing..." : "Sync Days From Range"}
               </Button>
             ) : null}
-            {!isPlanManageMode ? (
+            {isPlanManageMode ? (
+              <Button
+                variant="outline"
+                onClick={() => setMapDialogOpen(true)}
+                disabled={routeLocationSequenceIds.length === 0}
+              >
+                <MapPinned className="mr-1 size-4" />
+                Route Map
+              </Button>
+            ) : null}
+            {!isPlanManageMode && !showBinOnly ? (
               <Button className="master-add-btn" onClick={() => openDialog("pre-tours", "create")} disabled={isReadOnly}>
                 <Plus className="mr-1 size-4" />
                 Add Pre-Tour
@@ -1567,7 +2290,13 @@ export function PreTourManagementView({
         </div>
 
         <Input
-          placeholder={isPlanManageMode ? "Search in days, items, addons, totals..." : "Search plans..."}
+          placeholder={
+            showBinOnly
+              ? "Search bin records..."
+              : isPlanManageMode
+              ? "Search in days, items, addons, totals..."
+              : "Search plans..."
+          }
           value={query}
           onChange={(event) => setQuery(event.target.value)}
         />
@@ -1575,7 +2304,7 @@ export function PreTourManagementView({
         {isPlanManageMode ? (
           <PreTourDayWorkspace
             days={sortedDays}
-            items={items}
+            items={items.filter((item) => String(item.itemType || "").toUpperCase() !== "TRANSPORT")}
             selectedDayId={selectedDayId}
             onSelectDay={setSelectedDayId}
             lookupLabel={lookupLabel}
@@ -1587,22 +2316,54 @@ export function PreTourManagementView({
 
       <CardContent className="space-y-3 px-4 pb-3 pt-0">
         {!isPlanManageMode ? (
-          <SectionTable
-            resource="pre-tours"
-            rows={filteredPlanRows}
-            loading={loading}
-            isReadOnly={isReadOnly}
-            lookups={lookups}
-            showManage
-            onCreateVersion={(row) => void createVersionFromPlan(row)}
-            onCopyPlan={(row) => openCopyPlanDialog(row)}
-            onAdd={() => openDialog("pre-tours", "create")}
-            onEdit={(row) => openDialog("pre-tours", "edit", row)}
-            onDelete={(row) => void onDelete("pre-tours", row)}
-          />
+          showBinOnly ? (
+            <SectionTable
+              resource="pre-tour-bins"
+              rows={filteredBinRows}
+              loading={loading}
+              isReadOnly={!isAdmin}
+              lookups={lookups}
+              hideAdd
+              hideEdit={false}
+              editLabel="Restore"
+              deleteLabel="Purge"
+              onView={(row) => openDetailSheet("Pre-Tour Bin Details", "Soft-deleted pre-tour.", row)}
+              onEdit={(row) =>
+                void updatePreTourRecord("pre-tour-bins", String(row.id), { action: "RESTORE" })
+                  .then(() => {
+                    notify.success("Pre-tour restored from bin.");
+                    return loadData();
+                  })
+                  .catch((error) => {
+                    notify.error(error instanceof Error ? error.message : "Failed to restore pre-tour.");
+                  })
+              }
+              onDelete={(row) => void onDelete("pre-tour-bins", row)}
+            />
+          ) : (
+          <>
+            <SectionTable
+              resource="pre-tours"
+              rows={filteredPlanRows}
+              loading={loading}
+              isReadOnly={isReadOnly}
+              lookups={lookups}
+              showManage
+              onCreateVersion={(row) => void createVersionFromPlan(row)}
+              onCopyPlan={(row) => openCopyPlanDialog(row)}
+              onAdd={() => openDialog("pre-tours", "create")}
+              onView={(row) =>
+                openDetailSheet("Pre-Tour Details", "Selected pre-tour record details.", row, {
+                  kind: "pre-tour",
+                })
+              }
+              onEdit={(row) => openDialog("pre-tours", "edit", row)}
+              onDelete={(row) => void onDelete("pre-tours", row)}
+            />
+          </>)
         ) : (
           <>
-            {dayCards.map(({ day, dayItems }) => (
+            {paginatedDayCards.map(({ day, dayItems }) => (
               <Card key={String(day.id)} className="border-border/70 shadow-sm">
                 <CardHeader className="flex flex-row items-start justify-between gap-2 space-y-0 px-3 py-2.5">
                   <div>
@@ -1637,15 +2398,14 @@ export function PreTourManagementView({
                     </Button>
                   </div>
                 </CardHeader>
-                <CardContent className="px-3 pb-2.5 pt-0">
-                  <Table>
+                <CardContent className="space-y-2 px-3 pb-2.5 pt-0">
+                  <div className="overflow-x-auto">
+                  <Table className="min-w-[680px]">
                     <TableHeader>
                       <TableRow>
                         <TableHead className="w-[28px]" />
                         <TableHead>Type</TableHead>
                         <TableHead>Title</TableHead>
-                        <TableHead>Time</TableHead>
-                        <TableHead>Total</TableHead>
                         <TableHead>Status</TableHead>
                         <TableHead className="text-right">Actions</TableHead>
                       </TableRow>
@@ -1653,7 +2413,7 @@ export function PreTourManagementView({
                     <TableBody>
                       {dayItems.length === 0 ? (
                         <TableRow>
-                          <TableCell colSpan={7} className="py-3 text-center text-muted-foreground">
+                          <TableCell colSpan={5} className="py-3 text-center text-muted-foreground">
                             No plan items for this day.
                           </TableCell>
                         </TableRow>
@@ -1686,6 +2446,11 @@ export function PreTourManagementView({
                               </TableCell>
                               <TableCell className="py-1.5 align-top">
                                 <div className="font-medium">{String(item.title || item.code || "-")}</div>
+                                <p className="text-xs text-muted-foreground">
+                                  {String(item.startAt || "").slice(11, 16) || "-"} -{" "}
+                                  {String(item.endAt || "").slice(11, 16) || "-"} •{" "}
+                                  {String(item.currencyCode || "-")} {String(item.totalAmount || "0")}
+                                </p>
                                 {itemAddons.length > 0 ? (
                                   <div className="mt-1 flex flex-wrap gap-1">
                                     {itemAddons.map((addon) => (
@@ -1705,17 +2470,23 @@ export function PreTourManagementView({
                                 ) : null}
                               </TableCell>
                               <TableCell className="py-1.5">
-                                {String(item.startAt || "").slice(11, 16) || "-"} -{" "}
-                                {String(item.endAt || "").slice(11, 16) || "-"}
-                              </TableCell>
-                              <TableCell className="py-1.5">
-                                {String(item.currencyCode || "-")} {String(item.totalAmount || "0")}
-                              </TableCell>
-                              <TableCell className="py-1.5">
                                 <Badge variant="outline">{String(item.status || "-")}</Badge>
                               </TableCell>
                               <TableCell className="py-1.5 text-right">
                                 <div className="flex justify-end gap-1">
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={() =>
+                                      openDetailSheet("Day Item Details", `Day ${String(day.dayNumber)} item information.`, item, {
+                                        kind: "day-item",
+                                        dayId: String(day.id),
+                                      })
+                                    }
+                                  >
+                                    <PanelLeftOpen className="mr-1 size-4" />
+                                    View
+                                  </Button>
                                   <Button
                                     size="sm"
                                     variant="outline"
@@ -1769,10 +2540,45 @@ export function PreTourManagementView({
                       )}
                     </TableBody>
                   </Table>
+                  </div>
                 </CardContent>
               </Card>
             ))}
 
+            <TablePagination
+              totalItems={dayCards.length}
+              page={dayPage}
+              pageSize={dayPageSize}
+              onPageChange={setDayPage}
+              onPageSizeChange={setDayPageSize}
+            />
+
+            <SectionTable
+              resource="pre-tour-categories"
+              rows={filteredCategoryRows}
+              loading={loading}
+              isReadOnly={isReadOnly}
+              lookups={lookups}
+              onAdd={() => openDialog("pre-tour-categories", "create")}
+              onView={(row) =>
+                openDetailSheet("Pre-Tour Category Details", "Selected category mapping details.", row)
+              }
+              onEdit={(row) => openDialog("pre-tour-categories", "edit", row)}
+              onDelete={(row) => void onDelete("pre-tour-categories", row)}
+            />
+            <SectionTable
+              resource="pre-tour-technical-visits"
+              rows={filteredTechnicalVisitRows}
+              loading={loading}
+              isReadOnly={isReadOnly}
+              lookups={lookups}
+              onAdd={() => openDialog("pre-tour-technical-visits", "create")}
+              onView={(row) =>
+                openDetailSheet("Field Visit Link Details", "Selected field visit link details.", row)
+              }
+              onEdit={(row) => openDialog("pre-tour-technical-visits", "edit", row)}
+              onDelete={(row) => void onDelete("pre-tour-technical-visits", row)}
+            />
             <SectionTable
               resource="pre-tour-item-addons"
               rows={filteredAddonRows}
@@ -1780,6 +2586,7 @@ export function PreTourManagementView({
               isReadOnly={isReadOnly}
               lookups={lookups}
               onAdd={() => openDialog("pre-tour-item-addons", "create")}
+              onView={(row) => openDetailSheet("Addon Details", "Selected addon details.", row)}
               onEdit={(row) => openDialog("pre-tour-item-addons", "edit", row)}
               onDelete={(row) => void onDelete("pre-tour-item-addons", row)}
             />
@@ -1790,12 +2597,65 @@ export function PreTourManagementView({
               isReadOnly={isReadOnly}
               lookups={lookups}
               onAdd={() => openDialog("pre-tour-totals", "create")}
+              onView={(row) => openDetailSheet("Totals Details", "Selected totals details.", row)}
               onEdit={(row) => openDialog("pre-tour-totals", "edit", row)}
               onDelete={(row) => void onDelete("pre-tour-totals", row)}
             />
           </>
         )}
       </CardContent>
+
+      <Dialog open={mapDialogOpen} onOpenChange={setMapDialogOpen}>
+        <DialogContent className="sm:max-w-6xl">
+          <DialogHeader>
+            <DialogTitle>Pre-Tour Route Map</DialogTitle>
+            <DialogDescription>
+              Visual route for the current pre-tour based on day detail start and end locations.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="mb-2 flex items-center justify-between gap-2 rounded-md border bg-muted/20 px-3 py-2">
+            <p className="text-xs text-muted-foreground">
+              Selected {routeLocationSequenceIds.length} location point
+              {routeLocationSequenceIds.length === 1 ? "" : "s"} in sequence. Mapped:{" "}
+              {routeMapLocations.length}.
+            </p>
+            <div className="flex items-center gap-2">
+              <Label htmlFor="pretour-road-route" className="text-xs">
+                Use road route (OSRM)
+              </Label>
+              <Switch
+                id="pretour-road-route"
+                checked={useRoadRoute}
+                onCheckedChange={setUseRoadRoute}
+              />
+            </div>
+          </div>
+          <div className="mb-2 space-y-1 rounded-md border bg-background px-3 py-2">
+            <p className="truncate text-xs text-muted-foreground">
+              Path: <span className="font-medium text-foreground">{routePathLabel || "-"}</span>
+            </p>
+            <div className="flex flex-wrap items-center gap-3 text-xs">
+              <span className="text-muted-foreground">
+                Distance:{" "}
+                <span className="font-medium text-foreground">
+                  {routeMeta.distanceKm !== null ? `${routeMeta.distanceKm.toFixed(2)} km` : "-"}
+                </span>
+              </span>
+              <span className="text-muted-foreground">
+                Duration:{" "}
+                <span className="font-medium text-foreground">
+                  {routeMeta.durationMin !== null ? `${routeMeta.durationMin.toFixed(1)} min` : "-"}
+                </span>
+              </span>
+            </div>
+          </div>
+          <PreTourRouteMap
+            locations={routeMapLocations}
+            useRoadRoute={useRoadRoute}
+            onRouteMetaChange={setRouteMeta}
+          />
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={Boolean(sharingItem)} onOpenChange={(open) => (!open ? setSharingItem(null) : null)}>
         <DialogContent className="sm:max-w-md">
@@ -1837,6 +2697,250 @@ export function PreTourManagementView({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <Sheet
+        open={detailSheet.open}
+        onOpenChange={(open) => setDetailSheet((prev) => ({ ...prev, open }))}
+      >
+        <SheetContent side="right" className="w-[92vw] sm:max-w-xl">
+          <SheetHeader className="border-b pb-3">
+            <SheetTitle>{detailSheet.title}</SheetTitle>
+            <SheetDescription>{detailSheet.description}</SheetDescription>
+          </SheetHeader>
+          <div className="space-y-3 overflow-y-auto p-4">
+            {detailSheet.row && detailSheet.kind === "pre-tour" ? (
+              <div className="flex flex-wrap gap-1.5">
+                <Button size="sm" variant="outline" asChild>
+                  <Link href={`/master-data/pre-tours/${String(detailSheet.row.id)}`}>
+                    <Settings2 className="mr-1 size-4" />
+                    Manage
+                  </Link>
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    setDetailSheet((prev) => ({ ...prev, open: false }));
+                    void createVersionFromPlan(detailSheet.row as Row);
+                  }}
+                  disabled={isReadOnly}
+                >
+                  + Version
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    setDetailSheet((prev) => ({ ...prev, open: false }));
+                    openCopyPlanDialog(detailSheet.row as Row);
+                  }}
+                  disabled={isReadOnly}
+                >
+                  <CopyPlus className="mr-1 size-4" />
+                  Copy
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    setDetailSheet((prev) => ({ ...prev, open: false }));
+                    openDialog("pre-tours", "edit", detailSheet.row as Row);
+                  }}
+                  disabled={isReadOnly}
+                >
+                  <Settings2 className="mr-1 size-4" />
+                  Edit
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    setDetailSheet((prev) => ({ ...prev, open: false }));
+                    void onDelete("pre-tours", detailSheet.row as Row);
+                  }}
+                  disabled={isReadOnly}
+                >
+                  <Trash2 className="size-4" />
+                </Button>
+              </div>
+            ) : null}
+
+            {detailSheet.row && detailSheet.kind === "pre-tour" ? (
+              <div className="grid gap-1 rounded-md border bg-muted/20 p-3">
+                {([
+                  ["Code", detailSheet.row.code],
+                  ["Reference No", detailSheet.row.referenceNo],
+                  ["Plan Code", detailSheet.row.planCode],
+                  ["Title", detailSheet.row.title],
+                  ["Status", detailSheet.row.status],
+                  ["Operator", lookupLabel(detailSheet.row.operatorOrgId)],
+                  ["Market", lookupLabel(detailSheet.row.marketOrgId)],
+                  ["Start Date", formatDate(detailSheet.row.startDate)],
+                  ["End Date", formatDate(detailSheet.row.endDate)],
+                  ["Total Nights", detailSheet.row.totalNights],
+                  ["Adults", detailSheet.row.adults],
+                  ["Children", detailSheet.row.children],
+                  ["Infants", detailSheet.row.infants],
+                  ["Currency", detailSheet.row.currencyCode],
+                  ["Price Mode", detailSheet.row.priceMode],
+                  ["Version", detailSheet.row.version],
+                ] as Array<[string, unknown]>).map(([label, value]) => (
+                  <div key={String(label)} className="flex items-center justify-between gap-2 text-xs">
+                    <span className="font-medium text-muted-foreground">{label}</span>
+                    <span className="text-right text-foreground">{formatCell(value, lookups)}</span>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+
+            {detailSheet.row && detailSheet.kind === "day-item" ? (
+              <div className="flex flex-wrap gap-1.5">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    setSelectedDayId(String(detailSheet.dayId || detailSheet.row?.dayId || ""));
+                    setSelectedItemId(String(detailSheet.row?.id || ""));
+                    setDetailSheet((prev) => ({ ...prev, open: false }));
+                    openDialog("pre-tour-item-addons", "create");
+                  }}
+                  disabled={isReadOnly}
+                >
+                  + Addon
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    setSharingItem(detailSheet.row);
+                    setShareTargetDayId("");
+                    setDetailSheet((prev) => ({ ...prev, open: false }));
+                  }}
+                  disabled={isReadOnly}
+                >
+                  <CopyPlus className="mr-1 size-4" />
+                  Share
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    setSelectedDayId(String(detailSheet.dayId || detailSheet.row?.dayId || ""));
+                    setSelectedItemId(String(detailSheet.row?.id || ""));
+                    setDetailSheet((prev) => ({ ...prev, open: false }));
+                    openDialog("pre-tour-items", "edit", detailSheet.row as Row);
+                  }}
+                  disabled={isReadOnly}
+                >
+                  <Settings2 className="mr-1 size-4" />
+                  Edit
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    setDetailSheet((prev) => ({ ...prev, open: false }));
+                    void onDelete("pre-tour-items", detailSheet.row as Row);
+                  }}
+                  disabled={isReadOnly}
+                >
+                  <Trash2 className="size-4" />
+                </Button>
+              </div>
+            ) : null}
+
+            {detailSheet.kind === "pre-tour" ? (
+              <div className="rounded-md border bg-background p-3">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-xs text-muted-foreground">
+                    Locations: <span className="font-medium text-foreground">{detailRoutePathLabel || "-"}</span>
+                  </p>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setDrawerShowMap((prev) => !prev)}
+                    disabled={detailPreTourRouteLoading || detailRouteLocationSequenceIds.length === 0}
+                  >
+                    {drawerShowMap ? "Hide Map" : "Show Map"}
+                  </Button>
+                </div>
+              </div>
+            ) : null}
+
+            {(detailSheet.kind === "pre-tour" || detailSheet.kind === "day-item") &&
+            drawerShowMap &&
+            (detailPreTourRouteLoading || detailRouteLocationSequenceIds.length > 0) ? (
+              <div className="space-y-2 rounded-md border bg-muted/20 p-3">
+                {detailPreTourRouteLoading ? (
+                  <p className="text-xs text-muted-foreground">Loading route details...</p>
+                ) : null}
+                {selectedPlan || detailSheet.kind === "pre-tour" ? (
+                  <div className="grid gap-1 text-xs text-muted-foreground sm:grid-cols-2">
+                    <p>
+                      Header:{" "}
+                      <span className="font-medium text-foreground">
+                        {String(selectedPlan?.code || detailSheet.row?.code || "-")}
+                      </span>
+                    </p>
+                    <p>
+                      Date Range:{" "}
+                      <span className="font-medium text-foreground">
+                        {formatDate(selectedPlan?.startDate || detailSheet.row?.startDate)} -{" "}
+                        {formatDate(selectedPlan?.endDate || detailSheet.row?.endDate)}
+                      </span>
+                    </p>
+                  </div>
+                ) : null}
+                <div className="flex flex-wrap items-center gap-3 text-xs">
+                  <span className="text-muted-foreground">
+                    Distance:{" "}
+                    <span className="font-medium text-foreground">
+                      {drawerRouteMeta.distanceKm !== null ? `${drawerRouteMeta.distanceKm.toFixed(2)} km` : "-"}
+                    </span>
+                  </span>
+                  <span className="text-muted-foreground">
+                    Duration:{" "}
+                    <span className="font-medium text-foreground">
+                      {drawerRouteMeta.durationMin !== null ? `${drawerRouteMeta.durationMin.toFixed(1)} min` : "-"}
+                    </span>
+                  </span>
+                </div>
+                {detailRouteMapLocations.length > 0 ? (
+                  <PreTourRouteMap
+                    locations={detailRouteMapLocations}
+                    useRoadRoute={true}
+                    onRouteMetaChange={setDrawerRouteMeta}
+                  />
+                ) : (
+                  <div className="rounded-md border bg-background p-3 text-xs text-muted-foreground">
+                    No mapped coordinates found for selected tour locations.
+                  </div>
+                )}
+              </div>
+            ) : null}
+
+            {detailSheet.row && detailSheet.kind !== "pre-tour" ? (
+              Object.entries(detailSheet.row).map(([key, value]) => (
+                <div
+                  key={key}
+                  className="flex items-start justify-between gap-3 rounded-md border px-3 py-2 text-sm"
+                >
+                  <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                    {key}
+                  </span>
+                  <span className="max-w-[70%] text-right text-foreground">
+                    {formatCell(value, lookups)}
+                  </span>
+                </div>
+              ))
+            ) : (
+              detailSheet.kind !== "pre-tour" ? (
+                <p className="text-sm text-muted-foreground">No details to show.</p>
+              ) : null
+            )}
+          </div>
+        </SheetContent>
+      </Sheet>
 
       <Dialog
         open={copyDialogOpen}
@@ -2055,6 +3159,7 @@ export function PreTourManagementView({
                     onValueChange={(value) =>
                       setForm((prev) => ({
                         ...prev,
+                        ...(field.key === "typeId" ? { categoryId: "" } : {}),
                         [field.key]: field.nullable && value === "__none__" ? "" : value,
                       }))
                     }
@@ -2123,6 +3228,143 @@ export function PreTourManagementView({
                 ) : null}
               </div>
             ))}
+
+            {dialog.resource === "pre-tour-days" ? (
+              <div className="space-y-2 rounded-md border bg-muted/20 p-3 md:col-span-2">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-medium">Day Transport Details</p>
+                    <p className="text-xs text-muted-foreground">
+                      Maintain transport here. This will auto-save as the day transport record.
+                    </p>
+                  </div>
+                  <Switch
+                    checked={dayTransportForm.enabled}
+                    onCheckedChange={(checked) =>
+                      setDayTransportForm((prev) => ({ ...prev, enabled: checked }))
+                    }
+                  />
+                </div>
+
+                {dayTransportForm.enabled ? (
+                  <div className="grid gap-2 md:grid-cols-2">
+                    <div>
+                      <Label className="mb-1 block text-xs font-medium">Vehicle Type *</Label>
+                      <Select
+                        value={dayTransportForm.serviceId || "__none__"}
+                        onValueChange={(value) =>
+                          setDayTransportForm((prev) => ({
+                            ...prev,
+                            serviceId: value === "__none__" ? "" : value,
+                          }))
+                        }
+                      >
+                        <SelectTrigger className="w-full">
+                          <SelectValue placeholder="Select vehicle type" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="__none__">None</SelectItem>
+                          {transportVehicleOptions.map((option) => (
+                            <SelectItem key={option.value} value={option.value}>
+                              {option.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div>
+                      <Label className="mb-1 block text-xs font-medium">Pax</Label>
+                      <Input
+                        type="number"
+                        value={dayTransportForm.pax}
+                        onChange={(event) =>
+                          setDayTransportForm((prev) => ({ ...prev, pax: event.target.value }))
+                        }
+                      />
+                    </div>
+                    <div>
+                      <Label className="mb-1 block text-xs font-medium">Start Time</Label>
+                      <Input
+                        type="datetime-local"
+                        value={dayTransportForm.startAt}
+                        onChange={(event) =>
+                          setDayTransportForm((prev) => ({ ...prev, startAt: event.target.value }))
+                        }
+                      />
+                    </div>
+                    <div>
+                      <Label className="mb-1 block text-xs font-medium">End Time</Label>
+                      <Input
+                        type="datetime-local"
+                        value={dayTransportForm.endAt}
+                        onChange={(event) =>
+                          setDayTransportForm((prev) => ({ ...prev, endAt: event.target.value }))
+                        }
+                      />
+                    </div>
+                    <div>
+                      <Label className="mb-1 block text-xs font-medium">Base Amount</Label>
+                      <Input
+                        type="number"
+                        value={dayTransportForm.baseAmount}
+                        onChange={(event) =>
+                          setDayTransportForm((prev) => ({ ...prev, baseAmount: event.target.value }))
+                        }
+                      />
+                    </div>
+                    <div>
+                      <Label className="mb-1 block text-xs font-medium">Tax Amount</Label>
+                      <Input
+                        type="number"
+                        value={dayTransportForm.taxAmount}
+                        onChange={(event) =>
+                          setDayTransportForm((prev) => ({ ...prev, taxAmount: event.target.value }))
+                        }
+                      />
+                    </div>
+                    <div>
+                      <Label className="mb-1 block text-xs font-medium">Total Amount</Label>
+                      <Input
+                        type="number"
+                        value={dayTransportForm.totalAmount}
+                        onChange={(event) =>
+                          setDayTransportForm((prev) => ({ ...prev, totalAmount: event.target.value }))
+                        }
+                      />
+                    </div>
+                    <div>
+                      <Label className="mb-1 block text-xs font-medium">Status</Label>
+                      <Select
+                        value={dayTransportForm.status}
+                        onValueChange={(value) =>
+                          setDayTransportForm((prev) => ({ ...prev, status: value }))
+                        }
+                      >
+                        <SelectTrigger className="w-full">
+                          <SelectValue placeholder="Select status" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="PLANNED">PLANNED</SelectItem>
+                          <SelectItem value="CONFIRMED">CONFIRMED</SelectItem>
+                          <SelectItem value="CANCELLED">CANCELLED</SelectItem>
+                          <SelectItem value="COMPLETED">COMPLETED</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="md:col-span-2">
+                      <Label className="mb-1 block text-xs font-medium">Transport Notes</Label>
+                      <Textarea
+                        value={dayTransportForm.notes}
+                        onChange={(event) =>
+                          setDayTransportForm((prev) => ({ ...prev, notes: event.target.value }))
+                        }
+                        className="min-h-[90px]"
+                      />
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
           </div>
 
           <DialogFooter>
