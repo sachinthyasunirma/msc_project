@@ -591,7 +591,12 @@ async function cleanupExpiredPreTourBins(companyId: string) {
     for (const row of expired) {
       await tx
         .delete(schema.preTourPlanBin)
-        .where(and(eq(schema.preTourPlanBin.id, String(row.id))));
+        .where(
+          and(
+            eq(schema.preTourPlanBin.id, String(row.id)),
+            eq(schema.preTourPlanBin.companyId, companyId)
+          )
+        );
       await tx
         .delete(schema.preTourPlan)
         .where(
@@ -1503,7 +1508,7 @@ export async function updatePreTourRecord(
 
         await tx
           .delete(schema.preTourPlanBin)
-          .where(eq(schema.preTourPlanBin.id, id));
+          .where(and(eq(schema.preTourPlanBin.id, id), eq(schema.preTourPlanBin.companyId, companyId)));
 
         return [updatedPlan];
       });
@@ -1596,7 +1601,7 @@ export async function deletePreTourRecord(
       await db.transaction(async (tx) => {
         await tx
           .delete(schema.preTourPlanBin)
-          .where(eq(schema.preTourPlanBin.id, id));
+          .where(and(eq(schema.preTourPlanBin.id, id), eq(schema.preTourPlanBin.companyId, companyId)));
         await tx
           .delete(schema.preTourPlan)
           .where(

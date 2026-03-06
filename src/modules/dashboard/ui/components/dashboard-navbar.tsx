@@ -5,6 +5,7 @@ import { useSidebar } from "@/components/ui/sidebar";
 import { PanelLeftCloseIcon, PanelLeftIcon, SearchIcon } from "lucide-react";
 import { DashboardCommands } from "./dashboard-commands";
 import { useEffect, useState } from "react";
+import { NotificationBell } from "./notification-bell";
 
 export const DashboardNavbar = () => {
   const { state, toggleSidebar, isMobile } = useSidebar();
@@ -44,6 +45,9 @@ export const DashboardNavbar = () => {
             <span>&#8984;</span>K
           </kbd>
         </Button>
+        <div className="ml-auto">
+          <NotificationBell />
+        </div>
       </nav>
     </>
   );

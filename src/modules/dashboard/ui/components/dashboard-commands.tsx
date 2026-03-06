@@ -21,6 +21,7 @@ import {
   Trash2,
   Users,
   CalendarRange,
+  Bell,
 } from "lucide-react";
 
 import {
@@ -312,6 +313,13 @@ const navigationItems = [
     group: "Operations",
     icon: Hotel,
     keywords: "hotels operations inventory rates availability",
+  },
+  {
+    title: "Notifications",
+    href: "/notifications",
+    group: "General",
+    icon: Bell,
+    keywords: "notifications inbox messages mentions username internal communication",
   },
   {
     title: "Recycle Bin",

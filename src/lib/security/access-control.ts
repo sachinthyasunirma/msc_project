@@ -53,6 +53,13 @@ const SYSTEM_ROLE_CODES: Record<LegacyRole, string> = {
   MANAGER: "SYS_MANAGER",
   USER: "SYS_USER",
 };
+const ADMIN_PRIVILEGE_CACHE_TTL_MS = 15_000;
+const ROLE_PRIVILEGE_CACHE_TTL_MS = 5_000;
+const adminPrivilegeCache = new Map<
+  string,
+  { expiresAt: number; privileges: AppPrivilegeCode[] }
+>();
+const userPrivilegeCache = new Map<string, { expiresAt: number; privileges: string[] }>();
 
 function normalizeLegacyRole(value: string | null | undefined): LegacyRole {
   if (value === "ADMIN" || value === "MANAGER") return value;
@@ -71,12 +78,19 @@ function isSubscriptionActive(record: {
 }
 
 async function getRolePrivileges(companyId: string, userId: string) {
+  const cacheKey = `${companyId}:${userId}`;
+  const cached = userPrivilegeCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) return cached.privileges;
+
   const assignments = await db
     .select({ roleId: userCompanyRole.roleId })
     .from(userCompanyRole)
     .where(and(eq(userCompanyRole.companyId, companyId), eq(userCompanyRole.userId, userId)));
 
-  if (assignments.length === 0) return [] as string[];
+  if (assignments.length === 0) {
+    userPrivilegeCache.set(cacheKey, { privileges: [], expiresAt: Date.now() + ROLE_PRIVILEGE_CACHE_TTL_MS });
+    return [] as string[];
+  }
 
   const privilegeRows = await db
     .select({ privilegeCode: companyRolePrivilege.privilegeCode })
@@ -91,7 +105,53 @@ async function getRolePrivileges(companyId: string, userId: string) {
       )
     );
 
-  return [...new Set(privilegeRows.map((row) => row.privilegeCode))];
+  const privileges = [...new Set(privilegeRows.map((row) => row.privilegeCode))];
+  userPrivilegeCache.set(cacheKey, {
+    privileges,
+    expiresAt: Date.now() + ROLE_PRIVILEGE_CACHE_TTL_MS,
+  });
+  return privileges;
+}
+
+async function getCompanyAdminPrivilegeCeiling(companyId: string) {
+  const cacheKey = companyId;
+  const cached = adminPrivilegeCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.privileges;
+  }
+
+  const [adminRole] = await db
+    .select({ id: companyRole.id })
+    .from(companyRole)
+    .where(
+      and(
+        eq(companyRole.companyId, companyId),
+        eq(companyRole.code, SYSTEM_ROLE_CODES.ADMIN),
+        eq(companyRole.isActive, true)
+      )
+    )
+    .limit(1);
+
+  if (!adminRole) return null;
+
+  const privilegeRows = await db
+    .select({ privilegeCode: companyRolePrivilege.privilegeCode })
+    .from(companyRolePrivilege)
+    .where(
+      and(
+        eq(companyRolePrivilege.companyId, companyId),
+        eq(companyRolePrivilege.roleId, adminRole.id)
+      )
+    );
+
+  const privileges = [...new Set(privilegeRows.map((row) => row.privilegeCode))].filter(
+    isKnownPrivilegeCode
+  );
+  adminPrivilegeCache.set(cacheKey, {
+    privileges,
+    expiresAt: Date.now() + ADMIN_PRIVILEGE_CACHE_TTL_MS,
+  });
+  return privileges;
 }
 
 function deriveLegacyPrivileges(accessUser: {
@@ -282,6 +342,12 @@ export async function resolveAccess(
   const effectiveReadOnly = subscriptionLimited ? true : elevated ? false : storedReadOnly;
   const plan = currentCompany.subscriptionPlan ?? "STARTER";
   const allowedByPlan = new Set(getPrivilegesForPlan(plan));
+  const adminCeiling = await getCompanyAdminPrivilegeCeiling(currentCompany.id);
+  const allowedByCompany = new Set(
+    adminCeiling
+      ? clampPrivilegesToPlan(plan, adminCeiling)
+      : getPrivilegesForPlan(plan)
+  );
   const assignedPrivileges = await getRolePrivileges(currentCompany.id, currentUser.id);
 
   const baselinePrivileges = deriveLegacyPrivileges({
@@ -298,7 +364,9 @@ export async function resolveAccess(
     ]),
   ];
 
-  const privileges = clampPrivilegesToPlan(plan, rawPrivileges);
+  const privileges = clampPrivilegesToPlan(plan, rawPrivileges).filter((code) =>
+    allowedByCompany.has(code)
+  );
   const privilegeSet = new Set(privileges);
   const canWriteMasterData =
     !subscriptionLimited &&
@@ -314,6 +382,13 @@ export async function resolveAccess(
       403,
       "PLAN_RESTRICTED",
       "Your current subscription plan does not include this feature."
+    );
+  }
+  if (options.requiredPrivilege && !allowedByCompany.has(options.requiredPrivilege)) {
+    throw new AccessControlError(
+      403,
+      "PERMISSION_DENIED",
+      "Your company admin role configuration does not allow this feature."
     );
   }
   if (options.requiredPrivilege && !privilegeSet.has(options.requiredPrivilege)) {

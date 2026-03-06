@@ -1,7 +1,14 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ChevronsUpDown, Building2, LogOut, ShieldCheck } from "lucide-react";
+import {
+  ChevronsUpDown,
+  Building2,
+  LogOut,
+  Settings2,
+  CircleDollarSign,
+  LifeBuoy,
+} from "lucide-react";
 import { useRouter } from "next/navigation";
 import { GeneratedAvatar } from "@/components/generated-avatar";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -273,17 +280,17 @@ export function NavUser() {
               {isManager ? "Edit Company" : "View Company"}
             </DropdownMenuItem>
             <DropdownMenuItem onClick={() => router.push("/configuration/company")}>
-              <ShieldCheck />
+              <Settings2 />
               Company Configuration
             </DropdownMenuItem>
             {accessUser.role === "ADMIN" ? (
               <DropdownMenuItem onClick={() => router.push("/billing/plans")}>
-                <ShieldCheck />
+                <CircleDollarSign />
                 Plans & Billing
               </DropdownMenuItem>
             ) : null}
             <DropdownMenuItem onClick={() => router.push("/support/contact-us")}>
-              <Building2 />
+              <LifeBuoy />
               Contact Us
             </DropdownMenuItem>
             <DropdownMenuItem onClick={() => void onLogout()}>
