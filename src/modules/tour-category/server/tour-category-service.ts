@@ -2,7 +2,7 @@ import { and, desc, eq, ilike, or } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
 import * as schema from "@/db/schema";
-import { auth } from "@/lib/auth";
+import { AccessControlError, resolveAccess } from "@/lib/security/access-control";
 import {
   createTourCategoryRuleSchema,
   createTourCategorySchema,
@@ -37,26 +37,16 @@ function toDecimal(value: number | string | null | undefined, scale = 2) {
 }
 
 async function getAccess(headers: Headers) {
-  const session = await auth.api.getSession({ headers });
-  if (!session?.user) {
-    throw new TourCategoryError(401, "UNAUTHORIZED", "You are not authenticated.");
+  try {
+    return await resolveAccess(headers, {
+      requiredPrivilege: "SCREEN_MASTER_TOUR_CATEGORIES",
+    });
+  } catch (error) {
+    if (error instanceof AccessControlError) {
+      throw new TourCategoryError(error.status, error.code, error.message);
+    }
+    throw error;
   }
-
-  const user = session.user as {
-    companyId?: string | null;
-    role?: string | null;
-    readOnly?: boolean;
-    canWriteMasterData?: boolean;
-  };
-  if (!user.companyId) {
-    throw new TourCategoryError(403, "COMPANY_REQUIRED", "User is not linked to a company.");
-  }
-  return {
-    companyId: user.companyId,
-    role: user.role ?? "USER",
-    readOnly: Boolean(user.readOnly),
-    canWriteMasterData: Boolean(user.canWriteMasterData),
-  };
 }
 
 async function ensureWritable(headers: Headers) {
@@ -408,4 +398,3 @@ export function toTourCategoryErrorResponse(error: unknown) {
     },
   };
 }
-

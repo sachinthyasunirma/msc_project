@@ -2,7 +2,7 @@ import { and, desc, eq, ilike, or } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
 import * as schema from "@/db/schema";
-import { auth } from "@/lib/auth";
+import { AccessControlError, resolveAccess } from "@/lib/security/access-control";
 import {
   createTechnicalVisitActionSchema,
   createTechnicalVisitChecklistSchema,
@@ -46,28 +46,16 @@ function toDate(value: string | null | undefined) {
 }
 
 async function getAccess(headers: Headers) {
-  const session = await auth.api.getSession({ headers });
-  if (!session?.user) {
-    throw new TechnicalVisitError(401, "UNAUTHORIZED", "You are not authenticated.");
+  try {
+    return await resolveAccess(headers, {
+      requiredPrivilege: "SCREEN_TECHNICAL_VISITS",
+    });
+  } catch (error) {
+    if (error instanceof AccessControlError) {
+      throw new TechnicalVisitError(error.status, error.code, error.message);
+    }
+    throw error;
   }
-
-  const user = session.user as {
-    companyId?: string | null;
-    role?: string | null;
-    readOnly?: boolean;
-    canWriteMasterData?: boolean;
-  };
-
-  if (!user.companyId) {
-    throw new TechnicalVisitError(403, "COMPANY_REQUIRED", "User is not linked to a company.");
-  }
-
-  return {
-    companyId: user.companyId,
-    role: user.role ?? "USER",
-    readOnly: Boolean(user.readOnly),
-    canWriteMasterData: Boolean(user.canWriteMasterData),
-  };
 }
 
 async function ensureWritable(headers: Headers) {

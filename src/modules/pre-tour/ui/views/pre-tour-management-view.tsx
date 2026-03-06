@@ -96,6 +96,9 @@ type Row = Record<string, unknown>;
 type CompanySettingsResponse = {
   company?: { baseCurrencyCode?: string | null } | null;
 };
+type AccessControlResponse = {
+  privileges?: string[];
+};
 
 const META: Record<PreTourResourceKey, { title: string; description: string }> = {
   "pre-tours": {
@@ -544,6 +547,10 @@ export function PreTourManagementView({
       Boolean(accessUser?.canWritePreTour));
   const isReadOnly = !canWrite;
   const isAdmin = accessUser?.role === "ADMIN";
+  const [privileges, setPrivileges] = useState<string[]>([]);
+  const [accessLoaded, setAccessLoaded] = useState(false);
+  const canViewRouteMap = privileges.includes("PRE_TOUR_MAP");
+  const canViewCosting = privileges.includes("PRE_TOUR_COSTING");
 
   const isPlanManageMode = Boolean(managedPlanId);
 
@@ -578,7 +585,7 @@ export function PreTourManagementView({
   const [sharingItem, setSharingItem] = useState<Row | null>(null);
   const [shareTargetDayId, setShareTargetDayId] = useState("");
   const [sharing, setSharing] = useState(false);
-  const [creatingVersion, setCreatingVersion] = useState(false);
+  const [, setCreatingVersion] = useState(false);
   const [copyDialogOpen, setCopyDialogOpen] = useState(false);
   const [copySourcePlan, setCopySourcePlan] = useState<Row | null>(null);
   const [copySaving, setCopySaving] = useState(false);
@@ -1226,7 +1233,9 @@ export function PreTourManagementView({
         listPreTourRecords("pre-tour-days", { limit: 500, planId: managedPlanId }),
         listPreTourRecords("pre-tour-items", { limit: 500, planId: managedPlanId }),
         listPreTourRecords("pre-tour-item-addons", { limit: 500, planId: managedPlanId }),
-        listPreTourRecords("pre-tour-totals", { limit: 500, planId: managedPlanId }),
+        canViewCosting
+          ? listPreTourRecords("pre-tour-totals", { limit: 500, planId: managedPlanId })
+          : Promise.resolve([] as Row[]),
         listPreTourRecords("pre-tour-categories", { limit: 500, planId: managedPlanId }),
           listPreTourRecords("pre-tour-technical-visits", { limit: 500, planId: managedPlanId }),
         ]);
@@ -1243,7 +1252,33 @@ export function PreTourManagementView({
     } finally {
       setLoading(false);
     }
-  }, [isPlanManageMode, managedPlanId, query, showBinOnly]);
+  }, [canViewCosting, isPlanManageMode, managedPlanId, query, showBinOnly]);
+
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      try {
+        const response = await fetch("/api/companies/access-control", { cache: "no-store" });
+        const body = (await response.json()) as AccessControlResponse & { message?: string };
+        if (!response.ok) throw new Error(body.message || "Failed to load access control.");
+        if (!active) return;
+        setPrivileges(Array.isArray(body.privileges) ? body.privileges : []);
+      } catch {
+        if (active) setPrivileges([]);
+      } finally {
+        if (active) setAccessLoaded(true);
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (canViewRouteMap) return;
+    if (mapDialogOpen) setMapDialogOpen(false);
+    if (drawerShowMap) setDrawerShowMap(false);
+  }, [canViewRouteMap, drawerShowMap, mapDialogOpen]);
 
   useEffect(() => {
     void loadMasters().catch((error) => {
@@ -1500,6 +1535,9 @@ export function PreTourManagementView({
           throw new Error("Selected field visit is invalid.");
         }
       }
+      if (dialog.resource === "pre-tour-totals" && !canViewCosting) {
+        throw new Error("Your subscription plan does not include Pre-Tour Costing.");
+      }
       if (dialog.resource === "pre-tour-days" && dayTransportForm.enabled && !dayTransportForm.serviceId) {
         throw new Error("Select vehicle type in Day Transport Details.");
       }
@@ -1647,7 +1685,7 @@ export function PreTourManagementView({
     } finally {
       setSharing(false);
     }
-  }, [sharingItem, shareTargetDayId, sortedDays, managedPlanId, selectedPlan, loadData]);
+  }, [sharingItem, shareTargetDayId, sortedDays, managedPlanId, selectedPlan, companyBaseCurrencyCode, loadData]);
 
   const clonePlanChildren = useCallback(
     async (sourcePlan: Row, newPlanId: string, codePrefix: string) => {
@@ -1657,7 +1695,9 @@ export function PreTourManagementView({
         listPreTourRecords("pre-tour-days", { planId: sourcePlanId, limit: 1000 }),
         listPreTourRecords("pre-tour-items", { planId: sourcePlanId, limit: 2000 }),
         listPreTourRecords("pre-tour-item-addons", { planId: sourcePlanId, limit: 2000 }),
-        listPreTourRecords("pre-tour-totals", { planId: sourcePlanId, limit: 10 }),
+        canViewCosting
+          ? listPreTourRecords("pre-tour-totals", { planId: sourcePlanId, limit: 10 })
+          : Promise.resolve([] as Row[]),
           listPreTourRecords("pre-tour-categories", { planId: sourcePlanId, limit: 200 }),
           listPreTourRecords("pre-tour-technical-visits", { planId: sourcePlanId, limit: 200 }),
         ]);
@@ -1788,7 +1828,7 @@ export function PreTourManagementView({
         });
       }
     },
-    []
+    [canViewCosting, companyBaseCurrencyCode]
   );
 
   const createVersionFromPlan = useCallback(
@@ -1847,7 +1887,7 @@ export function PreTourManagementView({
         setCreatingVersion(false);
       }
     },
-    [clonePlanChildren, plans, loadData]
+    [clonePlanChildren, companyBaseCurrencyCode, plans, loadData]
   );
 
   const openCopyPlanDialog = useCallback((sourcePlan: Row) => {
@@ -2274,7 +2314,7 @@ export function PreTourManagementView({
               <Button
                 variant="outline"
                 onClick={() => setMapDialogOpen(true)}
-                disabled={routeLocationSequenceIds.length === 0}
+                disabled={!accessLoaded || !canViewRouteMap || routeLocationSequenceIds.length === 0}
               >
                 <MapPinned className="mr-1 size-4" />
                 Route Map
@@ -2294,7 +2334,9 @@ export function PreTourManagementView({
             showBinOnly
               ? "Search bin records..."
               : isPlanManageMode
-              ? "Search in days, items, addons, totals..."
+              ? canViewCosting
+                ? "Search in days, items, addons, totals..."
+                : "Search in days, items, addons..."
               : "Search plans..."
           }
           value={query}
@@ -2590,17 +2632,19 @@ export function PreTourManagementView({
               onEdit={(row) => openDialog("pre-tour-item-addons", "edit", row)}
               onDelete={(row) => void onDelete("pre-tour-item-addons", row)}
             />
-            <SectionTable
-              resource="pre-tour-totals"
-              rows={filteredTotalRows}
-              loading={loading}
-              isReadOnly={isReadOnly}
-              lookups={lookups}
-              onAdd={() => openDialog("pre-tour-totals", "create")}
-              onView={(row) => openDetailSheet("Totals Details", "Selected totals details.", row)}
-              onEdit={(row) => openDialog("pre-tour-totals", "edit", row)}
-              onDelete={(row) => void onDelete("pre-tour-totals", row)}
-            />
+            {canViewCosting ? (
+              <SectionTable
+                resource="pre-tour-totals"
+                rows={filteredTotalRows}
+                loading={loading}
+                isReadOnly={isReadOnly}
+                lookups={lookups}
+                onAdd={() => openDialog("pre-tour-totals", "create")}
+                onView={(row) => openDetailSheet("Totals Details", "Selected totals details.", row)}
+                onEdit={(row) => openDialog("pre-tour-totals", "edit", row)}
+                onDelete={(row) => void onDelete("pre-tour-totals", row)}
+              />
+            ) : null}
           </>
         )}
       </CardContent>
@@ -2849,7 +2893,7 @@ export function PreTourManagementView({
               </div>
             ) : null}
 
-            {detailSheet.kind === "pre-tour" ? (
+            {detailSheet.kind === "pre-tour" && canViewRouteMap ? (
               <div className="rounded-md border bg-background p-3">
                 <div className="flex items-center justify-between gap-2">
                   <p className="text-xs text-muted-foreground">
@@ -2867,7 +2911,8 @@ export function PreTourManagementView({
               </div>
             ) : null}
 
-            {(detailSheet.kind === "pre-tour" || detailSheet.kind === "day-item") &&
+            {canViewRouteMap &&
+            (detailSheet.kind === "pre-tour" || detailSheet.kind === "day-item") &&
             drawerShowMap &&
             (detailPreTourRouteLoading || detailRouteLocationSequenceIds.length > 0) ? (
               <div className="space-y-2 rounded-md border bg-muted/20 p-3">

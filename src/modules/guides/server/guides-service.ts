@@ -2,7 +2,7 @@ import { and, desc, eq, ilike, or } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
 import * as schema from "@/db/schema";
-import { auth } from "@/lib/auth";
+import { AccessControlError, resolveAccess } from "@/lib/security/access-control";
 import {
   createGuideAssignmentSchema,
   createGuideBlackoutDateSchema,
@@ -58,43 +58,16 @@ function toDate(value: string | null | undefined) {
 }
 
 async function getAccess(headers: Headers) {
-  let session: Awaited<ReturnType<typeof auth.api.getSession>>;
   try {
-    session = await auth.api.getSession({ headers });
+    return await resolveAccess(headers, {
+      requiredPrivilege: "SCREEN_MASTER_GUIDES",
+    });
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    const lowered = message.toLowerCase();
-    if (
-      lowered.includes("fetch failed") ||
-      lowered.includes("enotfound") ||
-      lowered.includes("error connecting to database")
-    ) {
-      throw new GuideError(
-        503,
-        "DATABASE_UNAVAILABLE",
-        "Database connection is unavailable. Check DATABASE_URL/network and try again."
-      );
+    if (error instanceof AccessControlError) {
+      throw new GuideError(error.status, error.code, error.message);
     }
     throw error;
   }
-  if (!session?.user) {
-    throw new GuideError(401, "UNAUTHORIZED", "You are not authenticated.");
-  }
-  const user = session.user as {
-    companyId?: string | null;
-    role?: string | null;
-    readOnly?: boolean;
-    canWriteMasterData?: boolean;
-  };
-  if (!user.companyId) {
-    throw new GuideError(403, "COMPANY_REQUIRED", "User is not linked to a company.");
-  }
-  return {
-    companyId: user.companyId,
-    role: user.role ?? "USER",
-    readOnly: Boolean(user.readOnly),
-    canWriteMasterData: Boolean(user.canWriteMasterData),
-  };
 }
 
 async function ensureWritable(headers: Headers) {

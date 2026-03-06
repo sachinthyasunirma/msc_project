@@ -2,7 +2,8 @@ import { and, desc, eq, gte, ilike, isNull, lte, ne, or } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
 import * as schema from "@/db/schema";
-import { auth } from "@/lib/auth";
+import { AccessControlError, resolveAccess } from "@/lib/security/access-control";
+import type { AppPrivilegeCode } from "@/lib/security/privileges";
 import {
   createPreTourCategorySchema,
   createPreTourDaySchema,
@@ -34,6 +35,11 @@ class PreTourError extends Error {
 
 type PreTourResource = z.infer<typeof preTourResourceSchema>;
 
+function requiredPrivilegeForResource(resource: PreTourResource): AppPrivilegeCode {
+  if (resource === "pre-tour-totals") return "PRE_TOUR_COSTING";
+  return "SCREEN_PRE_TOURS";
+}
+
 function normalizeZodError(error: z.ZodError) {
   return error.issues[0]?.message || "Validation failed.";
 }
@@ -57,37 +63,27 @@ function parseResource(input: string): PreTourResource {
   return parsed.data;
 }
 
-async function getAccess(headers: Headers) {
-  const session = await auth.api.getSession({ headers });
-  if (!session?.user) {
-    throw new PreTourError(401, "UNAUTHORIZED", "You are not authenticated.");
+async function getAccess(headers: Headers, resource: PreTourResource) {
+  try {
+    const access = await resolveAccess(headers, {
+      requiredPrivilege: requiredPrivilegeForResource(resource),
+    });
+    return {
+      ...access,
+      userId: access.userId,
+      userName: access.userName,
+      canWritePreTour: access.canWritePreTour,
+    };
+  } catch (error) {
+    if (error instanceof AccessControlError) {
+      throw new PreTourError(error.status, error.code, error.message);
+    }
+    throw error;
   }
-
-  const user = session.user as {
-    id?: string | null;
-    name?: string | null;
-    email?: string | null;
-    companyId?: string | null;
-    role?: string | null;
-    readOnly?: boolean;
-    canWritePreTour?: boolean;
-  };
-  if (!user.companyId) {
-    throw new PreTourError(403, "COMPANY_REQUIRED", "User is not linked to a company.");
-  }
-
-  return {
-    userId: user.id ?? null,
-    userName: user.name || user.email || "System",
-    companyId: user.companyId,
-    role: user.role ?? "USER",
-    readOnly: Boolean(user.readOnly),
-    canWritePreTour: Boolean(user.canWritePreTour),
-  };
 }
 
-async function ensureWritable(headers: Headers) {
-  const access = await getAccess(headers);
+async function ensureWritable(headers: Headers, resource: PreTourResource) {
+  const access = await getAccess(headers, resource);
   if (access.readOnly) {
     throw new PreTourError(
       403,
@@ -630,7 +626,7 @@ export async function listPreTourRecords(
     throw new PreTourError(400, "VALIDATION_ERROR", normalizeZodError(parsed.error));
   }
 
-  const { companyId } = await getAccess(headers);
+  const { companyId } = await getAccess(headers, resource);
   const q = parsed.data.q ? `%${parsed.data.q}%` : null;
   const limit = parsed.data.limit;
   const planId = parsed.data.planId;
@@ -816,7 +812,7 @@ export async function createPreTourRecord(
   headers: Headers
 ) {
   const resource = parseResource(resourceInput);
-  const { companyId, userId, userName, role } = await ensureWritable(headers);
+  const { companyId, userId, userName } = await ensureWritable(headers, resource);
 
   switch (resource) {
     case "pre-tours": {
@@ -1058,7 +1054,7 @@ export async function updatePreTourRecord(
   headers: Headers
 ) {
   const resource = parseResource(resourceInput);
-  const { companyId, userId, userName, role } = await ensureWritable(headers);
+  const { companyId, userId, userName, role } = await ensureWritable(headers, resource);
 
   switch (resource) {
     case "pre-tours": {
@@ -1529,7 +1525,7 @@ export async function deletePreTourRecord(
   headers: Headers
 ) {
   const resource = parseResource(resourceInput);
-  const access = await ensureWritable(headers);
+  const access = await ensureWritable(headers, resource);
   const { companyId, userId, userName } = access;
 
   switch (resource) {

@@ -43,6 +43,10 @@ type CompanyProfile = {
   email: string;
   country: string | null;
   image: string | null;
+  subscriptionPlan: "STARTER" | "GROWTH" | "ENTERPRISE" | null;
+  subscriptionStatus: "PENDING" | "ACTIVE" | "TRIAL" | "EXPIRED" | "CANCELED";
+  subscriptionStartsAt: string | null;
+  subscriptionEndsAt: string | null;
 };
 
 export function NavUser() {
@@ -63,6 +67,7 @@ export function NavUser() {
     email: "",
     country: "",
     image: "",
+    subscriptionPlan: "STARTER" as "STARTER" | "GROWTH" | "ENTERPRISE",
   });
 
   const onLogout = async () => {
@@ -100,6 +105,7 @@ export function NavUser() {
           email: details.email || "",
           country: details.country || "",
           image: details.image || "",
+          subscriptionPlan: details.subscriptionPlan || "STARTER",
         });
       }
     } catch (error) {
@@ -147,6 +153,7 @@ export function NavUser() {
           email: companyForm.email.trim(),
           country: companyForm.country.trim() || null,
           image: companyForm.image.trim() || null,
+          subscriptionPlan: companyForm.subscriptionPlan,
         }),
       });
       const body = (await response.json()) as { message?: string };
@@ -268,6 +275,16 @@ export function NavUser() {
             <DropdownMenuItem onClick={() => router.push("/configuration/company")}>
               <ShieldCheck />
               Company Configuration
+            </DropdownMenuItem>
+            {accessUser.role === "ADMIN" ? (
+              <DropdownMenuItem onClick={() => router.push("/billing/plans")}>
+                <ShieldCheck />
+                Plans & Billing
+              </DropdownMenuItem>
+            ) : null}
+            <DropdownMenuItem onClick={() => router.push("/support/contact-us")}>
+              <Building2 />
+              Contact Us
             </DropdownMenuItem>
             <DropdownMenuItem onClick={() => void onLogout()}>
               <LogOut />

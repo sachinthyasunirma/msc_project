@@ -1,14 +1,38 @@
 "use client";
 
 import { Eye } from "lucide-react";
+import { useEffect, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { authClient } from "@/lib/auth-client";
 
 export function ViewOnlyModeBadge() {
   const { data: session } = authClient.useSession();
-  const isReadOnly = Boolean(
-    (session?.user as { readOnly?: boolean } | undefined)?.readOnly
-  );
+  const [isReadOnly, setIsReadOnly] = useState(false);
+
+  useEffect(() => {
+    if (!session?.user?.id) {
+      setIsReadOnly(false);
+      return;
+    }
+    let active = true;
+    (async () => {
+      try {
+        const response = await fetch("/api/companies/access-control", { cache: "no-store" });
+        if (!response.ok) {
+          if (active) setIsReadOnly(false);
+          return;
+        }
+        const body = (await response.json()) as { readOnly?: boolean };
+        if (!active) return;
+        setIsReadOnly(Boolean(body.readOnly));
+      } catch {
+        if (active) setIsReadOnly(false);
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, [session?.user?.id]);
 
   if (!session?.user || !isReadOnly) {
     return null;
@@ -23,4 +47,3 @@ export function ViewOnlyModeBadge() {
     </div>
   );
 }
-

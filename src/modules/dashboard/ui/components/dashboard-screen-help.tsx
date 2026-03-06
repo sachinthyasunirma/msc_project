@@ -23,9 +23,7 @@ type CompanySettingsResponse = {
 export function DashboardScreenHelp() {
   const pathname = usePathname();
   const { data: session } = authClient.useSession();
-  const isReadOnly = Boolean(
-    (session?.user as { readOnly?: boolean } | undefined)?.readOnly
-  );
+  const [isReadOnly, setIsReadOnly] = useState(false);
   const [open, setOpen] = useState(false);
   const [enabled, setEnabled] = useState(true);
 
@@ -46,6 +44,24 @@ export function DashboardScreenHelp() {
       active = false;
     };
   }, []);
+
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      try {
+        const response = await fetch("/api/companies/access-control", { cache: "no-store" });
+        if (!response.ok) return;
+        const body = (await response.json()) as { readOnly?: boolean };
+        if (!active) return;
+        setIsReadOnly(Boolean(body.readOnly));
+      } catch {
+        if (active) setIsReadOnly(false);
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, [session?.user]);
 
   const doc = useMemo(() => getScreenHelpDoc(pathname), [pathname]);
 

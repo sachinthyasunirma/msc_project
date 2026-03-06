@@ -1,5 +1,19 @@
-import { pgTable, text, timestamp, boolean } from "drizzle-orm/pg-core";
+import { pgEnum, pgTable, text, timestamp, boolean } from "drizzle-orm/pg-core";
 import { nanoid } from "nanoid";
+
+export const subscriptionPlan = pgEnum("subscription_plan", [
+  "STARTER",
+  "GROWTH",
+  "ENTERPRISE",
+]);
+
+export const subscriptionStatus = pgEnum("subscription_status", [
+  "PENDING",
+  "ACTIVE",
+  "TRIAL",
+  "EXPIRED",
+  "CANCELED",
+]);
 
 export const company = pgTable("company", {
   id: text("id")
@@ -16,6 +30,12 @@ export const company = pgTable("company", {
     .default("VEHICLE_TYPE"),
   helpEnabled: boolean("help_enabled").notNull().default(true),
   country: text("country"),
+  subscriptionPlan: subscriptionPlan("subscription_plan"),
+  subscriptionStatus: subscriptionStatus("subscription_status")
+    .notNull()
+    .default("PENDING"),
+  subscriptionStartsAt: timestamp("subscription_starts_at"),
+  subscriptionEndsAt: timestamp("subscription_ends_at"),
   isActive: boolean("is_active").notNull().default(true),
   emailVerified: boolean("email_verified")
     .$defaultFn(() => false)

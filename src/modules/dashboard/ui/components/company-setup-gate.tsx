@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { authClient } from "@/lib/auth-client";
 import { Button } from "@/components/ui/button";
 import {
@@ -26,9 +27,12 @@ type CompanyPayload = {
   email: string;
   country: string | null;
   image: string | null;
+  subscriptionPlan?: "STARTER" | "GROWTH" | "ENTERPRISE" | null;
+  subscriptionStatus?: "PENDING" | "ACTIVE" | "TRIAL" | "EXPIRED" | "CANCELED" | null;
 };
 
 export function CompanySetupGate() {
+  const router = useRouter();
   const { data: session, isPending } = authClient.useSession();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -166,6 +170,10 @@ export function CompanySetupGate() {
         throw new Error(body.message || "Failed to save company settings.");
       }
       setNeedsSetup(false);
+      router.refresh();
+      if (!form.joinExisting) {
+        router.replace("/billing/plans");
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to save company settings.");
     } finally {

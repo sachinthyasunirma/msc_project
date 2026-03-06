@@ -4,7 +4,6 @@ import {
   timestamp,
   boolean,
   pgEnum,
-  integer,
   index,
 } from "drizzle-orm/pg-core";
 import { company } from "@/db/schemas/company";

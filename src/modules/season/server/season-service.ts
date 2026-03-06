@@ -2,7 +2,7 @@ import { and, desc, eq, ilike, lt, or, sql, SQL } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
 import * as schema from "@/db/schema";
-import { auth } from "@/lib/auth";
+import { AccessControlError, resolveAccess } from "@/lib/security/access-control";
 import {
   createSeasonSchema,
   cursorSchema,
@@ -50,42 +50,40 @@ function buildCursor(row: { createdAt: Date; id: string }) {
 }
 
 async function getCompanyId(requestHeaders: Headers) {
-  const session = await auth.api.getSession({
-    headers: requestHeaders,
-  });
-  if (!session?.user) {
-    throw new SeasonError(401, "UNAUTHORIZED", "You are not authenticated.");
+  try {
+    const access = await resolveAccess(requestHeaders, {
+      requiredPrivilege: "SCREEN_MASTER_SEASONS",
+    });
+    return access.companyId;
+  } catch (error) {
+    if (error instanceof AccessControlError) {
+      throw new SeasonError(error.status, error.code, error.message);
+    }
+    throw error;
   }
-
-  const companyId = (session.user as { companyId?: string }).companyId;
-  if (!companyId) {
-    throw new SeasonError(403, "COMPANY_REQUIRED", "User is not linked to a company.");
-  }
-  return companyId;
 }
 
 async function ensureWritable(requestHeaders: Headers) {
-  const session = await auth.api.getSession({
-    headers: requestHeaders,
-  });
-  if (!session?.user) {
-    throw new SeasonError(401, "UNAUTHORIZED", "You are not authenticated.");
+  let access: Awaited<ReturnType<typeof resolveAccess>>;
+  try {
+    access = await resolveAccess(requestHeaders, {
+      requiredPrivilege: "SCREEN_MASTER_SEASONS",
+    });
+  } catch (error) {
+    if (error instanceof AccessControlError) {
+      throw new SeasonError(error.status, error.code, error.message);
+    }
+    throw error;
   }
-  const accessUser = session.user as {
-    readOnly?: boolean;
-    role?: string | null;
-    canWriteMasterData?: boolean;
-  };
-  const readOnly = Boolean(accessUser.readOnly);
-  if (readOnly) {
+  if (access.readOnly) {
     throw new SeasonError(
       403,
       "READ_ONLY_MODE",
       "You are in read-only mode. Contact a manager for edit access."
     );
   }
-  const elevated = accessUser.role === "ADMIN" || accessUser.role === "MANAGER";
-  if (!elevated && !Boolean(accessUser.canWriteMasterData)) {
+  const elevated = access.role === "ADMIN" || access.role === "MANAGER";
+  if (!elevated && !access.canWriteMasterData) {
     throw new SeasonError(
       403,
       "PERMISSION_DENIED",
