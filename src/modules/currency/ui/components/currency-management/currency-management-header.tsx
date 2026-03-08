@@ -44,7 +44,7 @@ export function CurrencyManagementHeader({
               <Link href="/master-data/currencies">Back to Currencies</Link>
             </Button>
           ) : null}
-          <Button variant="outline" onClick={onRefresh}>
+          <Button variant="outline" className="master-refresh-btn" onClick={onRefresh}>
             <RefreshCw className="mr-2 size-4" />
             Refresh
           </Button>
@@ -74,4 +74,3 @@ export function CurrencyManagementHeader({
     </CardHeader>
   );
 }
-

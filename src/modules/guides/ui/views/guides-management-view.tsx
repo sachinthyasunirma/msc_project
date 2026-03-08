@@ -655,7 +655,11 @@ export function GuidesManagementView({
                 <Link href="/master-data/guides">Back to Guides</Link>
               </Button>
             ) : null}
-            <Button variant="outline" onClick={() => void Promise.all([load(), loadLookups()])}>
+            <Button
+              variant="outline"
+              className="master-refresh-btn"
+              onClick={() => void Promise.all([load(), loadLookups()])}
+            >
               <RefreshCw className="mr-2 size-4" />
               Refresh
             </Button>

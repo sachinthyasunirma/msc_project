@@ -45,6 +45,19 @@ Notes:
 - Realtime emits are sent via Redis adapter for multi-instance scaling.
 - If `REDIS_URL` is not set, app still works with database-backed notifications (no cross-instance realtime fanout).
 
+## Production Logging
+
+This project includes a production-grade structured logging system with:
+
+- request correlation (`x-request-id`, `x-trace-id`)
+- tenant-aware context (`companyId`, `userId`)
+- API request lifecycle logging
+- audit event logging
+- redaction/sanitization of sensitive fields
+- client error ingestion endpoint (`/api/logs/client`)
+
+See: [docs/logging.md](docs/logging.md)
+
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.

@@ -539,24 +539,228 @@ const MATCHERS: HelpMatcher[] = [
     },
   },
   {
+    test: (pathname) => pathname.startsWith("/master-data/tour-categories"),
+    doc: {
+      title: "Tour Categories",
+      summary:
+        "Maintain classification in this order: Category Types -> Categories -> Category Rules.",
+      steps: [
+        "Create Category Types first (example: Theme, Comfort, Travel Style).",
+        "Create Categories under each type and keep sort order business-friendly.",
+        "Use Parent Category only when you need hierarchy inside the same type.",
+        "Create Category Rules to define pricing and operational restrictions per category.",
+      ],
+      tabScenarios: [
+        {
+          tab: "Tour Category Types",
+          purpose: "Defines the dimension of classification.",
+          whenToUse: "Always first.",
+          keyFields: ["Code", "Name", "Allow Multiple", "Sort Order", "Active"],
+          validationNotes: [
+            "Use stable code naming (e.g. THEME, COMFORT, STYLE).",
+            "Enable Allow Multiple only when more than one category can be selected in same type.",
+          ],
+        },
+        {
+          tab: "Tour Categories",
+          purpose: "Reusable values under each category type.",
+          whenToUse: "After category types are ready.",
+          keyFields: [
+            "Code",
+            "Type",
+            "Name",
+            "Parent (optional)",
+            "Color/Icon (optional)",
+            "Sort Order",
+            "Active",
+          ],
+          validationNotes: [
+            "Parent should be from the same type to keep hierarchy clean.",
+            "Use color/icon only for UI meaning; do not encode business logic in those fields.",
+          ],
+        },
+        {
+          tab: "Tour Category Rules",
+          purpose: "Business constraints and default commercial behavior per category.",
+          whenToUse: "After categories are finalized.",
+          keyFields: [
+            "Code",
+            "Category",
+            "Default Markup %",
+            "Hotel Star Min/Max",
+            "Require Certified Guide",
+            "Require Hotel/Transport/Itinerary/Activity/Ceremony",
+            "Allow Multiple Hotels / Allow Without Hotel / Allow Without Transport",
+            "Min/Max Nights and Min/Max Days",
+            "Notes",
+            "Active",
+          ],
+          validationNotes: [
+            "Keep star range realistic and consistent with hotel master standards.",
+            "If Require Hotel = true, Allow Without Hotel must be false.",
+            "If Require Transport = true, Allow Without Transport must be false.",
+            "Min values cannot be greater than Max values.",
+            "Use notes to document why a rule exists for audit clarity.",
+          ],
+        },
+      ],
+      fields: [
+        {
+          field: "Type",
+          required: true,
+          instruction: "Select the category type first; this controls valid parent options.",
+        },
+        {
+          field: "Parent Category",
+          instruction: "Optional. Use only for hierarchical grouping within the same type.",
+        },
+        {
+          field: "Default Markup %",
+          instruction: "Optional baseline markup that downstream modules may reference.",
+        },
+        {
+          field: "Structural Requirement Flags",
+          instruction:
+            "Use require/allow flags to define mandatory components by tour type (hotel/transport/itinerary/activity/ceremony).",
+        },
+      ],
+      checklist: commonChecklist,
+      tips: [
+        "Keep category codes short and stable for reporting.",
+        "Deactivate old categories instead of deleting if they were already used.",
+      ],
+    },
+  },
+  {
     test: (pathname) => pathname.startsWith("/master-data/business-network"),
     doc: {
       title: "Business Network",
-      summary: "Maintain operator and market entities used in pre-tour and contracts.",
+      summary:
+        "Set up operator and market data in sequence so Pre-Tour, pricing, and contracts work correctly.",
       steps: [
-        "Create organization with correct type.",
-        "Maintain membership/contracts on related screens.",
-        "Use these records in pre-tour operator/market fields.",
+        "Start in Organizations tab and create business entities first.",
+        "Create OPERATOR (or SUPPLIER) organizations for service providers and DMCs.",
+        "Create MARKET organizations for agents/resellers/corporate demand channels.",
+        "Open Operator Profiles and attach one profile to each operator organization.",
+        "Open Market Profiles and attach one profile to each market organization.",
+        "Open Organization Members and assign your internal users to each organization with correct role.",
+        "Open Operator-Market Contracts and map operator <-> market with pricing and credit terms.",
+        "After this setup, use these records in Pre-Tour header: Operator + Market.",
+      ],
+      tabScenarios: [
+        {
+          tab: "Organizations",
+          purpose: "Create base business entities used by all other tabs.",
+          whenToUse: "Always first.",
+          keyFields: [
+            "Type (OPERATOR / MARKET / SUPPLIER / PLATFORM)",
+            "Code",
+            "Name",
+            "Base Currency",
+            "Country/City",
+            "Active",
+          ],
+          validationNotes: [
+            "Use OPERATOR for DMC/provider, MARKET for selling partner/agent.",
+            "Do not use same entity as both Operator and Market in contracts.",
+          ],
+        },
+        {
+          tab: "Operator Profiles",
+          purpose: "Define how an operator works operationally and financially.",
+          whenToUse: "After OPERATOR/SUPPLIER organizations exist.",
+          keyFields: [
+            "Organization (must be OPERATOR or SUPPLIER)",
+            "Operator Kind",
+            "Booking Mode",
+            "Lead Time Hours",
+            "Payout Mode / Payout Cycle",
+            "Service Regions JSON / Languages JSON",
+          ],
+          validationNotes: [
+            "If organization type is MARKET, it cannot be selected here.",
+            "Use JSON arrays for regions/languages, e.g. [\"Sri Lanka\"], [\"en\",\"de\"].",
+          ],
+        },
+        {
+          tab: "Market Profiles",
+          purpose: "Define commercial behavior for each market/agent.",
+          whenToUse: "After MARKET organizations exist.",
+          keyFields: [
+            "Organization (must be MARKET)",
+            "Agency Type",
+            "Preferred Currency",
+            "Credit Enabled / Credit Limit / Payment Term Days",
+            "Default Markup Percent",
+          ],
+          validationNotes: [
+            "If credit is enabled, maintain credit limit and payment terms.",
+            "Default markup can be overridden by contract-level pricing terms.",
+          ],
+        },
+        {
+          tab: "Organization Members",
+          purpose: "Map internal users to an organization with operational roles.",
+          whenToUse: "After organizations and users are ready.",
+          keyFields: ["Organization", "User", "Role", "Active"],
+          validationNotes: [
+            "Role list changes by organization type (operator roles, market roles, etc.).",
+            "Assign only users from your company.",
+          ],
+        },
+        {
+          tab: "Operator-Market Contracts",
+          purpose: "Commercial contract between one operator and one market.",
+          whenToUse: "After operator profile and market profile setup.",
+          keyFields: [
+            "Operator Organization",
+            "Market Organization",
+            "Status",
+            "Pricing Mode (MARKUP / COMMISSION / NET_ONLY)",
+            "Default Markup/Commission",
+            "Credit Enabled / Credit Limit / Payment Term Days",
+            "Effective From / Effective To",
+          ],
+          validationNotes: [
+            "Operator must be OPERATOR/SUPPLIER and Market must be MARKET.",
+            "Use MARKUP for sell-up model, COMMISSION for payout model, NET_ONLY for pure net rates.",
+          ],
+        },
       ],
       fields: [
         {
           field: "Organization Type",
           required: true,
-          example: "OPERATOR / MARKET / SUPPLIER",
-          instruction: "Select type carefully; it drives downstream validations.",
+          example: "OPERATOR / MARKET / SUPPLIER / PLATFORM",
+          instruction: "This controls where the organization can be used in profiles and contracts.",
+        },
+        {
+          field: "Operator Organization",
+          required: true,
+          instruction: "Must be an OPERATOR or SUPPLIER organization.",
+        },
+        {
+          field: "Market Organization",
+          required: true,
+          instruction: "Must be a MARKET organization.",
+        },
+        {
+          field: "Pricing Mode",
+          required: true,
+          example: "MARKUP / COMMISSION / NET_ONLY",
+          instruction: "Pick the commercial model used for this operator-market pair.",
         },
       ],
-      checklist: commonChecklist,
+      checklist: [
+        "Create at least one OPERATOR and one MARKET organization.",
+        "Ensure each selected organization has its matching profile tab completed.",
+        "Assign owner users in Organization Members before operational usage.",
+        "Keep contract effective dates current and avoid conflicting active contracts.",
+      ],
+      tips: [
+        "Use a naming convention for codes (e.g. OP-*, MK-*).",
+        "Start with one operator-market contract and validate Pre-Tour flow before bulk entry.",
+      ],
     },
   },
   {

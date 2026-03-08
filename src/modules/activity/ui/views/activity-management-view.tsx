@@ -740,7 +740,11 @@ export function ActivityManagementView({ activityId, showActivityList = true }: 
                 <Link href="/master-data/activities">Back to Activities</Link>
               </Button>
             ) : null}
-            <Button variant="outline" onClick={() => void Promise.all([load(), loadImages(), loadLookups()])}>
+            <Button
+              variant="outline"
+              className="master-refresh-btn"
+              onClick={() => void Promise.all([load(), loadImages(), loadLookups()])}
+            >
               <RefreshCw className="mr-2 size-4" />
               Refresh
             </Button>

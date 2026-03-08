@@ -155,7 +155,7 @@ export function DashboardSidebar({
     };
   }, []);
 
-  const has = (code: string) => privileges?.includes(code) ?? true;
+  const has = (code: string) => privileges?.includes(code) ?? false;
 
   const navMain = data.navMain
     .filter((item) => {

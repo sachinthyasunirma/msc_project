@@ -2,6 +2,12 @@ import { and, desc, eq, ilike, or } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
 import * as schema from "@/db/schema";
+import {
+  getOrSetMasterDataCache,
+  invalidateMasterDataCacheByPrefixes,
+  masterDataCachePrefix,
+  masterDataListCacheKey,
+} from "@/lib/cache/master-data-cache";
 import { AccessControlError, resolveAccess } from "@/lib/security/access-control";
 import {
   activityListQuerySchema,
@@ -128,96 +134,98 @@ export async function listActivityRecords(
   const limit = parsed.data.limit;
   const activityId = parsed.data.activityId;
   const parentActivityId = parsed.data.parentActivityId;
-
-  switch (resource) {
-    case "activities": {
-      const clauses = [eq(schema.activity.companyId, companyId)];
-      if (q) {
-        const searchClause = or(ilike(schema.activity.code, q), ilike(schema.activity.name, q));
-        if (searchClause) clauses.push(searchClause);
+  const cacheKey = masterDataListCacheKey("activity", companyId, resource, parsed.data);
+  return getOrSetMasterDataCache(cacheKey, async () => {
+    switch (resource) {
+      case "activities": {
+        const clauses = [eq(schema.activity.companyId, companyId)];
+        if (q) {
+          const searchClause = or(ilike(schema.activity.code, q), ilike(schema.activity.name, q));
+          if (searchClause) clauses.push(searchClause);
+        }
+        return db
+          .select()
+          .from(schema.activity)
+          .where(and(...clauses))
+          .orderBy(desc(schema.activity.createdAt))
+          .limit(limit);
       }
-      return db
-        .select()
-        .from(schema.activity)
-        .where(and(...clauses))
-        .orderBy(desc(schema.activity.createdAt))
-        .limit(limit);
+      case "activity-images": {
+        const clauses = [eq(schema.activityImage.companyId, companyId)];
+        if (activityId) {
+          clauses.push(eq(schema.activityImage.activityId, activityId));
+        }
+        if (q) {
+          const searchClause = or(
+            ilike(schema.activityImage.code, q),
+            ilike(schema.activityImage.url, q),
+            ilike(schema.activityImage.altText, q)
+          );
+          if (searchClause) clauses.push(searchClause);
+        }
+        return db
+          .select()
+          .from(schema.activityImage)
+          .where(and(...clauses))
+          .orderBy(desc(schema.activityImage.createdAt))
+          .limit(limit);
+      }
+      case "activity-availability": {
+        const clauses = [eq(schema.activityAvailability.companyId, companyId)];
+        if (activityId) {
+          clauses.push(eq(schema.activityAvailability.activityId, activityId));
+        }
+        if (q) {
+          const searchClause = or(
+            ilike(schema.activityAvailability.code, q),
+            ilike(schema.activityAvailability.startTime, q),
+            ilike(schema.activityAvailability.endTime, q)
+          );
+          if (searchClause) clauses.push(searchClause);
+        }
+        return db
+          .select()
+          .from(schema.activityAvailability)
+          .where(and(...clauses))
+          .orderBy(desc(schema.activityAvailability.createdAt))
+          .limit(limit);
+      }
+      case "activity-rates": {
+        const clauses = [eq(schema.activityRate.companyId, companyId)];
+        if (activityId) {
+          clauses.push(eq(schema.activityRate.activityId, activityId));
+        }
+        if (q) {
+          const searchClause = or(
+            ilike(schema.activityRate.code, q),
+            ilike(schema.activityRate.label, q),
+            ilike(schema.activityRate.pricingModel, q)
+          );
+          if (searchClause) clauses.push(searchClause);
+        }
+        return db
+          .select()
+          .from(schema.activityRate)
+          .where(and(...clauses))
+          .orderBy(desc(schema.activityRate.createdAt))
+          .limit(limit);
+      }
+      case "activity-supplements": {
+        const clauses = [eq(schema.activitySupplement.companyId, companyId)];
+        if (parentActivityId) {
+          clauses.push(eq(schema.activitySupplement.parentActivityId, parentActivityId));
+        }
+        return db
+          .select()
+          .from(schema.activitySupplement)
+          .where(and(...clauses))
+          .orderBy(desc(schema.activitySupplement.createdAt))
+          .limit(limit);
+      }
+      default:
+        throw new ActivityError(404, "RESOURCE_NOT_FOUND", "Activity resource not found.");
     }
-    case "activity-images": {
-      const clauses = [eq(schema.activityImage.companyId, companyId)];
-      if (activityId) {
-        clauses.push(eq(schema.activityImage.activityId, activityId));
-      }
-      if (q) {
-        const searchClause = or(
-          ilike(schema.activityImage.code, q),
-          ilike(schema.activityImage.url, q),
-          ilike(schema.activityImage.altText, q)
-        );
-        if (searchClause) clauses.push(searchClause);
-      }
-      return db
-        .select()
-        .from(schema.activityImage)
-        .where(and(...clauses))
-        .orderBy(desc(schema.activityImage.createdAt))
-        .limit(limit);
-    }
-    case "activity-availability": {
-      const clauses = [eq(schema.activityAvailability.companyId, companyId)];
-      if (activityId) {
-        clauses.push(eq(schema.activityAvailability.activityId, activityId));
-      }
-      if (q) {
-        const searchClause = or(
-          ilike(schema.activityAvailability.code, q),
-          ilike(schema.activityAvailability.startTime, q),
-          ilike(schema.activityAvailability.endTime, q)
-        );
-        if (searchClause) clauses.push(searchClause);
-      }
-      return db
-        .select()
-        .from(schema.activityAvailability)
-        .where(and(...clauses))
-        .orderBy(desc(schema.activityAvailability.createdAt))
-        .limit(limit);
-    }
-    case "activity-rates": {
-      const clauses = [eq(schema.activityRate.companyId, companyId)];
-      if (activityId) {
-        clauses.push(eq(schema.activityRate.activityId, activityId));
-      }
-      if (q) {
-        const searchClause = or(
-          ilike(schema.activityRate.code, q),
-          ilike(schema.activityRate.label, q),
-          ilike(schema.activityRate.pricingModel, q)
-        );
-        if (searchClause) clauses.push(searchClause);
-      }
-      return db
-        .select()
-        .from(schema.activityRate)
-        .where(and(...clauses))
-        .orderBy(desc(schema.activityRate.createdAt))
-        .limit(limit);
-    }
-    case "activity-supplements": {
-      const clauses = [eq(schema.activitySupplement.companyId, companyId)];
-      if (parentActivityId) {
-        clauses.push(eq(schema.activitySupplement.parentActivityId, parentActivityId));
-      }
-      return db
-        .select()
-        .from(schema.activitySupplement)
-        .where(and(...clauses))
-        .orderBy(desc(schema.activitySupplement.createdAt))
-        .limit(limit);
-    }
-    default:
-      throw new ActivityError(404, "RESOURCE_NOT_FOUND", "Activity resource not found.");
-  }
+  });
 }
 
 export async function createActivityRecord(
@@ -227,8 +235,8 @@ export async function createActivityRecord(
 ) {
   const resource = parseResource(resourceInput);
   const { companyId } = await ensureWritable(headers);
-
-  switch (resource) {
+  try {
+    switch (resource) {
     case "activities": {
       const parsed = createActivitySchema.safeParse(payload);
       if (!parsed.success) {
@@ -318,8 +326,11 @@ export async function createActivityRecord(
         .returning();
       return created;
     }
-    default:
-      throw new ActivityError(404, "RESOURCE_NOT_FOUND", "Activity resource not found.");
+      default:
+        throw new ActivityError(404, "RESOURCE_NOT_FOUND", "Activity resource not found.");
+    }
+  } finally {
+    await invalidateMasterDataCacheByPrefixes([masterDataCachePrefix("activity", companyId)]);
   }
 }
 
@@ -331,8 +342,8 @@ export async function updateActivityRecord(
 ) {
   const resource = parseResource(resourceInput);
   const { companyId } = await ensureWritable(headers);
-
-  switch (resource) {
+  try {
+    switch (resource) {
     case "activities": {
       const parsed = updateActivitySchema.safeParse(payload);
       if (!parsed.success) {
@@ -462,8 +473,11 @@ export async function updateActivityRecord(
       if (!updated) throw new ActivityError(404, "RECORD_NOT_FOUND", "Activity supplement not found.");
       return updated;
     }
-    default:
-      throw new ActivityError(404, "RESOURCE_NOT_FOUND", "Activity resource not found.");
+      default:
+        throw new ActivityError(404, "RESOURCE_NOT_FOUND", "Activity resource not found.");
+    }
+  } finally {
+    await invalidateMasterDataCacheByPrefixes([masterDataCachePrefix("activity", companyId)]);
   }
 }
 
@@ -474,8 +488,8 @@ export async function deleteActivityRecord(
 ) {
   const resource = parseResource(resourceInput);
   const { companyId } = await ensureWritable(headers);
-
-  switch (resource) {
+  try {
+    switch (resource) {
     case "activities": {
       const [deleted] = await db
         .delete(schema.activity)
@@ -523,8 +537,11 @@ export async function deleteActivityRecord(
       if (!deleted) throw new ActivityError(404, "RECORD_NOT_FOUND", "Supplement not found.");
       return;
     }
-    default:
-      throw new ActivityError(404, "RESOURCE_NOT_FOUND", "Activity resource not found.");
+      default:
+        throw new ActivityError(404, "RESOURCE_NOT_FOUND", "Activity resource not found.");
+    }
+  } finally {
+    await invalidateMasterDataCacheByPrefixes([masterDataCachePrefix("activity", companyId)]);
   }
 }
 

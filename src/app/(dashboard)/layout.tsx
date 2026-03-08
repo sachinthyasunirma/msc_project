@@ -9,6 +9,7 @@ import { DashboardSidebar } from "@/modules/dashboard/ui/components/dashboard-si
 import { SubscriptionGate } from "@/modules/dashboard/ui/components/subscription-gate";
 import { ViewOnlyModeBadge } from "@/modules/dashboard/ui/components/view-only-mode-badge";
 import { auth } from "@/lib/auth";
+import { ScreenAccessGate } from "@/modules/dashboard/ui/components/screen-access-gate";
 
 interface Props {
   children: React.ReactNode;
@@ -30,6 +31,7 @@ const layout = async ({ children }: Props) => {
         <DashboardNavbar />
         <CompanySetupGate />
         <SubscriptionGate />
+        <ScreenAccessGate />
         <DashboardScreenHelp />
         <ViewOnlyModeBadge />
         <div className="flex-1 bg-muted/35">{children}</div>

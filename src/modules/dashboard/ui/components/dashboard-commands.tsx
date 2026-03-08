@@ -1,4 +1,4 @@
-import { Dispatch, SetStateAction } from "react";
+import { Dispatch, SetStateAction, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   Building2,
@@ -322,6 +322,20 @@ const navigationItems = [
     keywords: "notifications inbox messages mentions username internal communication",
   },
   {
+    title: "Messages",
+    href: "/notifications",
+    group: "General",
+    icon: Bell,
+    keywords: "chat person wise message history delivered read inbox sent",
+  },
+  {
+    title: "Internal Chat",
+    href: "/notifications",
+    group: "General",
+    icon: Bell,
+    keywords: "internal chat fb style messenger team communication",
+  },
+  {
     title: "Recycle Bin",
     href: "/bin",
     group: "General",
@@ -353,11 +367,60 @@ const navigationItems = [
 
 export const DashboardCommands = ({ open, setOpen }: Props) => {
   const router = useRouter();
+  const [privileges, setPrivileges] = useState<string[] | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      try {
+        const response = await fetch("/api/companies/access-control", { cache: "no-store" });
+        if (!response.ok || !active) return;
+        const body = (await response.json()) as { privileges?: string[] };
+        if (!active) return;
+        setPrivileges(Array.isArray(body.privileges) ? body.privileges : []);
+      } catch {
+        if (active) setPrivileges(null);
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const goTo = (href: string) => {
     setOpen(false);
     router.push(href);
   };
+
+  const has = useCallback((code: string) => privileges?.includes(code) ?? false, [privileges]);
+
+  const canAccessHref = useCallback((href: string) => {
+    const byUrl: Record<string, string> = {
+      "/": "NAV_DASHBOARD",
+      "/master-data/accommodations": "SCREEN_MASTER_ACCOMMODATIONS",
+      "/master-data/seasons": "SCREEN_MASTER_SEASONS",
+      "/master-data/activities": "SCREEN_MASTER_ACTIVITIES",
+      "/master-data/transports": "SCREEN_MASTER_TRANSPORTS",
+      "/master-data/guides": "SCREEN_MASTER_GUIDES",
+      "/master-data/currencies": "SCREEN_MASTER_CURRENCIES",
+      "/master-data/taxes": "SCREEN_MASTER_TAXES",
+      "/master-data/tour-categories": "SCREEN_MASTER_TOUR_CATEGORIES",
+      "/master-data/business-network": "SCREEN_MASTER_BUSINESS_NETWORK",
+      "/master-data/pre-tours": "SCREEN_PRE_TOURS",
+      "/master-data/technical-visits": "SCREEN_TECHNICAL_VISITS",
+      "/configuration/company": "SCREEN_CONFIGURATION_COMPANY",
+      "/billing/plans": "SUBSCRIPTION_MANAGE",
+      "/billing/checkout": "SUBSCRIPTION_MANAGE",
+      "/bin": "SCREEN_BIN",
+      "/notifications": "NAV_DASHBOARD",
+      "/hotels": "NAV_DASHBOARD",
+    };
+
+    for (const [path, code] of Object.entries(byUrl)) {
+      if (href === path || href.startsWith(`${path}/`)) return has(code);
+    }
+    return true;
+  }, [has]);
 
   const toSearchValue = (item: (typeof navigationItems)[number]) => {
     const compactTitle = item.title.replace(/\s+/g, "").toLowerCase();
@@ -365,8 +428,13 @@ export const DashboardCommands = ({ open, setOpen }: Props) => {
     return `${item.title} ${item.keywords} ${item.group} ${item.href} ${compactTitle} ${compactKeywords}`;
   };
 
+  const visibleItems = useMemo(
+    () => navigationItems.filter((item) => canAccessHref(item.href)),
+    [canAccessHref]
+  );
+
   const groups = Array.from(
-    navigationItems.reduce((map, item) => {
+    visibleItems.reduce((map, item) => {
       if (!map.has(item.group)) {
         map.set(item.group, []);
       }
@@ -377,14 +445,14 @@ export const DashboardCommands = ({ open, setOpen }: Props) => {
 
   return (
     <CommandResponsiveDialog open={open} onOpenChange={setOpen}>
-      <CommandInput placeholder="Search navigation... (e.g. transport rates)" />
+      <CommandInput placeholder="Search screens... (e.g. transport rates, internal chat)" />
       <CommandList>
         <CommandEmpty>No navigation found.</CommandEmpty>
         {groups.map(([groupName, items]) => (
           <CommandGroup key={groupName} heading={groupName}>
             {items.map((item) => (
               <CommandItem
-                key={item.href}
+                key={`${item.href}:${item.title}`}
                 value={toSearchValue(item)}
                 onSelect={() => goTo(item.href)}
               >

@@ -533,12 +533,48 @@ export function TransportManagementView({
   }, [catalogs, resource, transportRateBasis]);
 
   const loadCatalogs = useCallback(async () => {
-    const [locations, vehicleCategories, vehicleTypes] = await Promise.all([
+    const results = await Promise.allSettled([
       listTransportRecords("locations", { limit: 200 }),
       listTransportRecords("vehicle-categories", { limit: 200 }),
       listTransportRecords("vehicle-types", { limit: 200 }),
     ]);
+
+    const catalogErrors: string[] = [];
+    const [locationsResult, vehicleCategoriesResult, vehicleTypesResult] = results;
+
+    const locations =
+      locationsResult.status === "fulfilled"
+        ? locationsResult.value
+        : (() => {
+            catalogErrors.push("locations");
+            return [];
+          })();
+
+    const vehicleCategories =
+      vehicleCategoriesResult.status === "fulfilled"
+        ? vehicleCategoriesResult.value
+        : (() => {
+            catalogErrors.push("vehicle categories");
+            return [];
+          })();
+
+    const vehicleTypes =
+      vehicleTypesResult.status === "fulfilled"
+        ? vehicleTypesResult.value
+        : (() => {
+            catalogErrors.push("vehicle types");
+            return [];
+          })();
+
     setCatalogs({ locations, vehicleCategories, vehicleTypes });
+
+    if (catalogErrors.length > 0) {
+      const message =
+        results.find((result) => result.status === "rejected")?.reason instanceof Error
+          ? results.find((result) => result.status === "rejected")?.reason.message
+          : "Failed to load one or more transport catalogs.";
+      notify.error(`Could not load ${catalogErrors.join(", ")}. ${message}`);
+    }
   }, []);
 
   const load = useCallback(async () => {
@@ -709,7 +745,11 @@ export function TransportManagementView({
           <CardDescription>{meta.description}</CardDescription>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" onClick={() => void Promise.all([load(), loadCatalogs()])}>
+          <Button
+            variant="outline"
+            className="master-refresh-btn"
+            onClick={() => void Promise.all([load(), loadCatalogs()])}
+          >
             <RefreshCw className="mr-2 size-4" />
             Refresh
           </Button>

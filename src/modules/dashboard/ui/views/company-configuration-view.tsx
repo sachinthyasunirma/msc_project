@@ -467,7 +467,12 @@ export function CompanyConfigurationView() {
               </div>
             ) : null}
           </div>
-          <Button variant="outline" onClick={() => void load()} disabled={loading}>
+          <Button
+            variant="outline"
+            className="master-refresh-btn"
+            onClick={() => void load()}
+            disabled={loading}
+          >
             <RefreshCw className="mr-2 size-4" />
             Refresh
           </Button>

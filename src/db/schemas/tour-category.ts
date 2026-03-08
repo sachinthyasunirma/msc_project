@@ -85,6 +85,18 @@ export const tourCategoryRule = pgTable(
     restrictHotelStarMin: integer("restrict_hotel_star_min"),
     restrictHotelStarMax: integer("restrict_hotel_star_max"),
     requireCertifiedGuide: boolean("require_certified_guide").notNull().default(false),
+    requireHotel: boolean("require_hotel").notNull().default(false),
+    requireTransport: boolean("require_transport").notNull().default(false),
+    requireItinerary: boolean("require_itinerary").notNull().default(false),
+    requireActivity: boolean("require_activity").notNull().default(false),
+    requireCeremony: boolean("require_ceremony").notNull().default(false),
+    allowMultipleHotels: boolean("allow_multiple_hotels").notNull().default(false),
+    allowWithoutHotel: boolean("allow_without_hotel").notNull().default(true),
+    allowWithoutTransport: boolean("allow_without_transport").notNull().default(true),
+    minNights: integer("min_nights"),
+    maxNights: integer("max_nights"),
+    minDays: integer("min_days"),
+    maxDays: integer("max_days"),
     notes: text("notes"),
     isActive: boolean("is_active").notNull().default(true),
     createdAt: timestamp("created_at").notNull().defaultNow(),
@@ -92,8 +104,8 @@ export const tourCategoryRule = pgTable(
   },
   (table) => [
     unique("uq_tour_category_rule_company_code").on(table.companyId, table.code),
+    unique("uq_tour_category_rule_category").on(table.categoryId),
     index("idx_tour_category_rule_company").on(table.companyId),
     index("idx_tour_category_rule_category").on(table.categoryId),
   ]
 );
-

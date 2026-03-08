@@ -2,6 +2,12 @@ import { and, desc, eq, ilike, or } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
 import * as schema from "@/db/schema";
+import {
+  getOrSetMasterDataCache,
+  invalidateMasterDataCacheByPrefixes,
+  masterDataCachePrefix,
+  masterDataListCacheKey,
+} from "@/lib/cache/master-data-cache";
 import { AccessControlError, resolveAccess } from "@/lib/security/access-control";
 import {
   createGuideAssignmentSchema,
@@ -166,8 +172,9 @@ export async function listGuideRecords(
   const q = parsed.data.q ? `%${parsed.data.q}%` : null;
   const limit = parsed.data.limit;
   const guideId = parsed.data.guideId;
-
-  switch (resource) {
+  const cacheKey = masterDataListCacheKey("guides", companyId, resource, parsed.data);
+  return getOrSetMasterDataCache(cacheKey, async () => {
+    switch (resource) {
     case "guides": {
       const clauses = [eq(schema.guide.companyId, companyId)];
       if (guideId) clauses.push(eq(schema.guide.id, guideId));
@@ -334,16 +341,17 @@ export async function listGuideRecords(
         .orderBy(desc(schema.guideAssignment.createdAt))
         .limit(limit);
     }
-    default:
-      throw new GuideError(404, "RESOURCE_NOT_FOUND", "Guide resource not found.");
-  }
+      default:
+        throw new GuideError(404, "RESOURCE_NOT_FOUND", "Guide resource not found.");
+    }
+  });
 }
 
 export async function createGuideRecord(resourceInput: string, payload: unknown, headers: Headers) {
   const resource = parseResource(resourceInput);
   const { companyId } = await ensureWritable(headers);
-
-  switch (resource) {
+  try {
+    switch (resource) {
     case "guides": {
       const parsed = createGuideSchema.safeParse(payload);
       if (!parsed.success) throw new GuideError(400, "VALIDATION_ERROR", normalizeZodError(parsed.error));
@@ -486,8 +494,11 @@ export async function createGuideRecord(resourceInput: string, payload: unknown,
         .returning();
       return created;
     }
-    default:
-      throw new GuideError(404, "RESOURCE_NOT_FOUND", "Guide resource not found.");
+      default:
+        throw new GuideError(404, "RESOURCE_NOT_FOUND", "Guide resource not found.");
+    }
+  } finally {
+    await invalidateMasterDataCacheByPrefixes([masterDataCachePrefix("guides", companyId)]);
   }
 }
 
@@ -499,8 +510,8 @@ export async function updateGuideRecord(
 ) {
   const resource = parseResource(resourceInput);
   const { companyId } = await ensureWritable(headers);
-
-  switch (resource) {
+  try {
+    switch (resource) {
     case "guides": {
       const parsed = updateGuideSchema.safeParse(payload);
       if (!parsed.success) throw new GuideError(400, "VALIDATION_ERROR", normalizeZodError(parsed.error));
@@ -673,16 +684,19 @@ export async function updateGuideRecord(
       if (!updated) throw new GuideError(404, "RECORD_NOT_FOUND", "Guide assignment not found.");
       return updated;
     }
-    default:
-      throw new GuideError(404, "RESOURCE_NOT_FOUND", "Guide resource not found.");
+      default:
+        throw new GuideError(404, "RESOURCE_NOT_FOUND", "Guide resource not found.");
+    }
+  } finally {
+    await invalidateMasterDataCacheByPrefixes([masterDataCachePrefix("guides", companyId)]);
   }
 }
 
 export async function deleteGuideRecord(resourceInput: string, id: string, headers: Headers) {
   const resource = parseResource(resourceInput);
   const { companyId } = await ensureWritable(headers);
-
-  switch (resource) {
+  try {
+    switch (resource) {
     case "guides": {
       const [deleted] = await db.delete(schema.guide).where(and(eq(schema.guide.id, id), eq(schema.guide.companyId, companyId))).returning({ id: schema.guide.id });
       if (!deleted) throw new GuideError(404, "RECORD_NOT_FOUND", "Guide not found.");
@@ -738,8 +752,11 @@ export async function deleteGuideRecord(resourceInput: string, id: string, heade
       if (!deleted) throw new GuideError(404, "RECORD_NOT_FOUND", "Guide assignment not found.");
       return;
     }
-    default:
-      throw new GuideError(404, "RESOURCE_NOT_FOUND", "Guide resource not found.");
+      default:
+        throw new GuideError(404, "RESOURCE_NOT_FOUND", "Guide resource not found.");
+    }
+  } finally {
+    await invalidateMasterDataCacheByPrefixes([masterDataCachePrefix("guides", companyId)]);
   }
 }
 

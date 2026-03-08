@@ -28,10 +28,12 @@ const baseCodeSchema = z.object({
 const dateTimeSchema = z.string().datetime();
 const optionalDateTimeSchema = z.string().datetime().optional().nullable();
 
-export const createPreTourSchema = baseCodeSchema.extend({
+export const createPreTourSchema = z.object({
+  isActive: z.boolean().default(true),
   customerId: z.string().trim().min(1).optional().nullable(),
   agentId: z.string().trim().min(1).optional().nullable(),
   leadId: z.string().trim().min(1).optional().nullable(),
+  categoryId: z.string().trim().min(1),
   operatorOrgId: z.string().trim().min(1),
   marketOrgId: z.string().trim().min(1),
   referenceNo: z.string().trim().toUpperCase().min(1).max(80).optional().nullable(),
@@ -62,7 +64,7 @@ export const createPreTourSchema = baseCodeSchema.extend({
       value: z.coerce.number().min(0).max(999999999).optional(),
       applyTo: z
         .array(
-          z.enum(["ACTIVITY", "TRANSPORT", "ACCOMMODATION", "GUIDE", "MISC", "SUPPLEMENT"])
+          z.enum(["ACTIVITY", "TRANSPORT", "ACCOMMODATION", "GUIDE", "CEREMONY", "MISC", "SUPPLEMENT"])
         )
         .optional(),
     })
@@ -110,7 +112,7 @@ export const createPreTourItemSchema = baseCodeSchema.extend({
   planId: z.string().min(1),
   dayId: z.string().min(1),
   itemType: z
-    .enum(["TRANSPORT", "ACTIVITY", "ACCOMMODATION", "GUIDE", "SUPPLEMENT", "MISC"])
+    .enum(["TRANSPORT", "ACTIVITY", "ACCOMMODATION", "GUIDE", "CEREMONY", "SUPPLEMENT", "MISC"])
     .default("MISC"),
   serviceId: z.string().trim().min(1).optional().nullable(),
   startAt: optionalDateTimeSchema,

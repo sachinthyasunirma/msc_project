@@ -34,6 +34,9 @@ export const preTourPlan = pgTable(
     marketOrgId: text("market_org_id").references(() => businessOrganization.id, {
       onDelete: "set null",
     }),
+    categoryId: text("category_id")
+      .notNull()
+      .references(() => tourCategory.id, { onDelete: "restrict" }),
     referenceNo: text("reference_no").notNull(),
     planCode: text("plan_code").notNull(),
     title: text("title").notNull(),
@@ -89,6 +92,7 @@ export const preTourPlan = pgTable(
     index("idx_pre_tour_plan_reference_no").on(table.referenceNo),
     index("idx_pre_tour_plan_operator_org").on(table.operatorOrgId),
     index("idx_pre_tour_plan_market_org").on(table.marketOrgId),
+    index("idx_pre_tour_plan_category").on(table.categoryId),
     index("idx_pre_tour_plan_status").on(table.status),
     index("idx_pre_tour_plan_deleted_at").on(table.deletedAt),
     index("idx_pre_tour_plan_date_range").on(table.startDate, table.endDate),

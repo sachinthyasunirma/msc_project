@@ -204,7 +204,12 @@ export const SeasonManagementView = () => {
       <CardHeader className="flex flex-row items-center justify-between">
         <CardTitle>Season Master Data</CardTitle>
         <div className="flex items-center gap-2">
-          <Button variant="outline" onClick={() => void load()} disabled={loading || saving}>
+          <Button
+            variant="outline"
+            className="master-refresh-btn"
+            onClick={() => void load()}
+            disabled={loading || saving}
+          >
             <RefreshCw className="mr-2 size-4" />
             Refresh
           </Button>

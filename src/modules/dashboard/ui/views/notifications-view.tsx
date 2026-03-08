@@ -370,7 +370,12 @@ export function NotificationsView() {
               <Badge variant="secondary">Word Limit: 200</Badge>
             </div>
           </div>
-          <Button variant="outline" onClick={() => void refreshAll()} disabled={threadsLoading || conversationLoading}>
+          <Button
+            variant="outline"
+            className="master-refresh-btn"
+            onClick={() => void refreshAll()}
+            disabled={threadsLoading || conversationLoading}
+          >
             <RefreshCw className="mr-2 size-4" />
             Refresh
           </Button>

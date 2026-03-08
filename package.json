@@ -3,12 +3,13 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "node server.mjs",
-    "build": "next build",
+    "dev": "NODE_OPTIONS=--max-old-space-size=8192 node server.mjs",
+    "build": "NODE_OPTIONS=--max-old-space-size=8192 next build",
     "start": "NODE_ENV=production node server.mjs",
     "lint": "next lint",
     "db:push": "drizzle-kit push",
-    "db:studio": "drizzle-kit studio"
+    "db:studio": "drizzle-kit studio",
+    "db:fix:pre-tour-category": "psql \"$DATABASE_URL\" -f scripts/add-pre-tour-category-id.sql"
   },
   "dependencies": {
     "@dicebear/collection": "^9.2.2",

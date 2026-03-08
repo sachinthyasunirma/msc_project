@@ -339,6 +339,14 @@ export function CurrencyManagementView({
         else if (field.key === "code" && typeof value === "string") payload[field.key] = value.toUpperCase().trim();
         else payload[field.key] = value;
       });
+
+      if (resource === "currencies") {
+        const currencyCode = String(payload.code ?? "").trim().toUpperCase();
+        if (currencyCode.length < 3) {
+          throw new Error("Currency Code must be at least 3 characters (e.g. LKR, USD).");
+        }
+      }
+
       if (
         isCurrencyManageMode &&
         (resource === "exchange-rates" || resource === "money-settings")

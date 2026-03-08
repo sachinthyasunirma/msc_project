@@ -2,6 +2,12 @@ import { and, desc, eq, ilike, or } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
 import * as schema from "@/db/schema";
+import {
+  getOrSetMasterDataCache,
+  invalidateMasterDataCacheByPrefixes,
+  masterDataCachePrefix,
+  masterDataListCacheKey,
+} from "@/lib/cache/master-data-cache";
 import { AccessControlError, resolveAccess } from "@/lib/security/access-control";
 import {
   createTransportBaggageRateSchema,
@@ -215,137 +221,142 @@ export async function listTransportRecords(
   const { companyId } = await getAccess(headers);
   const query = parsed.data;
   const term = query.q ? `%${query.q}%` : null;
-
-  switch (resource) {
-    case "locations":
-      return db
-        .select()
-        .from(schema.transportLocation)
-        .where(
-          and(
-            eq(schema.transportLocation.companyId, companyId),
-            term
-              ? or(
-                  ilike(schema.transportLocation.code, term),
-                  ilike(schema.transportLocation.name, term),
-                  ilike(schema.transportLocation.country, term),
-                  ilike(schema.transportLocation.region, term)
-                )
-              : undefined
+  const cacheKey = masterDataListCacheKey("transport", companyId, resource, query);
+  return getOrSetMasterDataCache(cacheKey, async () => {
+    switch (resource) {
+      case "locations":
+        return db
+          .select()
+          .from(schema.transportLocation)
+          .where(
+            and(
+              eq(schema.transportLocation.companyId, companyId),
+              term
+                ? or(
+                    ilike(schema.transportLocation.code, term),
+                    ilike(schema.transportLocation.name, term),
+                    ilike(schema.transportLocation.country, term),
+                    ilike(schema.transportLocation.region, term)
+                  )
+                : undefined
+            )
           )
-        )
-        .orderBy(desc(schema.transportLocation.createdAt))
-        .limit(query.limit);
-    case "vehicle-categories":
-      return db
-        .select()
-        .from(schema.transportVehicleCategory)
-        .where(
-          and(
-            eq(schema.transportVehicleCategory.companyId, companyId),
-            term
-              ? or(
-                  ilike(schema.transportVehicleCategory.code, term),
-                  ilike(schema.transportVehicleCategory.name, term)
-                )
-              : undefined
+          .orderBy(desc(schema.transportLocation.createdAt))
+          .limit(query.limit);
+      case "vehicle-categories":
+        return db
+          .select()
+          .from(schema.transportVehicleCategory)
+          .where(
+            and(
+              eq(schema.transportVehicleCategory.companyId, companyId),
+              term
+                ? or(
+                    ilike(schema.transportVehicleCategory.code, term),
+                    ilike(schema.transportVehicleCategory.name, term)
+                  )
+                : undefined
+            )
           )
-        )
-        .orderBy(desc(schema.transportVehicleCategory.sortOrder), desc(schema.transportVehicleCategory.createdAt))
-        .limit(query.limit);
-    case "vehicle-types":
-      return db
-        .select()
-        .from(schema.transportVehicleType)
-        .where(
-          and(
-            eq(schema.transportVehicleType.companyId, companyId),
-            term
-              ? or(
-                  ilike(schema.transportVehicleType.code, term),
-                  ilike(schema.transportVehicleType.name, term)
-                )
-              : undefined
+          .orderBy(
+            desc(schema.transportVehicleCategory.sortOrder),
+            desc(schema.transportVehicleCategory.createdAt)
           )
-        )
-        .orderBy(desc(schema.transportVehicleType.createdAt))
-        .limit(query.limit);
-    case "location-rates":
-      return db
-        .select()
-        .from(schema.transportLocationRate)
-        .where(
-          and(
-            eq(schema.transportLocationRate.companyId, companyId),
-            term
-              ? or(
-                  ilike(schema.transportLocationRate.code, term),
-                  ilike(schema.transportLocationRate.currency, term),
-                  ilike(schema.transportLocationRate.pricingModel, term)
-                )
-              : undefined
+          .limit(query.limit);
+      case "vehicle-types":
+        return db
+          .select()
+          .from(schema.transportVehicleType)
+          .where(
+            and(
+              eq(schema.transportVehicleType.companyId, companyId),
+              term
+                ? or(
+                    ilike(schema.transportVehicleType.code, term),
+                    ilike(schema.transportVehicleType.name, term)
+                  )
+                : undefined
+            )
           )
-        )
-        .orderBy(desc(schema.transportLocationRate.createdAt))
-        .limit(query.limit);
-    case "location-expenses":
-      return db
-        .select()
-        .from(schema.transportLocationExpense)
-        .where(
-          and(
-            eq(schema.transportLocationExpense.companyId, companyId),
-            term
-              ? or(
-                  ilike(schema.transportLocationExpense.code, term),
-                  ilike(schema.transportLocationExpense.name, term),
-                  ilike(schema.transportLocationExpense.expenseType, term)
-                )
-              : undefined
+          .orderBy(desc(schema.transportVehicleType.createdAt))
+          .limit(query.limit);
+      case "location-rates":
+        return db
+          .select()
+          .from(schema.transportLocationRate)
+          .where(
+            and(
+              eq(schema.transportLocationRate.companyId, companyId),
+              term
+                ? or(
+                    ilike(schema.transportLocationRate.code, term),
+                    ilike(schema.transportLocationRate.currency, term),
+                    ilike(schema.transportLocationRate.pricingModel, term)
+                  )
+                : undefined
+            )
           )
-        )
-        .orderBy(desc(schema.transportLocationExpense.createdAt))
-        .limit(query.limit);
-    case "pax-vehicle-rates":
-      return db
-        .select()
-        .from(schema.transportPaxVehicleRate)
-        .where(
-          and(
-            eq(schema.transportPaxVehicleRate.companyId, companyId),
-            term
-              ? or(
-                  ilike(schema.transportPaxVehicleRate.code, term),
-                  ilike(schema.transportPaxVehicleRate.currency, term),
-                  ilike(schema.transportPaxVehicleRate.pricingModel, term)
-                )
-              : undefined
+          .orderBy(desc(schema.transportLocationRate.createdAt))
+          .limit(query.limit);
+      case "location-expenses":
+        return db
+          .select()
+          .from(schema.transportLocationExpense)
+          .where(
+            and(
+              eq(schema.transportLocationExpense.companyId, companyId),
+              term
+                ? or(
+                    ilike(schema.transportLocationExpense.code, term),
+                    ilike(schema.transportLocationExpense.name, term),
+                    ilike(schema.transportLocationExpense.expenseType, term)
+                  )
+                : undefined
+            )
           )
-        )
-        .orderBy(desc(schema.transportPaxVehicleRate.createdAt))
-        .limit(query.limit);
-    case "baggage-rates":
-      return db
-        .select()
-        .from(schema.transportBaggageRate)
-        .where(
-          and(
-            eq(schema.transportBaggageRate.companyId, companyId),
-            term
-              ? or(
-                  ilike(schema.transportBaggageRate.code, term),
-                  ilike(schema.transportBaggageRate.currency, term),
-                  ilike(schema.transportBaggageRate.pricingModel, term),
-                  ilike(schema.transportBaggageRate.unit, term)
-                )
-              : undefined
+          .orderBy(desc(schema.transportLocationExpense.createdAt))
+          .limit(query.limit);
+      case "pax-vehicle-rates":
+        return db
+          .select()
+          .from(schema.transportPaxVehicleRate)
+          .where(
+            and(
+              eq(schema.transportPaxVehicleRate.companyId, companyId),
+              term
+                ? or(
+                    ilike(schema.transportPaxVehicleRate.code, term),
+                    ilike(schema.transportPaxVehicleRate.currency, term),
+                    ilike(schema.transportPaxVehicleRate.pricingModel, term)
+                  )
+                : undefined
+            )
           )
-        )
-        .orderBy(desc(schema.transportBaggageRate.createdAt))
-        .limit(query.limit);
-    default:
-      throw new TransportError(404, "RESOURCE_NOT_FOUND", "Transport resource not found.");
-  }
+          .orderBy(desc(schema.transportPaxVehicleRate.createdAt))
+          .limit(query.limit);
+      case "baggage-rates":
+        return db
+          .select()
+          .from(schema.transportBaggageRate)
+          .where(
+            and(
+              eq(schema.transportBaggageRate.companyId, companyId),
+              term
+                ? or(
+                    ilike(schema.transportBaggageRate.code, term),
+                    ilike(schema.transportBaggageRate.currency, term),
+                    ilike(schema.transportBaggageRate.pricingModel, term),
+                    ilike(schema.transportBaggageRate.unit, term)
+                  )
+                : undefined
+            )
+          )
+          .orderBy(desc(schema.transportBaggageRate.createdAt))
+          .limit(query.limit);
+      default:
+        throw new TransportError(404, "RESOURCE_NOT_FOUND", "Transport resource not found.");
+    }
+  });
 }
 
 export async function createTransportRecord(
@@ -355,8 +366,8 @@ export async function createTransportRecord(
 ) {
   const resource = parseResource(resourceInput);
   const { companyId } = await ensureWritable(headers);
-
-  switch (resource) {
+  try {
+    switch (resource) {
     case "locations": {
       const parsed = createTransportLocationSchema.safeParse(payload);
       if (!parsed.success) {
@@ -489,8 +500,11 @@ export async function createTransportRecord(
         .returning();
       return created;
     }
-    default:
-      throw new TransportError(404, "RESOURCE_NOT_FOUND", "Transport resource not found.");
+      default:
+        throw new TransportError(404, "RESOURCE_NOT_FOUND", "Transport resource not found.");
+    }
+  } finally {
+    await invalidateMasterDataCacheByPrefixes([masterDataCachePrefix("transport", companyId)]);
   }
 }
 
@@ -502,8 +516,8 @@ export async function updateTransportRecord(
 ) {
   const resource = parseResource(resourceInput);
   const { companyId } = await ensureWritable(headers);
-
-  switch (resource) {
+  try {
+    switch (resource) {
     case "locations": {
       const parsed = updateTransportLocationSchema.safeParse(payload);
       if (!parsed.success) {
@@ -805,16 +819,19 @@ export async function updateTransportRecord(
       if (!updated) throw new TransportError(404, "RECORD_NOT_FOUND", "Baggage rate not found.");
       return updated;
     }
-    default:
-      throw new TransportError(404, "RESOURCE_NOT_FOUND", "Transport resource not found.");
+      default:
+        throw new TransportError(404, "RESOURCE_NOT_FOUND", "Transport resource not found.");
+    }
+  } finally {
+    await invalidateMasterDataCacheByPrefixes([masterDataCachePrefix("transport", companyId)]);
   }
 }
 
 export async function deleteTransportRecord(resourceInput: string, id: string, headers: Headers) {
   const resource = parseResource(resourceInput);
   const { companyId } = await ensureWritable(headers);
-
-  switch (resource) {
+  try {
+    switch (resource) {
     case "locations": {
       const [deleted] = await db
         .delete(schema.transportLocation)
@@ -901,8 +918,11 @@ export async function deleteTransportRecord(resourceInput: string, id: string, h
       if (!deleted) throw new TransportError(404, "RECORD_NOT_FOUND", "Baggage rate not found.");
       return;
     }
-    default:
-      throw new TransportError(404, "RESOURCE_NOT_FOUND", "Transport resource not found.");
+      default:
+        throw new TransportError(404, "RESOURCE_NOT_FOUND", "Transport resource not found.");
+    }
+  } finally {
+    await invalidateMasterDataCacheByPrefixes([masterDataCachePrefix("transport", companyId)]);
   }
 }
 
@@ -913,8 +933,45 @@ export function toTransportErrorResponse(error: unknown) {
       body: { code: error.code, message: error.message },
     };
   }
+  if (error && typeof error === "object") {
+    const dbError = error as {
+      code?: string;
+      message?: string;
+      cause?: { code?: string; message?: string };
+      sourceError?: { code?: string; message?: string };
+    };
+    const lowered = (dbError.message ?? "").toLowerCase();
+    const causeCode = (dbError.cause?.code ?? "").toUpperCase();
+    const sourceCode = (dbError.sourceError?.code ?? "").toUpperCase();
+    if (
+      dbError.code === "ENOTFOUND" ||
+      dbError.code === "UND_ERR_SOCKET" ||
+      causeCode === "ENOTFOUND" ||
+      causeCode === "UND_ERR_SOCKET" ||
+      sourceCode === "ENOTFOUND" ||
+      sourceCode === "UND_ERR_SOCKET" ||
+      lowered.includes("fetch failed")
+    ) {
+      return {
+        status: 503,
+        body: {
+          code: "DATABASE_UNAVAILABLE",
+          message: "Database connection is unavailable. Check DATABASE_URL/network and try again.",
+        },
+      };
+    }
+  }
   if (error instanceof Error) {
     const message = error.message.toLowerCase();
+    if (message.includes("fetch failed") || message.includes("enotfound")) {
+      return {
+        status: 503,
+        body: {
+          code: "DATABASE_UNAVAILABLE",
+          message: "Database connection is unavailable. Check DATABASE_URL/network and try again.",
+        },
+      };
+    }
     if (
       (message.includes("relation") && message.includes("does not exist")) ||
       (message.includes("column") && message.includes("does not exist"))

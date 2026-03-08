@@ -1,4 +1,4 @@
-import { PreTourManagementView } from "@/modules/pre-tour/ui/views/pre-tour-management-view";
+import { PreTourPlanManageView } from "@/modules/pre-tour/ui/views/pre-tour-plan-manage-view";
 
 type PageProps = {
   params: Promise<{ planId: string }>;
@@ -9,10 +9,7 @@ const PreTourPlanManagePage = async ({ params }: PageProps) => {
 
   return (
     <div className="p-4 md:p-6">
-      <PreTourManagementView
-        managedPlanId={planId}
-        initialResource="pre-tour-days"
-      />
+      <PreTourPlanManageView planId={planId} />
     </div>
   );
 };

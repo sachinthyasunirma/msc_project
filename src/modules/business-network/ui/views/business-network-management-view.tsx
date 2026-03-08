@@ -334,7 +334,7 @@ export function BusinessNetworkManagementViewContent({
           { key: "email", label: "Email", type: "text", nullable: true },
           { key: "phone", label: "Phone", type: "text", nullable: true },
           { key: "website", label: "Website", type: "text", nullable: true },
-          { key: "country", label: "Country (ISO2)", type: "text", nullable: true },
+          { key: "country", label: "Country", type: "text", nullable: true },
           { key: "city", label: "City", type: "text", nullable: true },
           { key: "address", label: "Address", type: "text", nullable: true },
           {
@@ -702,7 +702,11 @@ export function BusinessNetworkManagementViewContent({
             <CardDescription>{META[resource].description}</CardDescription>
           </div>
           <div className="flex items-center gap-2">
-            <Button variant="outline" onClick={() => void Promise.all([load(), loadLookups()])}>
+            <Button
+              variant="outline"
+              className="master-refresh-btn"
+              onClick={() => void Promise.all([load(), loadLookups()])}
+            >
               <RefreshCw className="mr-2 size-4" />
               Refresh
             </Button>

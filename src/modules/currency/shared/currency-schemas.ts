@@ -18,6 +18,12 @@ const baseSchema = z.object({
 });
 
 export const createCurrencySchema = baseSchema.extend({
+  code: z
+    .string()
+    .trim()
+    .toUpperCase()
+    .min(3, "Currency Code must be at least 3 characters (e.g. LKR, USD).")
+    .max(40),
   name: z.string().trim().min(2).max(120),
   symbol: z.string().trim().max(10).optional().nullable(),
   numericCode: z.string().trim().max(3).optional().nullable(),

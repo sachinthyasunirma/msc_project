@@ -1,12 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { Plus, RefreshCw } from "lucide-react";
 import { notify } from "@/lib/notify";
 import { useConfirm } from "@/components/app-confirm-provider";
 import { authClient } from "@/lib/auth-client";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Dialog,
   DialogContent,
@@ -569,17 +570,28 @@ export function TechnicalVisitManagementView({
 
   return (
     <Card>
-      <CardContent className="space-y-4 pt-6">
+      <CardHeader className="space-y-4">
         <div className="flex flex-wrap items-start justify-between gap-2">
           <div>
-            <h2 className="text-lg font-semibold">{META[resource].title}</h2>
-            <p className="text-sm text-muted-foreground">{META[resource].description}</p>
+            <CardTitle>{META[resource].title}</CardTitle>
+            <CardDescription>{META[resource].description}</CardDescription>
           </div>
           <div className="flex items-center gap-2">
-            <Button variant="outline" onClick={() => void Promise.all([loadLookups(), loadRecords()])}>
+            <Button
+              variant="outline"
+              className="master-refresh-btn"
+              onClick={() => void Promise.all([loadLookups(), loadRecords()])}
+            >
+              <RefreshCw className="mr-2 size-4" />
               Refresh
             </Button>
-            <Button onClick={() => openDialog("create")} disabled={isReadOnly} className="master-add-btn">
+            <Button
+              onClick={() => openDialog("create")}
+              disabled={isReadOnly}
+              title={isReadOnly ? "View only mode" : undefined}
+              className="master-add-btn"
+            >
+              <Plus className="mr-2 size-4" />
               Add Record
             </Button>
           </div>
@@ -596,7 +608,9 @@ export function TechnicalVisitManagementView({
             </TabsList>
           </div>
         </Tabs>
+      </CardHeader>
 
+      <CardContent className="space-y-4">
         <div className="flex flex-wrap items-center gap-2">
           {resource !== "technical-visits" ? (
             <Select value={selectedVisitId} onValueChange={setSelectedVisitId}>

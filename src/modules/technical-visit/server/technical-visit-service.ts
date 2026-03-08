@@ -2,6 +2,12 @@ import { and, desc, eq, ilike, or } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
 import * as schema from "@/db/schema";
+import {
+  getOrSetMasterDataCache,
+  invalidateMasterDataCacheByPrefixes,
+  masterDataCachePrefix,
+  masterDataListCacheKey,
+} from "@/lib/cache/master-data-cache";
 import { AccessControlError, resolveAccess } from "@/lib/security/access-control";
 import {
   createTechnicalVisitActionSchema,
@@ -116,8 +122,9 @@ export async function listTechnicalVisitRecords(
   const { companyId } = await getAccess(headers);
   const q = parsed.data.q ? `%${parsed.data.q}%` : null;
   const limit = parsed.data.limit;
-
-  switch (resource) {
+  const cacheKey = masterDataListCacheKey("technical-visit", companyId, resource, parsed.data);
+  return getOrSetMasterDataCache(cacheKey, async () => {
+    switch (resource) {
     case "technical-visits":
       return db
         .select()
@@ -199,9 +206,14 @@ export async function listTechnicalVisitRecords(
         .orderBy(desc(schema.technicalVisitAction.createdAt))
         .limit(limit);
 
-    default:
-      throw new TechnicalVisitError(404, "RESOURCE_NOT_FOUND", "Technical visit resource not found.");
-  }
+      default:
+        throw new TechnicalVisitError(
+          404,
+          "RESOURCE_NOT_FOUND",
+          "Technical visit resource not found."
+        );
+    }
+  });
 }
 
 export async function createTechnicalVisitRecord(
@@ -211,8 +223,8 @@ export async function createTechnicalVisitRecord(
 ) {
   const resource = parseResource(resourceInput);
   const { companyId } = await ensureWritable(headers);
-
-  switch (resource) {
+  try {
+    switch (resource) {
     case "technical-visits": {
       const parsed = createTechnicalVisitSchema.safeParse(payload);
       if (!parsed.success) {
@@ -277,8 +289,17 @@ export async function createTechnicalVisitRecord(
       return created;
     }
 
-    default:
-      throw new TechnicalVisitError(404, "RESOURCE_NOT_FOUND", "Technical visit resource not found.");
+      default:
+        throw new TechnicalVisitError(
+          404,
+          "RESOURCE_NOT_FOUND",
+          "Technical visit resource not found."
+        );
+    }
+  } finally {
+    await invalidateMasterDataCacheByPrefixes([
+      masterDataCachePrefix("technical-visit", companyId),
+    ]);
   }
 }
 
@@ -290,8 +311,8 @@ export async function updateTechnicalVisitRecord(
 ) {
   const resource = parseResource(resourceInput);
   const { companyId } = await ensureWritable(headers);
-
-  switch (resource) {
+  try {
+    switch (resource) {
     case "technical-visits": {
       const parsed = updateTechnicalVisitSchema.safeParse(payload);
       if (!parsed.success) {
@@ -393,8 +414,17 @@ export async function updateTechnicalVisitRecord(
       return updated;
     }
 
-    default:
-      throw new TechnicalVisitError(404, "RESOURCE_NOT_FOUND", "Technical visit resource not found.");
+      default:
+        throw new TechnicalVisitError(
+          404,
+          "RESOURCE_NOT_FOUND",
+          "Technical visit resource not found."
+        );
+    }
+  } finally {
+    await invalidateMasterDataCacheByPrefixes([
+      masterDataCachePrefix("technical-visit", companyId),
+    ]);
   }
 }
 
@@ -405,8 +435,8 @@ export async function deleteTechnicalVisitRecord(
 ) {
   const resource = parseResource(resourceInput);
   const { companyId } = await ensureWritable(headers);
-
-  switch (resource) {
+  try {
+    switch (resource) {
     case "technical-visits": {
       const [deleted] = await db
         .delete(schema.technicalVisit)
@@ -459,8 +489,17 @@ export async function deleteTechnicalVisitRecord(
       }
       return;
     }
-    default:
-      throw new TechnicalVisitError(404, "RESOURCE_NOT_FOUND", "Technical visit resource not found.");
+      default:
+        throw new TechnicalVisitError(
+          404,
+          "RESOURCE_NOT_FOUND",
+          "Technical visit resource not found."
+        );
+    }
+  } finally {
+    await invalidateMasterDataCacheByPrefixes([
+      masterDataCachePrefix("technical-visit", companyId),
+    ]);
   }
 }
 

@@ -851,7 +851,12 @@ export const AccommodationManagementView = ({
         <CardHeader className="flex flex-row items-center justify-between">
           <CardTitle>Accommodation Hotels</CardTitle>
           <div className="flex items-center gap-2">
-            <Button variant="outline" onClick={() => void loadHotels()} disabled={loadingHotels}>
+            <Button
+              variant="outline"
+              className="master-refresh-btn"
+              onClick={() => void loadHotels()}
+              disabled={loadingHotels}
+            >
               <RefreshCw className="mr-2 size-4" />
               Refresh
             </Button>

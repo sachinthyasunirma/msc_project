@@ -2,6 +2,12 @@ import { and, desc, eq, ilike, isNull, ne, or } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
 import * as schema from "@/db/schema";
+import {
+  getOrSetMasterDataCache,
+  invalidateMasterDataCacheByPrefixes,
+  masterDataCachePrefix,
+  masterDataListCacheKey,
+} from "@/lib/cache/master-data-cache";
 import { AccessControlError, resolveAccess } from "@/lib/security/access-control";
 import {
   createCurrencySchema,
@@ -181,8 +187,9 @@ export async function listCurrencyRecords(
   const q = parsed.data.q ? `%${parsed.data.q}%` : null;
   const limit = parsed.data.limit;
   const currencyId = parsed.data.currencyId;
-
-  switch (resource) {
+  const cacheKey = masterDataListCacheKey("currency", companyId, resource, parsed.data);
+  return getOrSetMasterDataCache(cacheKey, async () => {
+    switch (resource) {
     case "currencies":
       return db
         .select()
@@ -249,9 +256,10 @@ export async function listCurrencyRecords(
         )
         .orderBy(desc(schema.moneySetting.createdAt))
         .limit(limit);
-    default:
-      throw new CurrencyError(404, "RESOURCE_NOT_FOUND", "Currency resource not found.");
-  }
+      default:
+        throw new CurrencyError(404, "RESOURCE_NOT_FOUND", "Currency resource not found.");
+    }
+  });
 }
 
 export async function createCurrencyRecord(
@@ -261,8 +269,8 @@ export async function createCurrencyRecord(
 ) {
   const resource = parseResource(resourceInput);
   const { companyId } = await ensureWritable(headers);
-
-  switch (resource) {
+  try {
+    switch (resource) {
     case "currencies": {
       const parsed = createCurrencySchema.safeParse(payload);
       if (!parsed.success) {
@@ -332,8 +340,11 @@ export async function createCurrencyRecord(
         .returning();
       return created;
     }
-    default:
-      throw new CurrencyError(404, "RESOURCE_NOT_FOUND", "Currency resource not found.");
+      default:
+        throw new CurrencyError(404, "RESOURCE_NOT_FOUND", "Currency resource not found.");
+    }
+  } finally {
+    await invalidateMasterDataCacheByPrefixes([masterDataCachePrefix("currency", companyId)]);
   }
 }
 
@@ -345,8 +356,8 @@ export async function updateCurrencyRecord(
 ) {
   const resource = parseResource(resourceInput);
   const { companyId } = await ensureWritable(headers);
-
-  switch (resource) {
+  try {
+    switch (resource) {
     case "currencies": {
       const parsed = updateCurrencySchema.safeParse(payload);
       if (!parsed.success) {
@@ -476,8 +487,11 @@ export async function updateCurrencyRecord(
       if (!updated) throw new CurrencyError(404, "RECORD_NOT_FOUND", "Money setting not found.");
       return updated;
     }
-    default:
-      throw new CurrencyError(404, "RESOURCE_NOT_FOUND", "Currency resource not found.");
+      default:
+        throw new CurrencyError(404, "RESOURCE_NOT_FOUND", "Currency resource not found.");
+    }
+  } finally {
+    await invalidateMasterDataCacheByPrefixes([masterDataCachePrefix("currency", companyId)]);
   }
 }
 
@@ -488,8 +502,8 @@ export async function deleteCurrencyRecord(
 ) {
   const resource = parseResource(resourceInput);
   const { companyId } = await ensureWritable(headers);
-
-  switch (resource) {
+  try {
+    switch (resource) {
     case "currencies": {
       const [deleted] = await db
         .delete(schema.currency)
@@ -522,8 +536,11 @@ export async function deleteCurrencyRecord(
       if (!deleted) throw new CurrencyError(404, "RECORD_NOT_FOUND", "Money setting not found.");
       return;
     }
-    default:
-      throw new CurrencyError(404, "RESOURCE_NOT_FOUND", "Currency resource not found.");
+      default:
+        throw new CurrencyError(404, "RESOURCE_NOT_FOUND", "Currency resource not found.");
+    }
+  } finally {
+    await invalidateMasterDataCacheByPrefixes([masterDataCachePrefix("currency", companyId)]);
   }
 }
 

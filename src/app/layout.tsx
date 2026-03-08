@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { AppConfirmProvider } from "@/components/app-confirm-provider";
+import { ClientLogBootstrap } from "@/components/logging/client-log-bootstrap";
 import { Geist, Geist_Mono } from "next/font/google";
 import { AppToaster } from "@/components/app-toaster";
 import "leaflet/dist/leaflet.css";
@@ -32,6 +33,7 @@ export default function RootLayout({
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
         <AppConfirmProvider>
+          <ClientLogBootstrap />
           {children}
           <AppToaster />
         </AppConfirmProvider>

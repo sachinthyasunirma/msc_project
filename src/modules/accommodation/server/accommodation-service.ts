@@ -2,6 +2,12 @@ import { and, asc, desc, eq, ilike, lt, or, sql, SQL } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
 import * as schema from "@/db/schema";
+import {
+  getOrSetMasterDataCache,
+  invalidateMasterDataCacheByPrefixes,
+  masterDataCachePrefix,
+  masterDataListCacheKey,
+} from "@/lib/cache/master-data-cache";
 import { AccessControlError, resolveAccess } from "@/lib/security/access-control";
 import {
   createAvailabilitySchema,
@@ -215,22 +221,25 @@ export async function listHotels(searchParams: URLSearchParams, headers: Headers
     );
   }
 
-  const rows = await db
-    .select()
-    .from(schema.hotel)
-    .where(and(...clauses))
-    .orderBy(desc(schema.hotel.createdAt), desc(schema.hotel.id))
-    .limit(query.limit + 1);
+  const cacheKey = masterDataListCacheKey("accommodation", companyId, "hotels", query);
+  return getOrSetMasterDataCache(cacheKey, async () => {
+    const rows = await db
+      .select()
+      .from(schema.hotel)
+      .where(and(...clauses))
+      .orderBy(desc(schema.hotel.createdAt), desc(schema.hotel.id))
+      .limit(query.limit + 1);
 
-  const hasNext = rows.length > query.limit;
-  const items = hasNext ? rows.slice(0, query.limit) : rows;
-  const last = items[items.length - 1];
-  return {
-    items,
-    nextCursor: hasNext && last ? buildCursor(last) : null,
-    hasNext,
-    limit: query.limit,
-  };
+    const hasNext = rows.length > query.limit;
+    const items = hasNext ? rows.slice(0, query.limit) : rows;
+    const last = items[items.length - 1];
+    return {
+      items,
+      nextCursor: hasNext && last ? buildCursor(last) : null,
+      hasNext,
+      limit: query.limit,
+    };
+  });
 }
 
 export async function createHotel(payload: unknown, headers: Headers) {
@@ -241,14 +250,18 @@ export async function createHotel(payload: unknown, headers: Headers) {
   }
 
   const companyId = await getCompanyId(headers);
-  const [created] = await db
-    .insert(schema.hotel)
-    .values({
-      ...parsed.data,
-      companyId,
-    })
-    .returning();
-  return created;
+  try {
+    const [created] = await db
+      .insert(schema.hotel)
+      .values({
+        ...parsed.data,
+        companyId,
+      })
+      .returning();
+    return created;
+  } finally {
+    await invalidateMasterDataCacheByPrefixes([masterDataCachePrefix("accommodation", companyId)]);
+  }
 }
 
 export async function updateHotel(hotelId: string, payload: unknown, headers: Headers) {
@@ -259,19 +272,23 @@ export async function updateHotel(hotelId: string, payload: unknown, headers: He
   }
 
   const companyId = await getCompanyId(headers);
-  const [updated] = await db
-    .update(schema.hotel)
-    .set({
-      ...parsed.data,
-      updatedAt: new Date(),
-    })
-    .where(and(eq(schema.hotel.id, hotelId), eq(schema.hotel.companyId, companyId)))
-    .returning();
+  try {
+    const [updated] = await db
+      .update(schema.hotel)
+      .set({
+        ...parsed.data,
+        updatedAt: new Date(),
+      })
+      .where(and(eq(schema.hotel.id, hotelId), eq(schema.hotel.companyId, companyId)))
+      .returning();
 
-  if (!updated) {
-    throw new AccommodationError(404, "HOTEL_NOT_FOUND", "Hotel not found.");
+    if (!updated) {
+      throw new AccommodationError(404, "HOTEL_NOT_FOUND", "Hotel not found.");
+    }
+    return updated;
+  } finally {
+    await invalidateMasterDataCacheByPrefixes([masterDataCachePrefix("accommodation", companyId)]);
   }
-  return updated;
 }
 
 export async function getHotelById(hotelId: string, headers: Headers) {
@@ -291,12 +308,16 @@ export async function getHotelById(hotelId: string, headers: Headers) {
 export async function deleteHotel(hotelId: string, headers: Headers) {
   await ensureWritable(headers);
   const companyId = await getCompanyId(headers);
-  const [deleted] = await db
-    .delete(schema.hotel)
-    .where(and(eq(schema.hotel.id, hotelId), eq(schema.hotel.companyId, companyId)))
-    .returning({ id: schema.hotel.id });
-  if (!deleted) {
-    throw new AccommodationError(404, "HOTEL_NOT_FOUND", "Hotel not found.");
+  try {
+    const [deleted] = await db
+      .delete(schema.hotel)
+      .where(and(eq(schema.hotel.id, hotelId), eq(schema.hotel.companyId, companyId)))
+      .returning({ id: schema.hotel.id });
+    if (!deleted) {
+      throw new AccommodationError(404, "HOTEL_NOT_FOUND", "Hotel not found.");
+    }
+  } finally {
+    await invalidateMasterDataCacheByPrefixes([masterDataCachePrefix("accommodation", companyId)]);
   }
 }
 

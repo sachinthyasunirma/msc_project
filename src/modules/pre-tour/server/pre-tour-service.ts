@@ -128,6 +128,32 @@ async function ensureDay(companyId: string, id: string) {
   return record;
 }
 
+async function ensureUniqueDayNumber(
+  companyId: string,
+  input: { planId: string; dayNumber: number; excludeDayId?: string }
+) {
+  const [existing] = await db
+    .select({ id: schema.preTourPlanDay.id })
+    .from(schema.preTourPlanDay)
+    .where(
+      and(
+        eq(schema.preTourPlanDay.companyId, companyId),
+        eq(schema.preTourPlanDay.planId, input.planId),
+        eq(schema.preTourPlanDay.dayNumber, input.dayNumber),
+        input.excludeDayId ? ne(schema.preTourPlanDay.id, input.excludeDayId) : undefined
+      )
+    )
+    .limit(1);
+
+  if (existing) {
+    throw new PreTourError(
+      400,
+      "VALIDATION_ERROR",
+      `Day number ${input.dayNumber} already exists for this pre-tour plan.`
+    );
+  }
+}
+
 async function ensureItem(companyId: string, id: string) {
   const [record] = await db
     .select({ id: schema.preTourPlanItem.id, planId: schema.preTourPlanItem.planId })
@@ -241,6 +267,201 @@ async function ensurePreTourCategoryTypeLimit(
         "This category type allows only one category per pre-tour plan."
       );
     }
+  }
+}
+
+async function ensureTourCategoryRule(companyId: string, categoryId: string) {
+  const [record] = await db
+    .select({
+      id: schema.tourCategoryRule.id,
+      categoryId: schema.tourCategoryRule.categoryId,
+      requireHotel: schema.tourCategoryRule.requireHotel,
+      requireTransport: schema.tourCategoryRule.requireTransport,
+      requireItinerary: schema.tourCategoryRule.requireItinerary,
+      requireActivity: schema.tourCategoryRule.requireActivity,
+      requireCeremony: schema.tourCategoryRule.requireCeremony,
+      allowMultipleHotels: schema.tourCategoryRule.allowMultipleHotels,
+      allowWithoutHotel: schema.tourCategoryRule.allowWithoutHotel,
+      allowWithoutTransport: schema.tourCategoryRule.allowWithoutTransport,
+      minNights: schema.tourCategoryRule.minNights,
+      maxNights: schema.tourCategoryRule.maxNights,
+      minDays: schema.tourCategoryRule.minDays,
+      maxDays: schema.tourCategoryRule.maxDays,
+    })
+    .from(schema.tourCategoryRule)
+    .where(
+      and(
+        eq(schema.tourCategoryRule.companyId, companyId),
+        eq(schema.tourCategoryRule.categoryId, categoryId),
+        eq(schema.tourCategoryRule.isActive, true)
+      )
+    )
+    .limit(1);
+
+  if (!record) {
+    throw new PreTourError(
+      400,
+      "TOUR_CATEGORY_RULE_NOT_FOUND",
+      "Selected tour category does not have an active category rule."
+    );
+  }
+  return record;
+}
+
+function isStrictPreTourStatus(status: unknown) {
+  const normalized = String(status || "").toUpperCase();
+  return (
+    normalized === "APPROVED" ||
+    normalized === "BOOKED" ||
+    normalized === "IN_PROGRESS" ||
+    normalized === "COMPLETED"
+  );
+}
+
+function validateHeaderAgainstTourCategoryRule(input: {
+  totalNights: number;
+  startDate: string;
+  endDate: string;
+  rule: Awaited<ReturnType<typeof ensureTourCategoryRule>>;
+}) {
+  const { totalNights, startDate, endDate, rule } = input;
+  const totalDaysFromNights = totalNights + 1;
+  const start = new Date(startDate);
+  const end = new Date(endDate);
+  const dayDiffRaw = Math.floor((end.getTime() - start.getTime()) / (24 * 60 * 60 * 1000)) + 1;
+  const totalDays = Number.isFinite(dayDiffRaw) && dayDiffRaw > 0 ? dayDiffRaw : totalDaysFromNights;
+
+  if (rule.minNights !== null && totalNights < Number(rule.minNights)) {
+    throw new PreTourError(
+      400,
+      "VALIDATION_ERROR",
+      `Total nights must be at least ${rule.minNights} for selected category.`
+    );
+  }
+  if (rule.maxNights !== null && totalNights > Number(rule.maxNights)) {
+    throw new PreTourError(
+      400,
+      "VALIDATION_ERROR",
+      `Total nights cannot exceed ${rule.maxNights} for selected category.`
+    );
+  }
+  if (rule.minDays !== null && totalDays < Number(rule.minDays)) {
+    throw new PreTourError(
+      400,
+      "VALIDATION_ERROR",
+      `Total days must be at least ${rule.minDays} for selected category.`
+    );
+  }
+  if (rule.maxDays !== null && totalDays > Number(rule.maxDays)) {
+    throw new PreTourError(
+      400,
+      "VALIDATION_ERROR",
+      `Total days cannot exceed ${rule.maxDays} for selected category.`
+    );
+  }
+}
+
+async function validatePlanStructureAgainstCategoryRule(input: {
+  companyId: string;
+  planId: string;
+  rule: Awaited<ReturnType<typeof ensureTourCategoryRule>>;
+  requireComplete: boolean;
+}) {
+  const { companyId, planId, rule, requireComplete } = input;
+  const days = await db
+    .select({ id: schema.preTourPlanDay.id })
+    .from(schema.preTourPlanDay)
+    .where(
+      and(
+        eq(schema.preTourPlanDay.companyId, companyId),
+        eq(schema.preTourPlanDay.planId, planId)
+      )
+    );
+  const dayCount = days.length;
+
+  const items = await db
+    .select({ itemType: schema.preTourPlanItem.itemType })
+    .from(schema.preTourPlanItem)
+    .where(
+      and(
+        eq(schema.preTourPlanItem.companyId, companyId),
+        eq(schema.preTourPlanItem.planId, planId)
+      )
+    );
+
+  const itemCounts = new Map<string, number>();
+  items.forEach((row) => {
+    const key = String(row.itemType || "").toUpperCase();
+    itemCounts.set(key, (itemCounts.get(key) ?? 0) + 1);
+  });
+
+  const accommodationCount = itemCounts.get("ACCOMMODATION") ?? 0;
+  const transportCount = itemCounts.get("TRANSPORT") ?? 0;
+  const activityCount = itemCounts.get("ACTIVITY") ?? 0;
+  const ceremonyCount = itemCounts.get("CEREMONY") ?? 0;
+
+  const mustHaveHotel = Boolean(rule.requireHotel) || !Boolean(rule.allowWithoutHotel);
+  const mustHaveTransport = Boolean(rule.requireTransport) || !Boolean(rule.allowWithoutTransport);
+
+  if (rule.maxDays !== null && dayCount > Number(rule.maxDays)) {
+    throw new PreTourError(
+      400,
+      "VALIDATION_ERROR",
+      `This category allows a maximum of ${rule.maxDays} day records.`
+    );
+  }
+
+  if (!rule.allowMultipleHotels && accommodationCount > 1) {
+    throw new PreTourError(
+      400,
+      "VALIDATION_ERROR",
+      "This category allows only one accommodation item for the full pre-tour."
+    );
+  }
+
+  if (!requireComplete) return;
+
+  if (rule.requireItinerary && dayCount === 0) {
+    throw new PreTourError(
+      400,
+      "VALIDATION_ERROR",
+      "Selected category requires itinerary/day records before this status."
+    );
+  }
+  if (rule.minDays !== null && dayCount < Number(rule.minDays)) {
+    throw new PreTourError(
+      400,
+      "VALIDATION_ERROR",
+      `Selected category requires at least ${rule.minDays} day records before this status.`
+    );
+  }
+  if (mustHaveHotel && accommodationCount === 0) {
+    throw new PreTourError(
+      400,
+      "VALIDATION_ERROR",
+      "Selected category requires at least one accommodation item."
+    );
+  }
+  if (mustHaveTransport && transportCount === 0) {
+    throw new PreTourError(
+      400,
+      "VALIDATION_ERROR",
+      "Selected category requires at least one transport item."
+    );
+  }
+  if (rule.requireActivity && activityCount === 0) {
+    throw new PreTourError(
+      400,
+      "VALIDATION_ERROR",
+      "Selected category requires at least one activity item."
+    );
+  }
+  if (rule.requireCeremony && ceremonyCount === 0) {
+    throw new PreTourError(
+      400,
+      "VALIDATION_ERROR",
+      "Selected category requires at least one ceremony item."
+    );
   }
 }
 
@@ -358,6 +579,38 @@ async function ensureOrganizationType(
       400,
       errorCode,
       `Invalid organization selection for ${errorCode.replaceAll("_", " ").toLowerCase()}.`
+    );
+  }
+}
+
+async function ensureOperatorMarketCompatibility(
+  companyId: string,
+  operatorOrgId: string,
+  marketOrgId: string
+) {
+  const contracts = await db
+    .select({
+      operatorOrgId: schema.businessOperatorMarketContract.operatorOrgId,
+    })
+    .from(schema.businessOperatorMarketContract)
+    .where(
+      and(
+        eq(schema.businessOperatorMarketContract.companyId, companyId),
+        eq(schema.businessOperatorMarketContract.marketOrgId, marketOrgId),
+        eq(schema.businessOperatorMarketContract.isActive, true),
+        eq(schema.businessOperatorMarketContract.status, "ACTIVE")
+      )
+    );
+
+  // Allow onboarding flows where contracts are not configured yet.
+  if (contracts.length === 0) return;
+
+  const isMapped = contracts.some((row) => row.operatorOrgId === operatorOrgId);
+  if (!isMapped) {
+    throw new PreTourError(
+      400,
+      "INVALID_OPERATOR_MARKET_MAPPING",
+      "Selected operator is not mapped to the selected market."
     );
   }
 }
@@ -825,8 +1078,17 @@ export async function createPreTourRecord(
       if (!parsed.success) {
         throw new PreTourError(400, "VALIDATION_ERROR", normalizeZodError(parsed.error));
       }
+      const normalizedPlanCode = parsed.data.planCode.trim().toUpperCase();
 
       validatePlanDateRange(parsed.data.startDate, parsed.data.endDate);
+      await ensureTourCategory(companyId, parsed.data.categoryId);
+      const categoryRule = await ensureTourCategoryRule(companyId, parsed.data.categoryId);
+      validateHeaderAgainstTourCategoryRule({
+        totalNights: parsed.data.totalNights,
+        startDate: parsed.data.startDate,
+        endDate: parsed.data.endDate,
+        rule: categoryRule,
+      });
       const currencyContext = await resolvePreTourCurrencyContext(companyId, {
         planCurrencyCode: parsed.data.currencyCode,
         startDate: parsed.data.startDate,
@@ -850,8 +1112,13 @@ export async function createPreTourRecord(
       await ensureOrganizationType(
         companyId,
         parsed.data.marketOrgId,
-        ["MARKET"],
+        ["MARKET", "MARKETING"],
         "INVALID_MARKET_ORGANIZATION"
+      );
+      await ensureOperatorMarketCompatibility(
+        companyId,
+        parsed.data.operatorOrgId,
+        parsed.data.marketOrgId
       );
 
       const referenceNo = parsed.data.referenceNo?.trim()
@@ -862,6 +1129,8 @@ export async function createPreTourRecord(
         .insert(schema.preTourPlan)
         .values({
           ...parsed.data,
+          code: normalizedPlanCode,
+          planCode: normalizedPlanCode,
           companyId,
           updatedByUserId: userId,
           updatedByName: userName,
@@ -888,6 +1157,51 @@ export async function createPreTourRecord(
       }
 
       await ensurePlan(companyId, parsed.data.planId);
+      await ensureUniqueDayNumber(companyId, {
+        planId: parsed.data.planId,
+        dayNumber: parsed.data.dayNumber,
+      });
+      const [plan] = await db
+        .select({
+          categoryId: schema.preTourPlan.categoryId,
+          status: schema.preTourPlan.status,
+        })
+        .from(schema.preTourPlan)
+        .where(
+          and(
+            eq(schema.preTourPlan.id, parsed.data.planId),
+            eq(schema.preTourPlan.companyId, companyId)
+          )
+        )
+        .limit(1);
+      if (!plan) {
+        throw new PreTourError(404, "NOT_FOUND", "Pre-tour plan not found.");
+      }
+      const categoryRule = await ensureTourCategoryRule(companyId, String(plan.categoryId));
+      if (categoryRule.maxDays !== null) {
+        const dayRows = await db
+          .select({ id: schema.preTourPlanDay.id })
+          .from(schema.preTourPlanDay)
+          .where(
+            and(
+              eq(schema.preTourPlanDay.companyId, companyId),
+              eq(schema.preTourPlanDay.planId, parsed.data.planId)
+            )
+          );
+        if (dayRows.length + 1 > Number(categoryRule.maxDays)) {
+          throw new PreTourError(
+            400,
+            "VALIDATION_ERROR",
+            `This category allows a maximum of ${categoryRule.maxDays} day records.`
+          );
+        }
+      }
+      await validatePlanStructureAgainstCategoryRule({
+        companyId,
+        planId: parsed.data.planId,
+        rule: categoryRule,
+        requireComplete: false,
+      });
       const uniqueCode = await generateUniquePreTourDayCode(companyId, parsed.data.code);
 
       const [created] = await db
@@ -910,6 +1224,23 @@ export async function createPreTourRecord(
       }
 
       await ensurePlan(companyId, parsed.data.planId);
+      const [plan] = await db
+        .select({
+          categoryId: schema.preTourPlan.categoryId,
+          status: schema.preTourPlan.status,
+        })
+        .from(schema.preTourPlan)
+        .where(
+          and(
+            eq(schema.preTourPlan.id, parsed.data.planId),
+            eq(schema.preTourPlan.companyId, companyId)
+          )
+        )
+        .limit(1);
+      if (!plan) {
+        throw new PreTourError(404, "NOT_FOUND", "Pre-tour plan not found.");
+      }
+      const categoryRule = await ensureTourCategoryRule(companyId, String(plan.categoryId));
       const day = await ensureDay(companyId, parsed.data.dayId);
       if (day.planId !== parsed.data.planId) {
         throw new PreTourError(
@@ -924,6 +1255,29 @@ export async function createPreTourRecord(
         pax: parsed.data.pax ?? null,
         pricingSnapshot: parsed.data.pricingSnapshot ?? null,
       });
+      if (
+        String(parsed.data.itemType || "").toUpperCase() === "ACCOMMODATION" &&
+        !categoryRule.allowMultipleHotels
+      ) {
+        const existingAccommodation = await db
+          .select({ id: schema.preTourPlanItem.id })
+          .from(schema.preTourPlanItem)
+          .where(
+            and(
+              eq(schema.preTourPlanItem.companyId, companyId),
+              eq(schema.preTourPlanItem.planId, parsed.data.planId),
+              eq(schema.preTourPlanItem.itemType, "ACCOMMODATION")
+            )
+          )
+          .limit(1);
+        if (existingAccommodation.length > 0) {
+          throw new PreTourError(
+            400,
+            "VALIDATION_ERROR",
+            "This category allows only one accommodation item for the full pre-tour."
+          );
+        }
+      }
 
       const [created] = await db
         .insert(schema.preTourPlanItem)
@@ -938,6 +1292,13 @@ export async function createPreTourRecord(
           totalAmount: toDecimal(parsed.data.totalAmount),
         } as any)
         .returning();
+
+      await validatePlanStructureAgainstCategoryRule({
+        companyId,
+        planId: parsed.data.planId,
+        rule: categoryRule,
+        requireComplete: isStrictPreTourStatus(plan.status),
+      });
 
       return created;
     }
@@ -1072,6 +1433,9 @@ export async function updatePreTourRecord(
         .select({
           operatorOrgId: schema.preTourPlan.operatorOrgId,
           marketOrgId: schema.preTourPlan.marketOrgId,
+          categoryId: schema.preTourPlan.categoryId,
+          status: schema.preTourPlan.status,
+          totalNights: schema.preTourPlan.totalNights,
           startDate: schema.preTourPlan.startDate,
           endDate: schema.preTourPlan.endDate,
           currencyCode: schema.preTourPlan.currencyCode,
@@ -1089,6 +1453,8 @@ export async function updatePreTourRecord(
 
       const nextOperatorOrgId = parsed.data.operatorOrgId ?? current.operatorOrgId;
       const nextMarketOrgId = parsed.data.marketOrgId ?? current.marketOrgId;
+      const nextCategoryId = parsed.data.categoryId ?? current.categoryId;
+      const nextStatus = parsed.data.status ?? String(current.status || "DRAFT");
       const nextStartDateRaw =
         parsed.data.startDate ??
         (current.startDate instanceof Date
@@ -1113,8 +1479,20 @@ export async function updatePreTourRecord(
           : current.exchangeRateDate instanceof Date
             ? current.exchangeRateDate.toISOString()
             : null;
+      const nextTotalNights =
+        parsed.data.totalNights !== undefined
+          ? parsed.data.totalNights
+          : Number(current.totalNights ?? 0);
 
       validatePlanDateRange(nextStartDateRaw, nextEndDateRaw);
+      await ensureTourCategory(companyId, nextCategoryId);
+      const categoryRule = await ensureTourCategoryRule(companyId, nextCategoryId);
+      validateHeaderAgainstTourCategoryRule({
+        totalNights: Number(nextTotalNights),
+        startDate: nextStartDateRaw,
+        endDate: nextEndDateRaw,
+        rule: categoryRule,
+      });
       const currencyContext = await resolvePreTourCurrencyContext(companyId, {
         planCurrencyCode: nextCurrencyCode,
         startDate: nextStartDateRaw,
@@ -1150,15 +1528,28 @@ export async function updatePreTourRecord(
         await ensureOrganizationType(
           companyId,
           parsed.data.marketOrgId,
-          ["MARKET"],
+          ["MARKET", "MARKETING"],
           "INVALID_MARKET_ORGANIZATION"
         );
       }
+      await ensureOperatorMarketCompatibility(companyId, nextOperatorOrgId, nextMarketOrgId);
+      await validatePlanStructureAgainstCategoryRule({
+        companyId,
+        planId: id,
+        rule: categoryRule,
+        requireComplete: isStrictPreTourStatus(nextStatus),
+      });
 
       const [updated] = await db
         .update(schema.preTourPlan)
         .set({
           ...parsed.data,
+          ...(parsed.data.planCode
+            ? {
+                code: parsed.data.planCode.trim().toUpperCase(),
+                planCode: parsed.data.planCode.trim().toUpperCase(),
+              }
+            : {}),
           updatedByUserId: userId,
           updatedByName: userName,
           startDate: parsed.data.startDate ? toDate(parsed.data.startDate) : undefined,
@@ -1190,9 +1581,31 @@ export async function updatePreTourRecord(
         throw new PreTourError(400, "VALIDATION_ERROR", normalizeZodError(parsed.error));
       }
 
+      const [currentDay] = await db
+        .select({
+          id: schema.preTourPlanDay.id,
+          planId: schema.preTourPlanDay.planId,
+          dayNumber: schema.preTourPlanDay.dayNumber,
+        })
+        .from(schema.preTourPlanDay)
+        .where(and(eq(schema.preTourPlanDay.id, id), eq(schema.preTourPlanDay.companyId, companyId)))
+        .limit(1);
+
+      if (!currentDay) {
+        throw new PreTourError(404, "NOT_FOUND", "Pre-tour day not found.");
+      }
+
+      const nextPlanId = String(parsed.data.planId ?? currentDay.planId);
+      const nextDayNumber = Number(parsed.data.dayNumber ?? currentDay.dayNumber);
+
       if (parsed.data.planId) {
         await ensurePlan(companyId, parsed.data.planId);
       }
+      await ensureUniqueDayNumber(companyId, {
+        planId: nextPlanId,
+        dayNumber: nextDayNumber,
+        excludeDayId: id,
+      });
 
       const [updated] = await db
         .update(schema.preTourPlanDay)
@@ -1227,6 +1640,7 @@ export async function updatePreTourRecord(
 
       const [current] = await db
         .select({
+          planId: schema.preTourPlanItem.planId,
           itemType: schema.preTourPlanItem.itemType,
           serviceId: schema.preTourPlanItem.serviceId,
           pax: schema.preTourPlanItem.pax,
@@ -1237,6 +1651,41 @@ export async function updatePreTourRecord(
         .limit(1);
       if (!current) {
         throw new PreTourError(404, "NOT_FOUND", "Pre-tour item not found.");
+      }
+      const nextPlanId = String(parsed.data.planId ?? current.planId);
+      const [plan] = await db
+        .select({
+          categoryId: schema.preTourPlan.categoryId,
+          status: schema.preTourPlan.status,
+        })
+        .from(schema.preTourPlan)
+        .where(and(eq(schema.preTourPlan.id, nextPlanId), eq(schema.preTourPlan.companyId, companyId)))
+        .limit(1);
+      if (!plan) {
+        throw new PreTourError(404, "NOT_FOUND", "Pre-tour plan not found.");
+      }
+      const categoryRule = await ensureTourCategoryRule(companyId, String(plan.categoryId));
+      const nextItemType = String(parsed.data.itemType ?? current.itemType).toUpperCase();
+      if (nextItemType === "ACCOMMODATION" && !categoryRule.allowMultipleHotels) {
+        const existingAccommodation = await db
+          .select({ id: schema.preTourPlanItem.id })
+          .from(schema.preTourPlanItem)
+          .where(
+            and(
+              eq(schema.preTourPlanItem.companyId, companyId),
+              eq(schema.preTourPlanItem.planId, nextPlanId),
+              eq(schema.preTourPlanItem.itemType, "ACCOMMODATION"),
+              ne(schema.preTourPlanItem.id, id)
+            )
+          )
+          .limit(1);
+        if (existingAccommodation.length > 0) {
+          throw new PreTourError(
+            400,
+            "VALIDATION_ERROR",
+            "This category allows only one accommodation item for the full pre-tour."
+          );
+        }
       }
 
       await validateTransportPaxCapacity(companyId, {
@@ -1269,6 +1718,13 @@ export async function updatePreTourRecord(
       if (!updated) {
         throw new PreTourError(404, "NOT_FOUND", "Pre-tour item not found.");
       }
+
+      await validatePlanStructureAgainstCategoryRule({
+        companyId,
+        planId: nextPlanId,
+        rule: categoryRule,
+        requireComplete: isStrictPreTourStatus(plan.status),
+      });
 
       return updated;
     }
@@ -1614,6 +2070,56 @@ export async function deletePreTourRecord(
       return;
     }
     case "pre-tour-days": {
+      const [currentDay] = await db
+        .select({ planId: schema.preTourPlanDay.planId })
+        .from(schema.preTourPlanDay)
+        .where(and(eq(schema.preTourPlanDay.id, id), eq(schema.preTourPlanDay.companyId, companyId)))
+        .limit(1);
+      if (!currentDay) throw new PreTourError(404, "NOT_FOUND", "Pre-tour day not found.");
+
+      const [plan] = await db
+        .select({
+          categoryId: schema.preTourPlan.categoryId,
+          status: schema.preTourPlan.status,
+        })
+        .from(schema.preTourPlan)
+        .where(
+          and(
+            eq(schema.preTourPlan.id, String(currentDay.planId)),
+            eq(schema.preTourPlan.companyId, companyId)
+          )
+        )
+        .limit(1);
+      if (!plan) throw new PreTourError(404, "NOT_FOUND", "Pre-tour plan not found.");
+
+      const categoryRule = await ensureTourCategoryRule(companyId, String(plan.categoryId));
+      if (isStrictPreTourStatus(plan.status)) {
+        const dayRows = await db
+          .select({ id: schema.preTourPlanDay.id })
+          .from(schema.preTourPlanDay)
+          .where(
+            and(
+              eq(schema.preTourPlanDay.companyId, companyId),
+              eq(schema.preTourPlanDay.planId, String(currentDay.planId))
+            )
+          );
+        const remainingDays = Math.max(0, dayRows.length - 1);
+        if (categoryRule.requireItinerary && remainingDays === 0) {
+          throw new PreTourError(
+            400,
+            "VALIDATION_ERROR",
+            "Selected category requires itinerary/day records. You cannot remove the last day."
+          );
+        }
+        if (categoryRule.minDays !== null && remainingDays < Number(categoryRule.minDays)) {
+          throw new PreTourError(
+            400,
+            "VALIDATION_ERROR",
+            `Selected category requires at least ${categoryRule.minDays} day records.`
+          );
+        }
+      }
+
       const [deleted] = await db
         .delete(schema.preTourPlanDay)
         .where(and(eq(schema.preTourPlanDay.id, id), eq(schema.preTourPlanDay.companyId, companyId)))
@@ -1622,6 +2128,85 @@ export async function deletePreTourRecord(
       return;
     }
     case "pre-tour-items": {
+      const [currentItem] = await db
+        .select({
+          planId: schema.preTourPlanItem.planId,
+          itemType: schema.preTourPlanItem.itemType,
+        })
+        .from(schema.preTourPlanItem)
+        .where(and(eq(schema.preTourPlanItem.id, id), eq(schema.preTourPlanItem.companyId, companyId)))
+        .limit(1);
+      if (!currentItem) throw new PreTourError(404, "NOT_FOUND", "Pre-tour item not found.");
+
+      const [plan] = await db
+        .select({
+          categoryId: schema.preTourPlan.categoryId,
+          status: schema.preTourPlan.status,
+        })
+        .from(schema.preTourPlan)
+        .where(
+          and(
+            eq(schema.preTourPlan.id, String(currentItem.planId)),
+            eq(schema.preTourPlan.companyId, companyId)
+          )
+        )
+        .limit(1);
+      if (!plan) throw new PreTourError(404, "NOT_FOUND", "Pre-tour plan not found.");
+
+      if (isStrictPreTourStatus(plan.status)) {
+        const categoryRule = await ensureTourCategoryRule(companyId, String(plan.categoryId));
+        const items = await db
+          .select({ itemType: schema.preTourPlanItem.itemType })
+          .from(schema.preTourPlanItem)
+          .where(
+            and(
+              eq(schema.preTourPlanItem.companyId, companyId),
+              eq(schema.preTourPlanItem.planId, String(currentItem.planId))
+            )
+          );
+        const countByType = new Map<string, number>();
+        items.forEach((row) => {
+          const key = String(row.itemType || "").toUpperCase();
+          countByType.set(key, (countByType.get(key) ?? 0) + 1);
+        });
+
+        const deletingType = String(currentItem.itemType || "").toUpperCase();
+        countByType.set(deletingType, Math.max(0, (countByType.get(deletingType) ?? 0) - 1));
+
+        const mustHaveHotel = Boolean(categoryRule.requireHotel) || !Boolean(categoryRule.allowWithoutHotel);
+        const mustHaveTransport =
+          Boolean(categoryRule.requireTransport) || !Boolean(categoryRule.allowWithoutTransport);
+
+        if (mustHaveHotel && (countByType.get("ACCOMMODATION") ?? 0) === 0) {
+          throw new PreTourError(
+            400,
+            "VALIDATION_ERROR",
+            "Selected category requires at least one accommodation item."
+          );
+        }
+        if (mustHaveTransport && (countByType.get("TRANSPORT") ?? 0) === 0) {
+          throw new PreTourError(
+            400,
+            "VALIDATION_ERROR",
+            "Selected category requires at least one transport item."
+          );
+        }
+        if (categoryRule.requireActivity && (countByType.get("ACTIVITY") ?? 0) === 0) {
+          throw new PreTourError(
+            400,
+            "VALIDATION_ERROR",
+            "Selected category requires at least one activity item."
+          );
+        }
+        if (categoryRule.requireCeremony && (countByType.get("CEREMONY") ?? 0) === 0) {
+          throw new PreTourError(
+            400,
+            "VALIDATION_ERROR",
+            "Selected category requires at least one ceremony item."
+          );
+        }
+      }
+
       const [deleted] = await db
         .delete(schema.preTourPlanItem)
         .where(and(eq(schema.preTourPlanItem.id, id), eq(schema.preTourPlanItem.companyId, companyId)))
@@ -1685,7 +2270,12 @@ export async function deletePreTourRecord(
 
 export function toPreTourErrorResponse(error: unknown) {
   if (error && typeof error === "object") {
-    const dbError = error as { code?: string; constraint?: string; detail?: string };
+    const dbError = error as {
+      code?: string;
+      constraint?: string;
+      detail?: string;
+      message?: string;
+    };
     if (dbError.code === "23505") {
       if (dbError.constraint === "uq_pre_tour_plan_day_company_code") {
         return {
@@ -1696,6 +2286,15 @@ export function toPreTourErrorResponse(error: unknown) {
           },
         };
       }
+      if (dbError.constraint === "uq_pre_tour_plan_day_plan_day_number") {
+        return {
+          status: 400,
+          body: {
+            code: "VALIDATION_ERROR",
+            message: "Day number already exists for this pre-tour plan. Please use a different day.",
+          },
+        };
+      }
       return {
         status: 400,
         body: {
@@ -1703,6 +2302,20 @@ export function toPreTourErrorResponse(error: unknown) {
           message: dbError.detail || "Duplicate record found. Please use unique values.",
         },
       };
+    }
+
+    if (dbError.code === "42703") {
+      const message = String(dbError.message ?? "").toLowerCase();
+      if (message.includes("category_id")) {
+        return {
+          status: 500,
+          body: {
+            code: "SCHEMA_MIGRATION_REQUIRED",
+            message:
+              "Database migration is required: run scripts/add-pre-tour-category-id.sql to add pre_tour_plan.category_id.",
+          },
+        };
+      }
     }
   }
 

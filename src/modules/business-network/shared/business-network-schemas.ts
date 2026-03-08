@@ -47,10 +47,16 @@ export const createBusinessOrganizationSchema = baseSchema.extend({
   email: z.string().email().optional().nullable(),
   phone: z.string().trim().max(80).optional().nullable(),
   website: z.string().url().optional().nullable(),
-  country: z.string().trim().max(2).optional().nullable(),
+  country: z.string().trim().max(120).optional().nullable(),
   city: z.string().trim().max(120).optional().nullable(),
   address: z.string().trim().max(255).optional().nullable(),
-  baseCurrency: z.string().trim().toUpperCase().min(3).max(10).default("LKR"),
+  baseCurrency: z
+    .string()
+    .trim()
+    .toUpperCase()
+    .min(3, "Base Currency must be at least 3 characters (e.g. LKR, USD).")
+    .max(10)
+    .default("LKR"),
   timezone: z.string().trim().min(2).max(80).default("Asia/Colombo"),
   isVerified: z.boolean().default(false),
   metadata: z.record(z.string(), z.unknown()).optional().nullable(),
@@ -89,7 +95,14 @@ export const createBusinessMarketProfileSchema = baseSchema.extend({
     .enum(["TRAVEL_AGENT", "ONLINE_AGENT", "CORPORATE", "WHOLESALER"])
     .default("TRAVEL_AGENT"),
   licenseNo: z.string().trim().max(80).optional().nullable(),
-  preferredCurrency: z.string().trim().toUpperCase().min(3).max(10).optional().nullable(),
+  preferredCurrency: z
+    .string()
+    .trim()
+    .toUpperCase()
+    .min(3, "Preferred Currency must be at least 3 characters (e.g. LKR, USD).")
+    .max(10)
+    .optional()
+    .nullable(),
   creditEnabled: z.boolean().default(false),
   creditLimit: z.coerce.number().min(0).max(999999999).optional().nullable(),
   paymentTermDays: z.coerce.number().int().min(0).max(365).optional().nullable(),

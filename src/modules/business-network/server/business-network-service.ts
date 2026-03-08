@@ -2,6 +2,12 @@ import { and, desc, eq, ilike, or } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
 import * as schema from "@/db/schema";
+import {
+  getOrSetMasterDataCache,
+  invalidateMasterDataCacheByPrefixes,
+  masterDataCachePrefix,
+  masterDataListCacheKey,
+} from "@/lib/cache/master-data-cache";
 import { AccessControlError, resolveAccess } from "@/lib/security/access-control";
 import {
   businessNetworkListQuerySchema,
@@ -177,8 +183,9 @@ export async function listBusinessNetworkRecords(
   const { companyId } = await getAccess(headers);
   const q = parsed.data.q ? `%${parsed.data.q}%` : null;
   const limit = parsed.data.limit;
-
-  switch (resource) {
+  const cacheKey = masterDataListCacheKey("business-network", companyId, resource, parsed.data);
+  return getOrSetMasterDataCache(cacheKey, async () => {
+    switch (resource) {
     case "organizations":
       return db
         .select()
@@ -283,9 +290,14 @@ export async function listBusinessNetworkRecords(
         )
         .orderBy(desc(schema.businessOperatorMarketContract.createdAt))
         .limit(limit);
-    default:
-      throw new BusinessNetworkError(404, "RESOURCE_NOT_FOUND", "Business network resource not found.");
-  }
+      default:
+        throw new BusinessNetworkError(
+          404,
+          "RESOURCE_NOT_FOUND",
+          "Business network resource not found."
+        );
+    }
+  });
 }
 
 export async function createBusinessNetworkRecord(
@@ -295,8 +307,8 @@ export async function createBusinessNetworkRecord(
 ) {
   const resource = parseResource(resourceInput);
   const { companyId } = await ensureWritable(headers);
-
-  switch (resource) {
+  try {
+    switch (resource) {
     case "organizations": {
       const parsed = createBusinessOrganizationSchema.safeParse(payload);
       if (!parsed.success) {
@@ -389,8 +401,17 @@ export async function createBusinessNetworkRecord(
         .returning();
       return created;
     }
-    default:
-      throw new BusinessNetworkError(404, "RESOURCE_NOT_FOUND", "Business network resource not found.");
+      default:
+        throw new BusinessNetworkError(
+          404,
+          "RESOURCE_NOT_FOUND",
+          "Business network resource not found."
+        );
+    }
+  } finally {
+    await invalidateMasterDataCacheByPrefixes([
+      masterDataCachePrefix("business-network", companyId),
+    ]);
   }
 }
 
@@ -402,8 +423,8 @@ export async function updateBusinessNetworkRecord(
 ) {
   const resource = parseResource(resourceInput);
   const { companyId } = await ensureWritable(headers);
-
-  switch (resource) {
+  try {
+    switch (resource) {
     case "organizations": {
       const parsed = updateBusinessOrganizationSchema.safeParse(payload);
       if (!parsed.success) {
@@ -604,8 +625,17 @@ export async function updateBusinessNetworkRecord(
       if (!updated) throw new BusinessNetworkError(404, "RECORD_NOT_FOUND", "Contract not found.");
       return updated;
     }
-    default:
-      throw new BusinessNetworkError(404, "RESOURCE_NOT_FOUND", "Business network resource not found.");
+      default:
+        throw new BusinessNetworkError(
+          404,
+          "RESOURCE_NOT_FOUND",
+          "Business network resource not found."
+        );
+    }
+  } finally {
+    await invalidateMasterDataCacheByPrefixes([
+      masterDataCachePrefix("business-network", companyId),
+    ]);
   }
 }
 
@@ -616,8 +646,8 @@ export async function deleteBusinessNetworkRecord(
 ) {
   const resource = parseResource(resourceInput);
   const { companyId } = await ensureWritable(headers);
-
-  switch (resource) {
+  try {
+    switch (resource) {
     case "organizations": {
       const [deleted] = await db
         .delete(schema.businessOrganization)
@@ -683,8 +713,17 @@ export async function deleteBusinessNetworkRecord(
       if (!deleted) throw new BusinessNetworkError(404, "RECORD_NOT_FOUND", "Contract not found.");
       return;
     }
-    default:
-      throw new BusinessNetworkError(404, "RESOURCE_NOT_FOUND", "Business network resource not found.");
+      default:
+        throw new BusinessNetworkError(
+          404,
+          "RESOURCE_NOT_FOUND",
+          "Business network resource not found."
+        );
+    }
+  } finally {
+    await invalidateMasterDataCacheByPrefixes([
+      masterDataCachePrefix("business-network", companyId),
+    ]);
   }
 }
 
