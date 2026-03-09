@@ -16,9 +16,9 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   PRE_TOUR_DAY_FORM_GROUPS,
   PRE_TOUR_FORM_GROUPS,
-} from "@/modules/pre-tour/ui/views/pre-tour-management/constants";
-import type { Field, PreTourResourceKey, Row } from "@/modules/pre-tour/ui/views/pre-tour-management/types";
-import { formatDate, toNightCount } from "@/modules/pre-tour/ui/views/pre-tour-management/utils";
+} from "@/modules/pre-tour/shared/pre-tour-management-constants";
+import type { Field, PreTourResourceKey, Row } from "@/modules/pre-tour/shared/pre-tour-management-types";
+import { formatDate, toNightCount } from "@/modules/pre-tour/lib/pre-tour-management-utils";
 
 type DayTransportForm = {
   enabled: boolean;

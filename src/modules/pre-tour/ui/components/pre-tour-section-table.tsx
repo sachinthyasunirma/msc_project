@@ -16,9 +16,9 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
-import { COLUMNS, META } from "./constants";
-import type { PreTourResourceKey, Row } from "./types";
-import { formatCell } from "./utils";
+import { COLUMNS, META } from "@/modules/pre-tour/shared/pre-tour-management-constants";
+import type { PreTourResourceKey, Row } from "@/modules/pre-tour/shared/pre-tour-management-types";
+import { formatCell } from "@/modules/pre-tour/lib/pre-tour-management-utils";
 
 type SectionTableProps = {
   resource: PreTourResourceKey;

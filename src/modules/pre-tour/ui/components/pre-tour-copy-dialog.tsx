@@ -12,7 +12,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { toNightCount } from "@/modules/pre-tour/ui/views/pre-tour-management/utils";
+import { toNightCount } from "@/modules/pre-tour/lib/pre-tour-management-utils";
 
 type CopyForm = {
   planCode: string;

@@ -1,8 +1,9 @@
 "use client";
 
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Switch } from "@/components/ui/switch";
 import { PreTourRouteMap } from "@/modules/pre-tour/ui/components/pre-tour-route-map";
-import { formatDate } from "@/modules/pre-tour/ui/views/pre-tour-management/utils";
+import { formatDate } from "@/modules/pre-tour/lib/pre-tour-management-utils";
 
 type PreTourRouteMapDialogProps = {
   open: boolean;
@@ -49,27 +50,28 @@ export function PreTourRouteMapDialog({
           <p className="text-xs text-muted-foreground">
             Locations: <span className="font-medium text-foreground">{routePathLabel || "-"}</span>
           </p>
-          <div className="flex flex-wrap items-center gap-4 text-xs">
-            <label className="inline-flex items-center gap-2 text-muted-foreground">
-              <input
-                type="checkbox"
-                checked={useRoadRoute}
-                onChange={(event) => onUseRoadRouteChange(event.target.checked)}
-              />
-              Use real road route
-            </label>
-            <span className="text-muted-foreground">
+          <div className="grid gap-2 rounded-md border bg-muted/20 p-3 text-xs sm:grid-cols-[1fr_auto_auto] sm:items-center">
+            <div className="flex items-center justify-between gap-3 sm:justify-start">
+              <div>
+                <p className="font-medium text-foreground">Road Routing</p>
+                <p className="text-[11px] text-muted-foreground">
+                  Toggle real-road routing or direct straight-line path.
+                </p>
+              </div>
+              <Switch checked={useRoadRoute} onCheckedChange={onUseRoadRouteChange} />
+            </div>
+            <div className="text-muted-foreground">
               Distance:{" "}
               <span className="font-medium text-foreground">
                 {routeMeta.distanceKm !== null ? `${routeMeta.distanceKm.toFixed(2)} km` : "-"}
               </span>
-            </span>
-            <span className="text-muted-foreground">
+            </div>
+            <div className="text-muted-foreground">
               Duration:{" "}
               <span className="font-medium text-foreground">
                 {routeMeta.durationMin !== null ? `${routeMeta.durationMin.toFixed(1)} min` : "-"}
               </span>
-            </span>
+            </div>
           </div>
           {routeMapLocations.length > 0 ? (
             <PreTourRouteMap
@@ -87,4 +89,3 @@ export function PreTourRouteMapDialog({
     </Dialog>
   );
 }
-

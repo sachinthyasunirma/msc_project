@@ -1,13 +1,14 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Building2, CalendarDays, CopyPlus, Globe2, Settings2, Trash2, Users, Wallet } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { PreTourRouteMap } from "@/modules/pre-tour/ui/components/pre-tour-route-map";
-import type { DetailSheetState, Row } from "@/modules/pre-tour/ui/views/pre-tour-management/types";
-import { formatCell, formatDate } from "@/modules/pre-tour/ui/views/pre-tour-management/utils";
+import type { DetailSheetState, Row } from "@/modules/pre-tour/shared/pre-tour-management-types";
+import { formatCell, formatDate } from "@/modules/pre-tour/lib/pre-tour-management-utils";
 
 type PreTourDetailSheetProps = {
   detailSheet: DetailSheetState;
@@ -17,13 +18,9 @@ type PreTourDetailSheetProps = {
   canViewRouteMap: boolean;
   lookups: Record<string, string>;
   selectedPlan: Row | null;
-  drawerShowMap: boolean;
-  setDrawerShowMap: (value: boolean) => void;
   detailPreTourRouteLoading: boolean;
   detailRouteLocationSequenceIds: string[];
   detailRoutePathLabel: string;
-  drawerRouteMeta: { distanceKm: number | null; durationMin: number | null };
-  setDrawerRouteMeta: (meta: { distanceKm: number | null; durationMin: number | null }) => void;
   detailRouteMapLocations: Array<{ id: string; name: string; coordinates: [number, number] }>;
   onCreateVersion: (row: Row) => void;
   onCopy: (row: Row) => void;
@@ -43,13 +40,9 @@ export function PreTourDetailSheet({
   canViewRouteMap,
   lookups,
   selectedPlan,
-  drawerShowMap,
-  setDrawerShowMap,
   detailPreTourRouteLoading,
   detailRouteLocationSequenceIds,
   detailRoutePathLabel,
-  drawerRouteMeta,
-  setDrawerRouteMeta,
   detailRouteMapLocations,
   onCreateVersion,
   onCopy,
@@ -60,6 +53,22 @@ export function PreTourDetailSheet({
   onEditItem,
   onDeleteItem,
 }: PreTourDetailSheetProps) {
+  const [drawerShowMap, setDrawerShowMap] = useState(false);
+  const [drawerRouteMeta, setDrawerRouteMeta] = useState<{
+    distanceKm: number | null;
+    durationMin: number | null;
+  }>({
+    distanceKm: null,
+    durationMin: null,
+  });
+
+  useEffect(() => {
+    if (!detailSheet.open || detailRouteMapLocations.length === 0) {
+      setDrawerShowMap(false);
+      setDrawerRouteMeta({ distanceKm: null, durationMin: null });
+    }
+  }, [detailRouteMapLocations.length, detailSheet.open]);
+
   return (
     <Sheet open={detailSheet.open} onOpenChange={setDetailSheetOpen}>
       <SheetContent side="right" className="w-[96vw] sm:max-w-2xl lg:max-w-3xl">
@@ -392,4 +401,3 @@ export function PreTourDetailSheet({
     </Sheet>
   );
 }
-

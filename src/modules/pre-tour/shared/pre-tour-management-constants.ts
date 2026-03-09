@@ -1,4 +1,4 @@
-import type { PreTourResourceKey } from "./types";
+import type { PreTourResourceKey } from "@/modules/pre-tour/shared/pre-tour-management-types";
 
 export const META: Record<PreTourResourceKey, { title: string; description: string }> = {
   "pre-tours": {

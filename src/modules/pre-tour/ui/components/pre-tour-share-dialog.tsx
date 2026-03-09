@@ -11,7 +11,7 @@ import {
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import type { Row } from "@/modules/pre-tour/ui/views/pre-tour-management/types";
+import type { Row } from "@/modules/pre-tour/shared/pre-tour-management-types";
 
 type PreTourShareDialogProps = {
   sharingItem: Row | null;

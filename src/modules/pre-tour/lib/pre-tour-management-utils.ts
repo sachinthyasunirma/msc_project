@@ -1,5 +1,5 @@
-import { COLUMNS } from "./constants";
-import type { Field, PreTourResourceKey, Row } from "./types";
+import { COLUMNS } from "@/modules/pre-tour/shared/pre-tour-management-constants";
+import type { Field, PreTourResourceKey, Row } from "@/modules/pre-tour/shared/pre-tour-management-types";
 
 export function toLocalDateTime(value: unknown) {
   if (!value || typeof value !== "string") return "";

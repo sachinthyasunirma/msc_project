@@ -5,8 +5,8 @@ import { CopyPlus, GripVertical, PanelLeftOpen, Plus, Settings2, Trash2 } from "
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader } from "@/components/ui/card";
-import type { Row } from "@/modules/pre-tour/ui/views/pre-tour-management/types";
-import { formatDate, itemTypeAccentClass, matchesQuery } from "@/modules/pre-tour/ui/views/pre-tour-management/utils";
+import type { Row } from "@/modules/pre-tour/shared/pre-tour-management-types";
+import { formatDate, itemTypeAccentClass, matchesQuery } from "@/modules/pre-tour/lib/pre-tour-management-utils";
 
 type ManagedDayEditorProps = {
   selectedDay: Row | null;

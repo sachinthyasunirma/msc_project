@@ -21,7 +21,9 @@ export async function listPreTourRecords(
 ) {
   const search = new URLSearchParams();
   if (params?.q) search.set("q", params.q);
-  if (params?.limit) search.set("limit", String(params.limit));
+  if (params?.limit) {
+    search.set("limit", String(Math.min(Math.max(params.limit, 1), 500)));
+  }
   if (params?.planId) search.set("planId", params.planId);
   if (params?.dayId) search.set("dayId", params.dayId);
   if (params?.itemId) search.set("itemId", params.itemId);
