@@ -22,6 +22,7 @@ import {
   SidebarMenuItem,
 } from "@/components/ui/sidebar";
 import { NavUser } from "@/modules/dashboard/ui/components/nav-user";
+import { useDashboardAccessState } from "@/modules/dashboard/ui/components/dashboard-shell-provider";
 import { DashboardSidebarSecondary } from "@/modules/dashboard/ui/components/dashboard-sidebar-secondary";
 import { DashboardSidebarMain } from "./dashboard-sidebar-main";
 
@@ -135,27 +136,9 @@ const data = {
 export function DashboardSidebar({
   ...props
 }: React.ComponentProps<typeof Sidebar>) {
-  const [privileges, setPrivileges] = React.useState<string[] | null>(null);
+  const { privileges } = useDashboardAccessState();
 
-  React.useEffect(() => {
-    let active = true;
-    (async () => {
-      try {
-        const response = await fetch("/api/companies/access-control", { cache: "no-store" });
-        if (!response.ok) return;
-        const body = (await response.json()) as { privileges?: string[] };
-        if (!active) return;
-        setPrivileges(Array.isArray(body.privileges) ? body.privileges : []);
-      } catch {
-        if (active) setPrivileges(null);
-      }
-    })();
-    return () => {
-      active = false;
-    };
-  }, []);
-
-  const has = (code: string) => privileges?.includes(code) ?? false;
+  const has = (code: string) => privileges.includes(code);
 
   const navMain = data.navMain
     .filter((item) => {

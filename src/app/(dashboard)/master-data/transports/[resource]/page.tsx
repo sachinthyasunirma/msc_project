@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import { loadTransportManagementInitialData } from "@/modules/transport/server/transport-management-loader";
 import {
   TransportManagementView,
   type TransportResourceKey,
@@ -23,10 +24,12 @@ const TransportResourcePage = async ({
   if (!allowedResources.includes(resolved.resource as TransportResourceKey)) {
     notFound();
   }
+  const resource = resolved.resource as TransportResourceKey;
+  const initialData = await loadTransportManagementInitialData(resource);
 
   return (
     <div className="p-4 md:p-6">
-      <TransportManagementView initialResource={resolved.resource as TransportResourceKey} />
+      <TransportManagementView initialResource={resource} initialData={initialData} />
     </div>
   );
 };

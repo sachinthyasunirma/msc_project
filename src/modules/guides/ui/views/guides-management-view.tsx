@@ -1,31 +1,25 @@
 "use client";
 
-import { authClient } from "@/lib/auth-client";
+import { useDashboardAccessState } from "@/modules/dashboard/ui/components/dashboard-shell-provider";
+import type { GuidesManagementInitialData } from "@/modules/guides/shared/guides-management-types";
 import { GuidesManagementSection, type GuideResourceKey } from "@/modules/guides/ui/components/guides-management-section";
 
 export function GuidesManagementView({
   initialResource = "guides",
   managedGuideId = "",
+  initialData = null,
 }: {
   initialResource?: GuideResourceKey;
   managedGuideId?: string;
+  initialData?: GuidesManagementInitialData | null;
 }) {
-  const { data: session } = authClient.useSession();
-  const accessUser = session?.user as
-    | { readOnly?: boolean; role?: string | null; canWriteMasterData?: boolean }
-    | undefined;
-  const canWrite =
-    Boolean(accessUser) &&
-    !Boolean(accessUser?.readOnly) &&
-    (accessUser?.role === "ADMIN" ||
-      accessUser?.role === "MANAGER" ||
-      Boolean(accessUser?.canWriteMasterData));
-  const isReadOnly = !canWrite;
+  const { isReadOnly } = useDashboardAccessState();
 
   return (
     <GuidesManagementSection
       initialResource={initialResource}
       managedGuideId={managedGuideId}
+      initialData={initialData}
       isReadOnly={isReadOnly}
     />
   );

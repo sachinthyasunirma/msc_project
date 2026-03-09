@@ -20,6 +20,7 @@ import {
   toLocalDateTime,
   toNightCount,
 } from "@/modules/pre-tour/lib/pre-tour-management-utils";
+import type { PreTourMastersData } from "@/modules/pre-tour/shared/pre-tour-master-types";
 import type { DetailSheetState, PreTourResourceKey, Row } from "@/modules/pre-tour/shared/pre-tour-management-types";
 import { PreTourCopyDialogController } from "@/modules/pre-tour/ui/components/pre-tour-copy-dialog-controller";
 import { PreTourDetailSheet } from "@/modules/pre-tour/ui/components/pre-tour-detail-sheet";
@@ -33,11 +34,13 @@ import { EMPTY_DAY_TRANSPORT_FORM, getPreTourFields } from "@/modules/pre-tour/u
 type PreTourPlansViewProps = {
   initialResource?: PreTourResourceKey;
   showBinOnly?: boolean;
+  initialMasters?: PreTourMastersData | null;
 };
 
 export function PreTourPlansView({
   initialResource = "pre-tours",
   showBinOnly = false,
+  initialMasters = null,
 }: PreTourPlansViewProps) {
   const { isReadOnly, isAdmin, canViewRouteMap, canViewCosting } = usePreTourAccess();
   const {
@@ -47,7 +50,7 @@ export function PreTourPlansView({
     operatorMarketContracts,
     tourCategories,
     companyBaseCurrencyCode,
-  } = usePreTourMasters();
+  } = usePreTourMasters({ initialData: initialMasters });
 
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(true);
@@ -99,7 +102,6 @@ export function PreTourPlansView({
   const { clonePlanChildren, createVersionFromPlan } = usePreTourPlanOperations({
     canViewCosting,
     companyBaseCurrencyCode,
-    plans,
     onSuccess: loadData,
   });
 

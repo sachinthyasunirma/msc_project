@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import { loadCurrencyManagementInitialData } from "@/modules/currency/server/currency-management-loader";
 import {
   CurrencyManagementView,
   type CurrencyResourceKey,
@@ -20,10 +21,12 @@ const CurrenciesResourcePage = async ({ params }: PageProps) => {
   if (!allowedResources.includes(resolved.resource as CurrencyResourceKey)) {
     notFound();
   }
+  const resource = resolved.resource as CurrencyResourceKey;
+  const initialData = await loadCurrencyManagementInitialData(resource);
 
   return (
     <div className="p-4 md:p-6">
-      <CurrencyManagementView initialResource={resolved.resource as CurrencyResourceKey} />
+      <CurrencyManagementView initialResource={resource} initialData={initialData} />
     </div>
   );
 };

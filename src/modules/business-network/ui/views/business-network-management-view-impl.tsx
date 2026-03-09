@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Edit3, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { useConfirm } from "@/components/app-confirm-provider";
 import { notify } from "@/lib/notify";
@@ -37,13 +37,14 @@ import {
 } from "@/components/ui/table";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
-import { authClient } from "@/lib/auth-client";
+import { useDashboardAccessState } from "@/modules/dashboard/ui/components/dashboard-shell-provider";
 import {
   createBusinessNetworkRecord,
   deleteBusinessNetworkRecord,
   listBusinessNetworkRecords,
   updateBusinessNetworkRecord,
 } from "@/modules/business-network/lib/business-network-api";
+import type { BusinessNetworkManagementInitialData } from "@/modules/business-network/shared/business-network-management-types";
 import { listCurrencyRecords } from "@/modules/currency/lib/currency-api";
 
 export type BusinessNetworkResourceKey =
@@ -192,30 +193,32 @@ export function BusinessNetworkManagementView() {
 
 export function BusinessNetworkManagementViewContent({
   initialResource = "organizations",
+  initialData = null,
 }: {
   initialResource?: BusinessNetworkResourceKey;
+  initialData?: BusinessNetworkManagementInitialData | null;
 }) {
   const confirm = useConfirm();
-  const { data: session } = authClient.useSession();
-  const accessUser = session?.user as
-    | { readOnly?: boolean; role?: string | null; canWriteMasterData?: boolean }
-    | undefined;
-  const canWrite =
-    Boolean(accessUser) &&
-    !Boolean(accessUser?.readOnly) &&
-    (accessUser?.role === "ADMIN" ||
-      accessUser?.role === "MANAGER" ||
-      Boolean(accessUser?.canWriteMasterData));
-  const isReadOnly = !canWrite;
+  const { isReadOnly } = useDashboardAccessState();
+  const skipInitialLookupsLoadRef = useRef(Boolean(initialData));
+  const skipInitialRecordsLoadRef = useRef(
+    Boolean(initialData && initialData.resource === initialResource)
+  );
 
   const [resource, setResource] = useState<BusinessNetworkResourceKey>(initialResource);
   const [query, setQuery] = useState("");
-  const [records, setRecords] = useState<Array<Record<string, unknown>>>([]);
-  const [loading, setLoading] = useState(true);
+  const [records, setRecords] = useState<Array<Record<string, unknown>>>(
+    initialData?.records ?? []
+  );
+  const [loading, setLoading] = useState(!initialData);
   const [saving, setSaving] = useState(false);
-  const [organizations, setOrganizations] = useState<Array<Record<string, unknown>>>([]);
-  const [users, setUsers] = useState<Array<Record<string, unknown>>>([]);
-  const [currencies, setCurrencies] = useState<Array<Record<string, unknown>>>([]);
+  const [organizations, setOrganizations] = useState<Array<Record<string, unknown>>>(
+    initialData?.organizations ?? []
+  );
+  const [users, setUsers] = useState<Array<Record<string, unknown>>>(initialData?.users ?? []);
+  const [currencies, setCurrencies] = useState<Array<Record<string, unknown>>>(
+    initialData?.currencies ?? []
+  );
   const [dialog, setDialog] = useState<{
     open: boolean;
     mode: "create" | "edit";
@@ -591,12 +594,24 @@ export function BusinessNetworkManagementViewContent({
   }, [records, currentPage, pageSize]);
 
   useEffect(() => {
+    if (skipInitialLookupsLoadRef.current) {
+      skipInitialLookupsLoadRef.current = false;
+      return;
+    }
     void loadLookups();
   }, [loadLookups]);
 
   useEffect(() => {
+    if (
+      skipInitialRecordsLoadRef.current &&
+      resource === initialResource &&
+      query.length === 0
+    ) {
+      skipInitialRecordsLoadRef.current = false;
+      return;
+    }
     void load();
-  }, [load]);
+  }, [initialResource, load, query.length, resource]);
 
   useEffect(() => {
     setCurrentPage(1);

@@ -3,7 +3,6 @@ import { AppConfirmProvider } from "@/components/app-confirm-provider";
 import { ClientLogBootstrap } from "@/components/logging/client-log-bootstrap";
 import { Geist, Geist_Mono } from "next/font/google";
 import { AppToaster } from "@/components/app-toaster";
-import "leaflet/dist/leaflet.css";
 import "./globals.css";
 
 const geistSans = Geist({

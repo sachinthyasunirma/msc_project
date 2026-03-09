@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import { loadBusinessNetworkManagementInitialData } from "@/modules/business-network/server/business-network-management-loader";
 import {
   BusinessNetworkManagementViewContent,
   type BusinessNetworkResourceKey,
@@ -21,12 +22,12 @@ const BusinessNetworkResourcePage = async ({ params }: PageProps) => {
   if (!allowedResources.includes(resolved.resource as (typeof allowedResources)[number])) {
     notFound();
   }
+  const resource = resolved.resource as BusinessNetworkResourceKey;
+  const initialData = await loadBusinessNetworkManagementInitialData(resource);
 
   return (
     <div className="p-4 md:p-6">
-      <BusinessNetworkManagementViewContent
-        initialResource={resolved.resource as BusinessNetworkResourceKey}
-      />
+      <BusinessNetworkManagementViewContent initialResource={resource} initialData={initialData} />
     </div>
   );
 };

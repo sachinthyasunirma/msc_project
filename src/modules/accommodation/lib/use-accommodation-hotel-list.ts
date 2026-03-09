@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useConfirm } from "@/components/app-confirm-provider";
 import { notify } from "@/lib/notify";
 import {
@@ -18,31 +18,40 @@ import { useAccommodationFormDialog } from "@/modules/accommodation/lib/use-acco
 import { createHotelSchema } from "@/modules/accommodation/shared/accommodation-schemas";
 
 type HotelFilters = { isActive: string; city: string; country: string };
+const DEFAULT_HOTEL_FILTERS: HotelFilters = { isActive: "all", city: "", country: "" };
+
+export type AccommodationHotelListData = {
+  items: Hotel[];
+  nextCursor: string | null;
+  hasNext: boolean;
+  limit: number;
+};
 
 type UseAccommodationHotelListOptions = {
   isReadOnly: boolean;
+  initialData?: AccommodationHotelListData | null;
 };
 
 export function useAccommodationHotelList({
   isReadOnly,
+  initialData = null,
 }: UseAccommodationHotelListOptions) {
   const confirm = useConfirm();
-  const [loadingHotels, setLoadingHotels] = useState(true);
+  const skipInitialLoadRef = useRef(Boolean(initialData));
+  const [loadingHotels, setLoadingHotels] = useState(!initialData);
   const [saving, setSaving] = useState(false);
   const [batchOpen, setBatchOpen] = useState(false);
   const [hotelSearch, setHotelSearch] = useState("");
   const [debouncedHotelSearch, setDebouncedHotelSearch] = useState("");
-  const [hotelFilters, setHotelFilters] = useState<HotelFilters>({
-    isActive: "all",
-    city: "",
-    country: "",
-  });
-  const [hotels, setHotels] = useState<Hotel[]>([]);
-  const [hasNext, setHasNext] = useState(false);
-  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [hotelFilters, setHotelFilters] = useState<HotelFilters>(DEFAULT_HOTEL_FILTERS);
+  const [hotels, setHotels] = useState<Hotel[]>(initialData?.items ?? []);
+  const [hasNext, setHasNext] = useState(initialData?.hasNext ?? false);
+  const [nextCursor, setNextCursor] = useState<string | null>(initialData?.nextCursor ?? null);
   const [cursorHistory, setCursorHistory] = useState<Array<string | null>>([null]);
   const [pageIndex, setPageIndex] = useState(0);
-  const [selectedHotelId, setSelectedHotelId] = useState<string | null>(null);
+  const [selectedHotelId, setSelectedHotelId] = useState<string | null>(
+    initialData?.items[0]?.id ?? null
+  );
 
   const hotelDialog = useAccommodationFormDialog<HotelFormState, Hotel>((row) =>
     getInitialHotelForm(row ?? null)
@@ -93,9 +102,21 @@ export function useAccommodationHotelList({
     setPageIndex(0);
   }, [debouncedHotelSearch, hotelFilters.city, hotelFilters.country, hotelFilters.isActive]);
 
+  const isDefaultQuery =
+    debouncedHotelSearch.length === 0 &&
+    hotelFilters.isActive === DEFAULT_HOTEL_FILTERS.isActive &&
+    hotelFilters.city === DEFAULT_HOTEL_FILTERS.city &&
+    hotelFilters.country === DEFAULT_HOTEL_FILTERS.country &&
+    pageIndex === 0 &&
+    cursorHistory[0] === null;
+
   useEffect(() => {
+    if (skipInitialLoadRef.current && isDefaultQuery) {
+      skipInitialLoadRef.current = false;
+      return;
+    }
     void loadHotels();
-  }, [loadHotels]);
+  }, [isDefaultQuery, loadHotels]);
 
   const withSave = useCallback(async (callback: () => Promise<void>) => {
     try {

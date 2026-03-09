@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useConfirm } from "@/components/app-confirm-provider";
 import { notify } from "@/lib/notify";
 import {
@@ -9,6 +9,7 @@ import {
   listCurrencyRecords,
   updateCurrencyRecord,
 } from "@/modules/currency/lib/currency-api";
+import type { CurrencyManagementInitialData } from "@/modules/currency/shared/currency-management-types";
 import {
   CURRENCY_META,
   type CurrencyField,
@@ -23,23 +24,33 @@ import {
 type UseCurrencyManagementOptions = {
   initialResource?: CurrencyResourceKey;
   managedCurrencyId?: string;
+  initialData?: CurrencyManagementInitialData | null;
   isReadOnly: boolean;
 };
 
 export function useCurrencyManagement({
   initialResource = "currencies",
   managedCurrencyId = "",
+  initialData = null,
   isReadOnly,
 }: UseCurrencyManagementOptions) {
   const confirm = useConfirm();
   const isCurrencyManageMode = Boolean(managedCurrencyId);
+  const skipInitialRecordsLoadRef = useRef(
+    Boolean(initialData && initialData.resource === initialResource)
+  );
+  const skipInitialLookupsLoadRef = useRef(Boolean(initialData));
   const [resource, setResource] = useState<CurrencyResourceKey>(initialResource);
   const [query, setQuery] = useState("");
-  const [records, setRecords] = useState<Array<Record<string, unknown>>>([]);
-  const [loading, setLoading] = useState(true);
+  const [records, setRecords] = useState<Array<Record<string, unknown>>>(initialData?.records ?? []);
+  const [loading, setLoading] = useState(!initialData);
   const [saving, setSaving] = useState(false);
-  const [currencies, setCurrencies] = useState<Array<Record<string, unknown>>>([]);
-  const [providers, setProviders] = useState<Array<Record<string, unknown>>>([]);
+  const [currencies, setCurrencies] = useState<Array<Record<string, unknown>>>(
+    initialData?.currencies ?? []
+  );
+  const [providers, setProviders] = useState<Array<Record<string, unknown>>>(
+    initialData?.providers ?? []
+  );
   const [dialog, setDialog] = useState<{
     open: boolean;
     mode: "create" | "edit";
@@ -211,12 +222,24 @@ export function useCurrencyManagement({
   }, [isCurrencyManageMode, managedCurrencyId, query, resource]);
 
   useEffect(() => {
+    if (skipInitialLookupsLoadRef.current) {
+      skipInitialLookupsLoadRef.current = false;
+      return;
+    }
     void loadLookups();
   }, [loadLookups]);
 
   useEffect(() => {
+    if (
+      skipInitialRecordsLoadRef.current &&
+      resource === initialResource &&
+      query.length === 0
+    ) {
+      skipInitialRecordsLoadRef.current = false;
+      return;
+    }
     void load();
-  }, [load]);
+  }, [initialResource, load, query.length, resource]);
 
   useEffect(() => {
     if (!visibleResources.includes(resource)) {

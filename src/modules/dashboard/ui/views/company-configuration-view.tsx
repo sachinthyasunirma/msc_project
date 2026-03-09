@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { KeyRound, RefreshCw, Settings2, ShieldCheck, Trash2, Users } from "lucide-react";
 import { useConfirm } from "@/components/app-confirm-provider";
 import { notify } from "@/lib/notify";
@@ -20,63 +20,16 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-
-type Role = "ADMIN" | "MANAGER" | "USER";
-type Plan = "STARTER" | "GROWTH" | "ENTERPRISE";
-type TransportRateBasis = "VEHICLE_CATEGORY" | "VEHICLE_TYPE";
-
-type CompanyUsersResponse = {
-  company: {
-    id: string;
-    code: string;
-    name: string;
-    email: string;
-    baseCurrencyCode: string;
-    transportRateBasis: TransportRateBasis;
-    helpEnabled: boolean;
-    joinSecretCode: string | null;
-    managerPrivilegeCode: string | null;
-    subscriptionPlan: Plan | null;
-    subscriptionStatus: "PENDING" | "ACTIVE" | "TRIAL" | "EXPIRED" | "CANCELED";
-  };
-  userCount: number;
-  userLimit: number;
-  currentUserId: string;
-  currentUserRole: Role;
-  currentUserReadOnly: boolean;
-  currentUserPrivileges: string[];
-  users: Array<{
-    id: string;
-    name: string;
-    email: string;
-    image: string | null;
-    role: Role;
-    readOnly: boolean;
-    canWriteMasterData: boolean;
-    canWritePreTour: boolean;
-    isActive: boolean;
-    createdAt: string;
-  }>;
-  customRoles: Array<{
-    id: string;
-    code: string;
-    name: string;
-    description: string | null;
-    isSystem: boolean;
-    isActive: boolean;
-  }>;
-  userRoleAssignments: Array<{ userId: string; roleId: string }>;
-  rolePrivileges: Array<{ roleId: string; privilegeCode: string }>;
-  availablePrivileges: Array<{
-    code: string;
-    name: string;
-    description: string;
-    minPlan: Plan;
-  }>;
-};
+import type {
+  CompanyConfigurationInitialData,
+  CompanyPlan,
+  CompanyRole,
+  CompanyUsersResponse,
+  TransportRateBasis,
+} from "@/modules/dashboard/shared/company-configuration-types";
 
 type UserDraft = {
-  role: Role;
+  role: CompanyRole;
   roleIds: string[];
   readOnly: boolean;
   canWriteMasterData: boolean;
@@ -104,9 +57,14 @@ function getGroupColorClass(group: string) {
   return "bg-slate-50 text-slate-700 border-slate-100";
 }
 
-export function CompanyConfigurationView() {
+export function CompanyConfigurationView({
+  initialData = null,
+}: {
+  initialData?: CompanyConfigurationInitialData | null;
+}) {
   const confirm = useConfirm();
-  const [loading, setLoading] = useState(true);
+  const skipInitialLoadRef = useRef(Boolean(initialData?.payload));
+  const [loading, setLoading] = useState(!initialData?.payload);
   const [query, setQuery] = useState("");
   const [savingCompany, setSavingCompany] = useState(false);
   const [savingUserId, setSavingUserId] = useState<string | null>(null);
@@ -115,13 +73,13 @@ export function CompanyConfigurationView() {
   const [creatingRole, setCreatingRole] = useState(false);
   const [deletingRole, setDeletingRole] = useState(false);
   const [activeTab, setActiveTab] = useState("overview");
-  const [payload, setPayload] = useState<CompanyUsersResponse | null>(null);
+  const [payload, setPayload] = useState<CompanyUsersResponse | null>(initialData?.payload ?? null);
 
   const [helpEnabled, setHelpEnabled] = useState(true);
   const [baseCurrencyCode, setBaseCurrencyCode] = useState("USD");
   const [transportRateBasis, setTransportRateBasis] = useState<TransportRateBasis>("VEHICLE_TYPE");
-  const [subscriptionPlan, setSubscriptionPlan] = useState<Plan>("STARTER");
-  const [currencyOptions, setCurrencyOptions] = useState<Array<{ code: string; name: string }>>([]);
+  const [subscriptionPlan, setSubscriptionPlan] = useState<CompanyPlan>("STARTER");
+  const [currencyOptions, setCurrencyOptions] = useState(initialData?.currencyOptions ?? []);
 
   const [drafts, setDrafts] = useState<Record<string, UserDraft>>({});
   const [selectedRoleId, setSelectedRoleId] = useState<string>("");
@@ -154,16 +112,8 @@ export function CompanyConfigurationView() {
 
   const selectedRole = payload?.customRoles.find((role) => role.id === selectedRoleId) ?? null;
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const response = await fetch("/api/companies/users", { cache: "no-store" });
-      const body = (await response.json()) as CompanyUsersResponse | { message?: string };
-      if (!response.ok) {
-        throw new Error(("message" in body && body.message) || "Failed to load configuration.");
-      }
-
-      const typed = body as CompanyUsersResponse;
+  const applyConfigurationPayload = useCallback(
+    (typed: CompanyUsersResponse, nextCurrencyOptions?: typeof currencyOptions) => {
       const assignments = new Map<string, string[]>();
       for (const row of typed.userRoleAssignments) {
         assignments.set(row.userId, [...(assignments.get(row.userId) ?? []), row.roleId]);
@@ -178,6 +128,9 @@ export function CompanyConfigurationView() {
       setBaseCurrencyCode(typed.company.baseCurrencyCode || "USD");
       setTransportRateBasis(typed.company.transportRateBasis || "VEHICLE_TYPE");
       setSubscriptionPlan(typed.company.subscriptionPlan || "STARTER");
+      if (nextCurrencyOptions) {
+        setCurrencyOptions(nextCurrencyOptions);
+      }
       setDrafts(
         Object.fromEntries(
           typed.users.map((entry) => [
@@ -198,7 +151,9 @@ export function CompanyConfigurationView() {
         typed.customRoles.find((role) => !role.isSystem)?.id ??
         typed.customRoles[0]?.id ??
         "";
-      setSelectedRoleId((current) => (typed.customRoles.some((role) => role.id === current) ? current : nextSelectedRoleId));
+      setSelectedRoleId((current) =>
+        typed.customRoles.some((role) => role.id === current) ? current : nextSelectedRoleId
+      );
       setSelectedPrivilegeCodes(
         rolePrivileges.get(
           typed.customRoles.some((role) => role.id === selectedRoleId)
@@ -206,38 +161,48 @@ export function CompanyConfigurationView() {
             : nextSelectedRoleId
         ) ?? []
       );
+    },
+    [selectedRoleId]
+  );
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [usersResponse, currencyResponse] = await Promise.all([
+        fetch("/api/companies/users", { cache: "no-store" }),
+        fetch("/api/currencies/currencies?limit=500", { cache: "no-store" }),
+      ]);
+
+      const usersBody = (await usersResponse.json()) as CompanyUsersResponse | { message?: string };
+      if (!usersResponse.ok) {
+        throw new Error(("message" in usersBody && usersBody.message) || "Failed to load configuration.");
+      }
+
+      const typed = usersBody as CompanyUsersResponse;
+      const nextCurrencyOptions = currencyResponse.ok
+        ? ((await currencyResponse.json()) as Array<{ code?: string; name?: string }>)
+            .map((row) => ({ code: String(row.code || ""), name: String(row.name || "") }))
+            .filter((row) => row.code)
+        : [];
+
+      applyConfigurationPayload(typed, nextCurrencyOptions);
     } catch (error) {
       notify.error(error instanceof Error ? error.message : "Failed to load configuration.");
     } finally {
       setLoading(false);
     }
-  }, [selectedRoleId]);
+  }, [applyConfigurationPayload]);
 
   useEffect(() => {
-    void load();
-  }, [load]);
-
-  useEffect(() => {
-    let active = true;
-    (async () => {
-      try {
-        const response = await fetch("/api/currencies/currencies?limit=500", { cache: "no-store" });
-        if (!response.ok) return;
-        const rows = (await response.json()) as Array<{ code?: string; name?: string }>;
-        if (!active) return;
-        setCurrencyOptions(
-          rows
-            .map((row) => ({ code: String(row.code || ""), name: String(row.name || "") }))
-            .filter((row) => row.code)
-        );
-      } catch {
-        if (active) setCurrencyOptions([]);
+    if (skipInitialLoadRef.current) {
+      skipInitialLoadRef.current = false;
+      if (initialData?.payload) {
+        applyConfigurationPayload(initialData.payload, initialData.currencyOptions);
       }
-    })();
-    return () => {
-      active = false;
-    };
-  }, []);
+      return;
+    }
+    void load();
+  }, [applyConfigurationPayload, initialData, load]);
 
   useEffect(() => {
     if (!selectedRoleId) return;

@@ -43,6 +43,15 @@ export async function createPreTourRecord(resource: string, payload: Record<stri
   return parseResponse<Record<string, unknown>>(response);
 }
 
+export async function createPreTourVersion(sourcePlanId: string) {
+  const response = await fetch("/api/pre-tours/clone-version", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ sourcePlanId }),
+  });
+  return parseResponse<Record<string, unknown>>(response);
+}
+
 export async function updatePreTourRecord(
   resource: string,
   id: string,

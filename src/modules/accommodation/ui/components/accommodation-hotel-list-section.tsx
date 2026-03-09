@@ -1,19 +1,32 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { memo } from "react";
 import { hotelImportConfig } from "@/components/batch-import/master-batch-import-config";
-import { MasterBatchImportDialog } from "@/components/batch-import/master-batch-import-dialog";
 import { createHotel } from "@/modules/accommodation/lib/accommodation-api";
-import { useAccommodationHotelList } from "@/modules/accommodation/lib/use-accommodation-hotel-list";
+import {
+  useAccommodationHotelList,
+  type AccommodationHotelListData,
+} from "@/modules/accommodation/lib/use-accommodation-hotel-list";
 import { AccommodationHotelListCard } from "@/modules/accommodation/ui/components/accommodation-hotel-list-card";
 import { AccommodationHotelDialog } from "@/modules/accommodation/ui/components/dialogs/accommodation-hotel-dialog";
 
+const MasterBatchImportDialog = dynamic(
+  () =>
+    import("@/components/batch-import/master-batch-import-dialog").then(
+      (module) => module.MasterBatchImportDialog
+    ),
+  { ssr: false }
+);
+
 type AccommodationHotelListSectionProps = {
   isReadOnly: boolean;
+  initialHotelList?: AccommodationHotelListData | null;
 };
 
 function AccommodationHotelListSectionComponent({
   isReadOnly,
+  initialHotelList = null,
 }: AccommodationHotelListSectionProps) {
   const {
     loadingHotels,
@@ -39,7 +52,7 @@ function AccommodationHotelListSectionComponent({
     hotelDialog,
     hotelExistingCodes,
     refreshHotelExistingCodes,
-  } = useAccommodationHotelList({ isReadOnly });
+  } = useAccommodationHotelList({ isReadOnly, initialData: initialHotelList });
 
   return (
     <>

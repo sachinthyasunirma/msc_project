@@ -1,6 +1,7 @@
 "use client";
 
-import { authClient } from "@/lib/auth-client";
+import type { CurrencyManagementInitialData } from "@/modules/currency/shared/currency-management-types";
+import { useDashboardAccessState } from "@/modules/dashboard/ui/components/dashboard-shell-provider";
 import type { CurrencyResourceKey } from "@/modules/currency/ui/components/currency-management/currency-management-config";
 import { CurrencyManagementSection } from "@/modules/currency/ui/components/currency-management/currency-management-section";
 
@@ -10,27 +11,15 @@ export function CurrencyManagementView({
 }: {
   initialResource?: CurrencyResourceKey;
   managedCurrencyId?: string;
+  initialData?: CurrencyManagementInitialData | null;
 }) {
-  const { data: session } = authClient.useSession();
-  const accessUser = session?.user as
-    | {
-        readOnly?: boolean;
-        role?: string | null;
-        canWriteMasterData?: boolean;
-      }
-    | undefined;
-  const canWrite =
-    Boolean(accessUser) &&
-    !Boolean(accessUser?.readOnly) &&
-    (accessUser?.role === "ADMIN" ||
-      accessUser?.role === "MANAGER" ||
-      Boolean(accessUser?.canWriteMasterData));
-  const isReadOnly = !canWrite;
+  const { isReadOnly } = useDashboardAccessState();
 
   return (
     <CurrencyManagementSection
       initialResource={initialResource}
       managedCurrencyId={managedCurrencyId}
+      initialData={initialData}
       isReadOnly={isReadOnly}
     />
   );

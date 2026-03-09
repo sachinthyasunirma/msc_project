@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Bell, Check, CheckCheck, Loader2, RefreshCw, Send, Trash2, Users } from "lucide-react";
 import { notify } from "@/lib/notify";
 import { useConfirm } from "@/components/app-confirm-provider";
@@ -20,45 +20,13 @@ import { Textarea } from "@/components/ui/textarea";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
 import { subscribeToNotificationRealtime } from "@/modules/notifications/lib/realtime-client";
-
-type ThreadItem = {
-  peerUserId: string;
-  peerName: string;
-  peerEmail: string;
-  peerHandle: string;
-  lastMessageId: string;
-  lastMessage: string;
-  lastMessageAt: string;
-  lastSenderUserId: string;
-  unreadCount: number;
-};
-
-type ConversationMessage = {
-  id: string;
-  senderUserId: string;
-  recipientUserId: string;
-  message: string;
-  isRead: boolean;
-  deliveredAt: string;
-  readAt: string | null;
-  createdAt: string;
-};
-
-type Recipient = {
-  id: string;
-  name: string;
-  email: string;
-  mentionHandle: string;
-  isActive: boolean;
-};
-
-type ConversationPeer = {
-  id: string;
-  name: string;
-  email: string;
-  mentionHandle: string;
-  isActive: boolean;
-};
+import type {
+  ConversationMessage,
+  ConversationPeer,
+  NotificationsViewInitialData,
+  Recipient,
+  ThreadItem,
+} from "@/modules/notifications/shared/notifications-view-types";
 
 function countWords(text: string) {
   const normalized = text.trim();
@@ -88,29 +56,40 @@ function formatDayLabel(value: string) {
   }).format(date);
 }
 
-export function NotificationsView() {
+export function NotificationsView({
+  initialData = null,
+}: {
+  initialData?: NotificationsViewInitialData | null;
+}) {
   const confirm = useConfirm();
   const THREAD_PAGE_SIZE_OPTIONS = [10, 20, 50] as const;
-  const [threadsLoading, setThreadsLoading] = useState(true);
+  const skipInitialRecipientsLoadRef = useRef(Boolean(initialData));
+  const skipInitialThreadsLoadRef = useRef(Boolean(initialData));
+  const skipInitialConversationLoadRef = useRef(Boolean(initialData?.selectedPeerId));
+  const [threadsLoading, setThreadsLoading] = useState(!initialData);
   const [conversationLoading, setConversationLoading] = useState(false);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [sending, setSending] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const [threadQuery, setThreadQuery] = useState("");
-  const [threads, setThreads] = useState<ThreadItem[]>([]);
-  const [threadsUnreadCount, setThreadsUnreadCount] = useState(0);
-  const [totalThreads, setTotalThreads] = useState(0);
+  const [threads, setThreads] = useState<ThreadItem[]>(initialData?.threads ?? []);
+  const [threadsUnreadCount, setThreadsUnreadCount] = useState(initialData?.threadsUnreadCount ?? 0);
+  const [totalThreads, setTotalThreads] = useState(initialData?.totalThreads ?? 0);
   const [threadPage, setThreadPage] = useState(1);
   const [threadPageSize, setThreadPageSize] = useState<number>(20);
-  const [selectedPeerId, setSelectedPeerId] = useState<string>("");
+  const [selectedPeerId, setSelectedPeerId] = useState<string>(initialData?.selectedPeerId ?? "");
   const [chatOpen, setChatOpen] = useState(false);
 
-  const [recipients, setRecipients] = useState<Recipient[]>([]);
-  const [conversationPeer, setConversationPeer] = useState<ConversationPeer | null>(null);
-  const [messages, setMessages] = useState<ConversationMessage[]>([]);
-  const [hasMoreOlder, setHasMoreOlder] = useState(false);
-  const [conversationUnreadFromPeer, setConversationUnreadFromPeer] = useState(0);
+  const [recipients, setRecipients] = useState<Recipient[]>(initialData?.recipients ?? []);
+  const [conversationPeer, setConversationPeer] = useState<ConversationPeer | null>(
+    initialData?.conversationPeer ?? null
+  );
+  const [messages, setMessages] = useState<ConversationMessage[]>(initialData?.messages ?? []);
+  const [hasMoreOlder, setHasMoreOlder] = useState(initialData?.hasMoreOlder ?? false);
+  const [conversationUnreadFromPeer, setConversationUnreadFromPeer] = useState(
+    initialData?.conversationUnreadFromPeer ?? 0
+  );
 
   const [message, setMessage] = useState("");
 
@@ -253,8 +232,12 @@ export function NotificationsView() {
   }, [loadRecipients, loadThreads]);
 
   useEffect(() => {
-    void refreshAll();
-  }, [refreshAll]);
+    if (skipInitialRecipientsLoadRef.current) {
+      skipInitialRecipientsLoadRef.current = false;
+      return;
+    }
+    void loadRecipients();
+  }, [loadRecipients]);
 
   useEffect(() => {
     if (!selectedPeerId) {
@@ -262,6 +245,10 @@ export function NotificationsView() {
       setMessages([]);
       setHasMoreOlder(false);
       setConversationUnreadFromPeer(0);
+      return;
+    }
+    if (skipInitialConversationLoadRef.current) {
+      skipInitialConversationLoadRef.current = false;
       return;
     }
     void loadConversation(selectedPeerId);
@@ -273,6 +260,10 @@ export function NotificationsView() {
 
   useEffect(() => {
     const timeout = window.setTimeout(() => {
+      if (skipInitialThreadsLoadRef.current) {
+        skipInitialThreadsLoadRef.current = false;
+        return;
+      }
       void loadThreads();
     }, 250);
     return () => window.clearTimeout(timeout);

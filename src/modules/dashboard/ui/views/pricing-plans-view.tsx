@@ -3,8 +3,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Check, CircleDollarSign, Headset, Rocket, TrendingUp } from "lucide-react";
-import { authClient } from "@/lib/auth-client";
-import { notify } from "@/lib/notify";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
@@ -27,25 +25,8 @@ import {
   PLAN_META,
   type SubscriptionDuration,
 } from "@/modules/dashboard/lib/billing-pricing";
+import { useDashboardShell } from "@/modules/dashboard/ui/components/dashboard-shell-provider";
 import { PRIVILEGE_DEFINITIONS } from "@/lib/security/privileges";
-
-type CompanyProfile = {
-  code: string;
-  name: string;
-  email: string;
-  joinSecretCode: string | null;
-  managerPrivilegeCode: string | null;
-  baseCurrencyCode: string;
-  transportRateBasis: "VEHICLE_CATEGORY" | "VEHICLE_TYPE";
-  helpEnabled: boolean;
-  country: string | null;
-  image: string | null;
-  subscriptionPlan: PlanCode | null;
-  subscriptionStatus: "PENDING" | "ACTIVE" | "TRIAL" | "EXPIRED" | "CANCELED";
-  subscriptionStartsAt: string | null;
-  subscriptionEndsAt: string | null;
-};
-
 
 const PLAN_WEIGHT: Record<PlanCode, number> = {
   STARTER: 1,
@@ -72,10 +53,8 @@ function getPrivilegeCategory(code: string) {
 
 export function PricingPlansView() {
   const router = useRouter();
-  authClient.useSession();
-  const [company, setCompany] = useState<CompanyProfile | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [selectedPlan, setSelectedPlan] = useState<PlanCode>("STARTER");
+  const { company } = useDashboardShell();
+  const [selectedPlan, setSelectedPlan] = useState<PlanCode>(company?.subscriptionPlan ?? "STARTER");
   const [activeTab, setActiveTab] = useState("plans");
   const [selectedDuration, setSelectedDuration] = useState<SubscriptionDuration>("YEARLY");
 
@@ -108,26 +87,10 @@ export function PricingPlansView() {
   const durationSuffix = getDurationSuffix(selectedDuration);
 
   useEffect(() => {
-    let active = true;
-    (async () => {
-      try {
-        const response = await fetch("/api/companies/me", { cache: "no-store" });
-        const body = (await response.json()) as { company?: CompanyProfile | null; message?: string };
-        if (!response.ok) throw new Error(body.message || "Failed to load company.");
-        if (!active) return;
-        const companyData = body.company ?? null;
-        setCompany(companyData);
-        if (companyData?.subscriptionPlan) setSelectedPlan(companyData.subscriptionPlan);
-      } catch (error) {
-        if (active) notify.error(error instanceof Error ? error.message : "Failed to load company.");
-      } finally {
-        if (active) setLoading(false);
-      }
-    })();
-    return () => {
-      active = false;
-    };
-  }, []);
+    if (company?.subscriptionPlan) {
+      setSelectedPlan(company.subscriptionPlan);
+    }
+  }, [company?.subscriptionPlan]);
 
   const goToCheckout = (plan: PlanCode) => {
     const search = new URLSearchParams({
@@ -271,7 +234,7 @@ export function PricingPlansView() {
                         event.stopPropagation();
                         goToCheckout(plan.code);
                       }}
-                      disabled={current || loading}
+                      disabled={current}
                     >
                       <Rocket className="mr-2 size-4" />
                       {current

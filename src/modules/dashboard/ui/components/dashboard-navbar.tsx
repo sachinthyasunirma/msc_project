@@ -1,11 +1,20 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { Button } from "@/components/ui/button";
 import { useSidebar } from "@/components/ui/sidebar";
 import { PanelLeftCloseIcon, PanelLeftIcon, SearchIcon } from "lucide-react";
-import { DashboardCommands } from "./dashboard-commands";
 import { useEffect, useState } from "react";
-import { NotificationBell } from "./notification-bell";
+
+const DashboardCommands = dynamic(
+  () => import("./dashboard-commands").then((module) => module.DashboardCommands),
+  { ssr: false }
+);
+
+const NotificationBell = dynamic(
+  () => import("./notification-bell").then((module) => module.NotificationBell),
+  { ssr: false }
+);
 
 export const DashboardNavbar = () => {
   const { state, toggleSidebar, isMobile } = useSidebar();

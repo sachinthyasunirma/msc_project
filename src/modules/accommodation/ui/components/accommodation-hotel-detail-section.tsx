@@ -2,6 +2,7 @@
 
 import { memo } from "react";
 import { useAccommodationHotelDetail } from "@/modules/accommodation/lib/use-accommodation-hotel-detail";
+import type { AccommodationHotelDetailData } from "@/modules/accommodation/shared/accommodation-detail-types";
 import { AccommodationHotelDetailCard } from "@/modules/accommodation/ui/components/accommodation-hotel-detail-card";
 import { AccommodationAvailabilityDialog } from "@/modules/accommodation/ui/components/dialogs/accommodation-availability-dialog";
 import { AccommodationImageDialog } from "@/modules/accommodation/ui/components/dialogs/accommodation-image-dialog";
@@ -14,14 +15,16 @@ type AccommodationHotelDetailSectionProps = {
   hotelId?: string;
   showHotelList: boolean;
   isReadOnly: boolean;
+  initialData?: AccommodationHotelDetailData | null;
 };
 
 function AccommodationHotelDetailSectionComponent({
   hotelId,
   showHotelList,
   isReadOnly,
+  initialData = null,
 }: AccommodationHotelDetailSectionProps) {
-  const detail = useAccommodationHotelDetail({ hotelId, isReadOnly });
+  const detail = useAccommodationHotelDetail({ hotelId, isReadOnly, initialData });
 
   return (
     <>

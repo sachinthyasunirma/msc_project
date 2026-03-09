@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useConfirm } from "@/components/app-confirm-provider";
 import { notify } from "@/lib/notify";
 import {
@@ -14,23 +14,28 @@ import { createSeasonSchema } from "@/modules/season/shared/season-schemas";
 
 type UseSeasonManagementOptions = {
   isReadOnly: boolean;
+  initialData?: SeasonListResponse | null;
 };
 
 type Mode = "create" | "edit";
 
 const PAGE_SIZE = 20;
 
-export function useSeasonManagement({ isReadOnly }: UseSeasonManagementOptions) {
+export function useSeasonManagement({
+  isReadOnly,
+  initialData = null,
+}: UseSeasonManagementOptions) {
   const confirm = useConfirm();
-  const [seasons, setSeasons] = useState<SeasonOption[]>([]);
-  const [loading, setLoading] = useState(true);
+  const skipInitialLoadRef = useRef(Boolean(initialData));
+  const [seasons, setSeasons] = useState<SeasonOption[]>(initialData?.items ?? []);
+  const [loading, setLoading] = useState(!initialData);
   const [saving, setSaving] = useState(false);
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [startDateFrom, setStartDateFrom] = useState("");
   const [startDateTo, setStartDateTo] = useState("");
-  const [hasNext, setHasNext] = useState(false);
-  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [hasNext, setHasNext] = useState(initialData?.hasNext ?? false);
+  const [nextCursor, setNextCursor] = useState<string | null>(initialData?.nextCursor ?? null);
   const [cursorHistory, setCursorHistory] = useState<Array<string | null>>([null]);
   const [pageIndex, setPageIndex] = useState(0);
   const [dialog, setDialog] = useState<{
@@ -78,8 +83,18 @@ export function useSeasonManagement({ isReadOnly }: UseSeasonManagementOptions) 
   }, [debouncedSearch, startDateFrom, startDateTo]);
 
   useEffect(() => {
+    const isDefaultQuery =
+      debouncedSearch.length === 0 &&
+      startDateFrom.length === 0 &&
+      startDateTo.length === 0 &&
+      pageIndex === 0 &&
+      cursorHistory[0] === null;
+    if (skipInitialLoadRef.current && isDefaultQuery) {
+      skipInitialLoadRef.current = false;
+      return;
+    }
     void load();
-  }, [load]);
+  }, [cursorHistory, debouncedSearch, load, pageIndex, startDateFrom, startDateTo]);
 
   const openDialog = useCallback(
     (mode: Mode, row: SeasonOption | null = null) => {

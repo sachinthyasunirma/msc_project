@@ -26,6 +26,7 @@ import {
   toNightCount,
   toNumericValue,
 } from "@/modules/pre-tour/lib/pre-tour-management-utils";
+import type { PreTourMastersData } from "@/modules/pre-tour/shared/pre-tour-master-types";
 import type { DetailSheetState, PreTourResourceKey, Row } from "@/modules/pre-tour/shared/pre-tour-management-types";
 import { ManagedDayEditor } from "@/modules/pre-tour/ui/components/managed-day-editor";
 import { PreTourCopyDialogController } from "@/modules/pre-tour/ui/components/pre-tour-copy-dialog-controller";
@@ -47,9 +48,13 @@ import {
 
 type PreTourPlanManageViewProps = {
   planId: string;
+  initialMasters?: PreTourMastersData | null;
 };
 
-export function PreTourPlanManageView({ planId }: PreTourPlanManageViewProps) {
+export function PreTourPlanManageView({
+  planId,
+  initialMasters = null,
+}: PreTourPlanManageViewProps) {
   const { isReadOnly, canViewRouteMap, canViewCosting } = usePreTourAccess();
   const {
     locations,
@@ -65,7 +70,7 @@ export function PreTourPlanManageView({ planId }: PreTourPlanManageViewProps) {
     hotels,
     tourCategoryRules,
     companyBaseCurrencyCode,
-  } = usePreTourMasters();
+  } = usePreTourMasters({ initialData: initialMasters });
 
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(true);
@@ -137,7 +142,6 @@ export function PreTourPlanManageView({ planId }: PreTourPlanManageViewProps) {
   const { clonePlanChildren, createVersionFromPlan } = usePreTourPlanOperations({
     canViewCosting,
     companyBaseCurrencyCode,
-    plans,
     onSuccess: loadData,
   });
 

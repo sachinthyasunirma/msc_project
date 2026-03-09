@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import { loadTaxManagementInitialData } from "@/modules/tax/server/tax-management-loader";
 import { TaxManagementView, type TaxResourceKey } from "@/modules/tax/ui/views/tax-management-view";
 
 const allowedResources: TaxResourceKey[] = [
@@ -22,10 +23,12 @@ const TaxesResourcePage = async ({ params }: PageProps) => {
   if (!allowedResources.includes(resolved.resource as TaxResourceKey)) {
     notFound();
   }
+  const resource = resolved.resource as TaxResourceKey;
+  const initialData = await loadTaxManagementInitialData(resource);
 
   return (
     <div className="p-4 md:p-6">
-      <TaxManagementView initialResource={resolved.resource as TaxResourceKey} />
+      <TaxManagementView initialResource={resource} initialData={initialData} />
     </div>
   );
 };

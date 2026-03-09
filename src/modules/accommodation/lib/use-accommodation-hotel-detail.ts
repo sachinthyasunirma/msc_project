@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useConfirm } from "@/components/app-confirm-provider";
 import { notify } from "@/lib/notify";
 import {
@@ -57,27 +57,49 @@ import {
 import { createSeason, deleteSeason, listSeasons, updateSeason } from "@/modules/season/lib/season-api";
 import type { SeasonOption } from "@/modules/season/lib/season-api";
 import { createSeasonSchema } from "@/modules/season/shared/season-schemas";
+import type { AccommodationHotelDetailData } from "@/modules/accommodation/shared/accommodation-detail-types";
 
 type UseAccommodationHotelDetailOptions = {
   hotelId?: string;
   isReadOnly: boolean;
+  initialData?: AccommodationHotelDetailData | null;
 };
 
 export function useAccommodationHotelDetail({
   hotelId,
   isReadOnly,
+  initialData = null,
 }: UseAccommodationHotelDetailOptions) {
   const confirm = useConfirm();
+  const skipInitialLoadRef = useRef(
+    Boolean(initialData && initialData.selectedHotel && hotelId)
+  );
   const [loadingDetails, setLoadingDetails] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [selectedHotel, setSelectedHotel] = useState<Hotel | null>(null);
-  const [roomTypes, setRoomTypes] = useState<RoomType[]>([]);
-  const [roomRateHeaders, setRoomRateHeaders] = useState<RoomRateHeader[]>([]);
-  const [selectedRoomRateHeaderId, setSelectedRoomRateHeaderId] = useState<string | null>(null);
-  const [roomRates, setRoomRates] = useState<RoomRate[]>([]);
-  const [availability, setAvailability] = useState<Availability[]>([]);
-  const [images, setImages] = useState<HotelImage[]>([]);
-  const [seasons, setSeasons] = useState<SeasonOption[]>([]);
+  const [selectedHotel, setSelectedHotel] = useState<Hotel | null>(
+    (initialData?.selectedHotel as Hotel | null) ?? null
+  );
+  const [roomTypes, setRoomTypes] = useState<RoomType[]>(
+    (initialData?.roomTypes as RoomType[] | undefined) ?? []
+  );
+  const [roomRateHeaders, setRoomRateHeaders] = useState<RoomRateHeader[]>(
+    (initialData?.roomRateHeaders as RoomRateHeader[] | undefined) ?? []
+  );
+  const [selectedRoomRateHeaderId, setSelectedRoomRateHeaderId] = useState<string | null>(
+    (initialData?.roomRateHeaders?.[0]?.id as string | undefined) ?? null
+  );
+  const [roomRates, setRoomRates] = useState<RoomRate[]>(
+    (initialData?.roomRates as RoomRate[] | undefined) ?? []
+  );
+  const [availability, setAvailability] = useState<Availability[]>(
+    (initialData?.availability as Availability[] | undefined) ?? []
+  );
+  const [images, setImages] = useState<HotelImage[]>(
+    (initialData?.images as HotelImage[] | undefined) ?? []
+  );
+  const [seasons, setSeasons] = useState<SeasonOption[]>(
+    (initialData?.seasons as SeasonOption[] | undefined) ?? []
+  );
   const [roomRateLineSearch, setRoomRateLineSearch] = useState("");
   const [roomRateLineStatusFilter, setRoomRateLineStatusFilter] = useState("all");
   const [roomRateLinePageSize, setRoomRateLinePageSize] = useState("10");
@@ -273,6 +295,10 @@ export function useAccommodationHotelDetail({
   }, [hotelId, loadAvailability, loadHotel, loadImages, loadRoomRateHeaders, loadRoomRates, loadRoomTypes, loadSeasons]);
 
   useEffect(() => {
+    if (skipInitialLoadRef.current) {
+      skipInitialLoadRef.current = false;
+      return;
+    }
     void loadDetails();
   }, [loadDetails]);
 

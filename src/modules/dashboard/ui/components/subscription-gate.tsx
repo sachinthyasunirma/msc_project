@@ -2,7 +2,7 @@
 
 import { useEffect } from "react";
 import { usePathname, useRouter } from "next/navigation";
-import { authClient } from "@/lib/auth-client";
+import { useDashboardShell } from "@/modules/dashboard/ui/components/dashboard-shell-provider";
 
 const ALLOWED_WHEN_SUBSCRIPTION_REQUIRED = [
   "/billing/plans",
@@ -13,33 +13,16 @@ const ALLOWED_WHEN_SUBSCRIPTION_REQUIRED = [
 export function SubscriptionGate() {
   const router = useRouter();
   const pathname = usePathname();
-  const { data: session } = authClient.useSession();
+  const { accessErrorCode, needsSetup, viewer } = useDashboardShell();
 
   useEffect(() => {
-    if (!session?.user) return;
-    let active = true;
-    (async () => {
-      try {
-        const response = await fetch("/api/companies/access-control", { cache: "no-store" });
-        if (!active) return;
-        if (response.ok) return;
-        const body = (await response.json()) as { code?: string };
-        if (body.code === "SUBSCRIPTION_REQUIRED") {
-          const allowed = ALLOWED_WHEN_SUBSCRIPTION_REQUIRED.some((path) =>
-            pathname.startsWith(path)
-          );
-          if (!allowed) {
-            router.replace("/billing/plans");
-          }
-        }
-      } catch {
-        // no-op
-      }
-    })();
-    return () => {
-      active = false;
-    };
-  }, [pathname, router, session?.user]);
+    if (!viewer || needsSetup || accessErrorCode !== "SUBSCRIPTION_REQUIRED") return;
+
+    const allowed = ALLOWED_WHEN_SUBSCRIPTION_REQUIRED.some((path) => pathname.startsWith(path));
+    if (!allowed) {
+      router.replace("/billing/plans");
+    }
+  }, [accessErrorCode, needsSetup, pathname, router, viewer]);
 
   return null;
 }

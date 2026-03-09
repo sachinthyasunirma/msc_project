@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { notify } from "@/lib/notify";
 import { listActivityRecords } from "@/modules/activity/lib/activity-api";
 import { listHotels } from "@/modules/accommodation/lib/accommodation-api";
@@ -8,27 +8,12 @@ import { listBusinessNetworkRecords } from "@/modules/business-network/lib/busin
 import { listCurrencyRecords } from "@/modules/currency/lib/currency-api";
 import { listGuideRecords } from "@/modules/guides/lib/guides-api";
 import type { CompanySettingsResponse, Row } from "@/modules/pre-tour/shared/pre-tour-management-types";
+import type { PreTourMastersData } from "@/modules/pre-tour/shared/pre-tour-master-types";
 import { listTechnicalVisitRecords } from "@/modules/technical-visit/lib/technical-visit-api";
 import { listTourCategoryRecords } from "@/modules/tour-category/lib/tour-category-api";
 import { listTransportRecords } from "@/modules/transport/lib/transport-api";
 
-type PreTourMastersState = {
-  locations: Row[];
-  vehicleTypes: Row[];
-  activities: Row[];
-  guides: Row[];
-  currencies: Row[];
-  organizations: Row[];
-  operatorMarketContracts: Row[];
-  tourCategoryTypes: Row[];
-  tourCategories: Row[];
-  technicalVisits: Row[];
-  hotels: Row[];
-  tourCategoryRules: Row[];
-  companyBaseCurrencyCode: string;
-};
-
-const INITIAL_STATE: PreTourMastersState = {
+const INITIAL_STATE: PreTourMastersData = {
   locations: [],
   vehicleTypes: [],
   activities: [],
@@ -44,8 +29,13 @@ const INITIAL_STATE: PreTourMastersState = {
   companyBaseCurrencyCode: "USD",
 };
 
-export function usePreTourMasters() {
-  const [state, setState] = useState<PreTourMastersState>(INITIAL_STATE);
+type UsePreTourMastersOptions = {
+  initialData?: PreTourMastersData | null;
+};
+
+export function usePreTourMasters({ initialData = null }: UsePreTourMastersOptions = {}) {
+  const skipInitialLoadRef = useRef(Boolean(initialData));
+  const [state, setState] = useState<PreTourMastersData>(initialData ?? INITIAL_STATE);
 
   const loadMasters = useCallback(async () => {
     const optionalMaster = async <T,>(loader: () => Promise<T>, fallback: T) => {
@@ -121,6 +111,10 @@ export function usePreTourMasters() {
   }, []);
 
   useEffect(() => {
+    if (skipInitialLoadRef.current) {
+      skipInitialLoadRef.current = false;
+      return;
+    }
     void loadMasters().catch((error) => {
       notify.error(error instanceof Error ? error.message : "Failed to load lookup data.");
     });

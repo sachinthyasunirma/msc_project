@@ -80,7 +80,7 @@ export function NotificationBell() {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [composeOpen, setComposeOpen] = useState(false);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [sending, setSending] = useState(false);
   const [markingReadId, setMarkingReadId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -91,6 +91,7 @@ export function NotificationBell() {
   const [recipientUserId, setRecipientUserId] = useState<string>("");
   const [recipientHandleInput, setRecipientHandleInput] = useState("");
   const [message, setMessage] = useState("");
+  const [hasLoadedList, setHasLoadedList] = useState(false);
 
   const loadNotifications = useCallback(async () => {
     setLoading(true);
@@ -108,10 +109,29 @@ export function NotificationBell() {
       }
       setItems(Array.isArray(body.items) ? body.items : []);
       setUnreadCount(Number(body.unreadCount ?? 0));
+      setHasLoadedList(true);
     } catch (error) {
       notify.error(error instanceof Error ? error.message : "Failed to load notifications.");
     } finally {
       setLoading(false);
+    }
+  }, []);
+
+  const loadUnreadCount = useCallback(async () => {
+    try {
+      const response = await fetch("/api/notifications/unread-count", {
+        cache: "no-store",
+      });
+      const body = (await response.json()) as {
+        unreadCount?: number;
+        message?: string;
+      };
+      if (!response.ok) {
+        throw new Error(body.message || "Failed to load unread notifications.");
+      }
+      setUnreadCount(Number(body.unreadCount ?? 0));
+    } catch {
+      // Avoid noisy global errors for a lightweight badge refresh.
     }
   }, []);
 
@@ -131,31 +151,46 @@ export function NotificationBell() {
   }, []);
 
   useEffect(() => {
-    void loadNotifications();
-  }, [loadNotifications]);
+    void loadUnreadCount();
+  }, [loadUnreadCount]);
 
   useEffect(() => {
     const interval = window.setInterval(() => {
-      void loadNotifications();
-    }, 60000);
+      if (document.visibilityState !== "visible") return;
+      void loadUnreadCount();
+    }, 120000);
     return () => window.clearInterval(interval);
-  }, [loadNotifications]);
-
-  useEffect(() => {
-    return subscribeToNotificationRealtime(
-      () => {
-        void loadNotifications();
-      },
-      () => {
-        void loadNotifications();
-      }
-    );
-  }, [loadNotifications]);
+  }, [loadUnreadCount]);
 
   useEffect(() => {
     if (!open) return;
+    if (!hasLoadedList) {
+      void loadNotifications();
+      return;
+    }
     void loadNotifications();
-  }, [open, loadNotifications]);
+  }, [hasLoadedList, loadNotifications, open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const interval = window.setInterval(() => {
+      if (document.visibilityState !== "visible") return;
+      void loadNotifications();
+    }, 60000);
+    return () => window.clearInterval(interval);
+  }, [loadNotifications, open]);
+
+  useEffect(() => {
+    if (!open) return;
+    return subscribeToNotificationRealtime(
+      () => {
+        void Promise.all([loadNotifications(), loadUnreadCount()]);
+      },
+      () => {
+        void Promise.all([loadNotifications(), loadUnreadCount()]);
+      }
+    );
+  }, [loadNotifications, loadUnreadCount, open]);
 
   useEffect(() => {
     if (!composeOpen) return;
@@ -178,6 +213,7 @@ export function NotificationBell() {
       }
       setItems((prev) => prev.map((row) => (row.id === item.id ? { ...row, isRead: true } : row)));
       setUnreadCount((prev) => Math.max(prev - 1, 0));
+      void loadUnreadCount();
     } catch (error) {
       notify.error(error instanceof Error ? error.message : "Failed to mark notification as read.");
     } finally {
@@ -208,7 +244,7 @@ export function NotificationBell() {
       if (expandedId === item.id) {
         setExpandedId(null);
       }
-      await loadNotifications();
+      await Promise.all([loadNotifications(), loadUnreadCount()]);
       notify.success("Message deleted.");
     } catch (error) {
       notify.error(error instanceof Error ? error.message : "Failed to delete message.");
@@ -251,7 +287,7 @@ export function NotificationBell() {
       setRecipientUserId("");
       setRecipientHandleInput("");
       setMessage("");
-      await loadNotifications();
+      await Promise.all([loadNotifications(), loadUnreadCount()]);
     } catch (error) {
       notify.error(error instanceof Error ? error.message : "Failed to send notification.");
     } finally {

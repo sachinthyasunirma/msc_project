@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { usePathname } from "next/navigation";
 import { CircleHelp } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -11,59 +11,16 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { authClient } from "@/lib/auth-client";
 import { getScreenHelpDoc } from "@/modules/dashboard/shared/screen-help-docs";
-
-type CompanySettingsResponse = {
-  company?: {
-    helpEnabled?: boolean | null;
-  } | null;
-};
+import { useDashboardAccessState, useDashboardShell } from "@/modules/dashboard/ui/components/dashboard-shell-provider";
 
 export function DashboardScreenHelp() {
   const pathname = usePathname();
-  const { data: session } = authClient.useSession();
-  const [isReadOnly, setIsReadOnly] = useState(false);
+  const { company } = useDashboardShell();
+  const { isReadOnly } = useDashboardAccessState();
   const [open, setOpen] = useState(false);
-  const [enabled, setEnabled] = useState(true);
-
-  useEffect(() => {
-    let active = true;
-    (async () => {
-      try {
-        const response = await fetch("/api/companies/me", { cache: "no-store" });
-        if (!response.ok) return;
-        const body = (await response.json()) as CompanySettingsResponse;
-        if (!active) return;
-        setEnabled(body.company?.helpEnabled !== false);
-      } catch {
-        if (active) setEnabled(true);
-      }
-    })();
-    return () => {
-      active = false;
-    };
-  }, []);
-
-  useEffect(() => {
-    let active = true;
-    (async () => {
-      try {
-        const response = await fetch("/api/companies/access-control", { cache: "no-store" });
-        if (!response.ok) return;
-        const body = (await response.json()) as { readOnly?: boolean };
-        if (!active) return;
-        setIsReadOnly(Boolean(body.readOnly));
-      } catch {
-        if (active) setIsReadOnly(false);
-      }
-    })();
-    return () => {
-      active = false;
-    };
-  }, [session?.user]);
-
   const doc = useMemo(() => getScreenHelpDoc(pathname), [pathname]);
+  const enabled = company?.helpEnabled !== false;
 
   if (!enabled || !doc) return null;
 

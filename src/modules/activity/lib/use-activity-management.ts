@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useConfirm } from "@/components/app-confirm-provider";
 import { notify } from "@/lib/notify";
 import {
@@ -16,30 +16,45 @@ import {
   toLocalDateTime,
 } from "@/modules/activity/lib/activity-management-utils";
 import { ACTIVITY_META } from "@/modules/activity/shared/activity-management-constants";
-import type { ActivityField, ActivityResourceKey } from "@/modules/activity/shared/activity-management-types";
+import type {
+  ActivityField,
+  ActivityManagementInitialData,
+  ActivityResourceKey,
+} from "@/modules/activity/shared/activity-management-types";
 import { listTransportRecords } from "@/modules/transport/lib/transport-api";
 
 type UseActivityManagementOptions = {
   activityId?: string;
   showActivityList?: boolean;
+  initialData?: ActivityManagementInitialData | null;
   isReadOnly: boolean;
 };
 
 export function useActivityManagement({
   activityId,
   showActivityList = true,
+  initialData = null,
   isReadOnly,
 }: UseActivityManagementOptions) {
   const confirm = useConfirm();
   const initialResource: ActivityResourceKey = showActivityList ? "activities" : "activity-rates";
+  const skipInitialLookupsLoadRef = useRef(Boolean(initialData));
+  const skipInitialImagesLoadRef = useRef(Boolean(initialData));
+  const skipInitialRecordsLoadRef = useRef(
+    Boolean(initialData && initialData.resource === initialResource)
+  );
   const [resource, setResource] = useState<ActivityResourceKey>(initialResource);
   const [query, setQuery] = useState("");
-  const [records, setRecords] = useState<Array<Record<string, unknown>>>([]);
-  const [loading, setLoading] = useState(true);
+  const [records, setRecords] = useState<Array<Record<string, unknown>>>(initialData?.records ?? []);
+  const [loading, setLoading] = useState(!initialData);
   const [saving, setSaving] = useState(false);
-  const [activities, setActivities] = useState<Array<Record<string, unknown>>>([]);
-  const [locations, setLocations] = useState<Array<Record<string, unknown>>>([]);
-  const [images, setImages] = useState<Array<Record<string, unknown>>>([]);
+  const [activities, setActivities] = useState<Array<Record<string, unknown>>>(
+    initialData?.activities ?? []
+  );
+  const [locations, setLocations] = useState<Array<Record<string, unknown>>>(
+    initialData?.locations ?? []
+  );
+  const [images, setImages] = useState<Array<Record<string, unknown>>>(initialData?.images ?? []);
   const [dialog, setDialog] = useState<{
     open: boolean;
     mode: "create" | "edit";
@@ -325,13 +340,29 @@ export function useActivityManagement({
   }, [records, currentPage, pageSize]);
 
   useEffect(() => {
-    void loadLookups();
-    void loadImages();
+    if (skipInitialLookupsLoadRef.current) {
+      skipInitialLookupsLoadRef.current = false;
+    } else {
+      void loadLookups();
+    }
+    if (skipInitialImagesLoadRef.current) {
+      skipInitialImagesLoadRef.current = false;
+    } else {
+      void loadImages();
+    }
   }, [loadImages, loadLookups]);
 
   useEffect(() => {
+    if (
+      skipInitialRecordsLoadRef.current &&
+      resource === initialResource &&
+      query.length === 0
+    ) {
+      skipInitialRecordsLoadRef.current = false;
+      return;
+    }
     void load();
-  }, [load]);
+  }, [initialResource, load, query.length, resource]);
 
   useEffect(() => {
     setCurrentPage(1);

@@ -1,8 +1,9 @@
-import { and, count, desc, eq, gte, ilike, lt, or } from "drizzle-orm";
+import { and, count, desc, eq, gte, ilike, lt, or, sql } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { db } from "@/db";
 import { internalNotification, user } from "@/db/schema";
+import { withApiLogging } from "@/lib/logging/request";
 import { getNotificationRealtimeEmitter } from "@/lib/realtime/redis-emitter";
 import { AccessControlError, resolveAccess } from "@/lib/security/access-control";
 import {
@@ -29,6 +30,15 @@ type DirectoryEntry = {
   email: string;
   mentionHandle: string;
   isActive: boolean;
+};
+
+type ThreadSummaryRow = {
+  peer_user_id: string;
+  last_message_id: string;
+  last_message: string;
+  last_message_at: string | Date;
+  last_sender_user_id: string;
+  unread_count: number | string;
 };
 
 async function loadDirectory(companyId: string) {
@@ -207,88 +217,95 @@ async function handleThreadsView(request: Request) {
       .map((entry) => entry.id)
   );
 
-  const rows = await db
-    .select({
-      id: internalNotification.id,
-      senderUserId: internalNotification.senderUserId,
-      recipientUserId: internalNotification.recipientUserId,
-      message: internalNotification.message,
-      isRead: internalNotification.isRead,
-      createdAt: internalNotification.createdAt,
-    })
-    .from(internalNotification)
-    .where(
-      and(
-        eq(internalNotification.companyId, access.companyId),
-        or(
-          and(
-            eq(internalNotification.senderUserId, access.userId),
-            eq(internalNotification.deletedBySender, false)
-          ),
-          and(
-            eq(internalNotification.recipientUserId, access.userId),
-            eq(internalNotification.deletedByRecipient, false)
-          )
+  const summaryResult = await db.execute(sql<ThreadSummaryRow>`
+    with visible_notifications as (
+      select
+        n.id,
+        n.sender_user_id,
+        n.recipient_user_id,
+        n.message,
+        n.is_read,
+        n.created_at,
+        case
+          when n.sender_user_id = ${access.userId} then n.recipient_user_id
+          else n.sender_user_id
+        end as peer_user_id
+      from internal_notification n
+      where
+        n.company_id = ${access.companyId}
+        and (
+          (n.sender_user_id = ${access.userId} and n.deleted_by_sender = false)
+          or
+          (n.recipient_user_id = ${access.userId} and n.deleted_by_recipient = false)
         )
-      )
+    ),
+    ranked_threads as (
+      select
+        peer_user_id,
+        id as last_message_id,
+        message as last_message,
+        created_at as last_message_at,
+        sender_user_id as last_sender_user_id,
+        sum(
+          case
+            when sender_user_id = peer_user_id
+              and recipient_user_id = ${access.userId}
+              and is_read = false
+            then 1
+            else 0
+          end
+        ) over (partition by peer_user_id) as unread_count,
+        row_number() over (
+          partition by peer_user_id
+          order by created_at desc, id desc
+        ) as row_number
+      from visible_notifications
     )
-    .orderBy(desc(internalNotification.createdAt))
-    .limit(2000);
+    select
+      peer_user_id,
+      last_message_id,
+      last_message,
+      last_message_at,
+      last_sender_user_id,
+      unread_count
+    from ranked_threads
+    where row_number = 1
+    order by last_message_at desc, last_message_id desc
+  `);
 
-  const byPeer = new Map<
-    string,
-    {
-      peerUserId: string;
-      lastMessageId: string;
-      lastMessage: string;
-      lastMessageAt: Date;
-      lastSenderUserId: string;
-      unreadCount: number;
-    }
-  >();
+  const summaryRows = (
+    Array.isArray(summaryResult)
+      ? summaryResult
+      : "rows" in summaryResult
+        ? summaryResult.rows
+        : []
+  ) as ThreadSummaryRow[];
 
-  for (const row of rows) {
-    const peerUserId =
-      row.senderUserId === access.userId ? row.recipientUserId : row.senderUserId;
-    if (!peerMatches.has(peerUserId)) continue;
+  const filteredRows = summaryRows.filter((row) => peerMatches.has(row.peer_user_id));
 
-    const existing = byPeer.get(peerUserId);
-    if (!existing) {
-      byPeer.set(peerUserId, {
-        peerUserId,
-        lastMessageId: row.id,
-        lastMessage: row.message,
-        lastMessageAt: row.createdAt,
-        lastSenderUserId: row.senderUserId,
-        unreadCount: 0,
-      });
-    }
-    if (row.senderUserId === peerUserId && row.recipientUserId === access.userId && !row.isRead) {
-      const tracked = byPeer.get(peerUserId);
-      if (tracked) tracked.unreadCount += 1;
-    }
-  }
-
-  const threadItems = Array.from(byPeer.values())
-    .sort((a, b) => b.lastMessageAt.getTime() - a.lastMessageAt.getTime())
+  const threadItems = filteredRows
     .slice(offset, offset + limit)
     .map((thread) => {
-      const peer = byUserId.get(thread.peerUserId);
+      const peer = byUserId.get(thread.peer_user_id);
+      const lastMessageAt = new Date(thread.last_message_at);
       return {
-        peerUserId: thread.peerUserId,
+        peerUserId: thread.peer_user_id,
         peerName: peer?.name ?? "Unknown User",
         peerEmail: peer?.email ?? "",
-        peerHandle: mentionByUserId.get(thread.peerUserId) ?? "user",
-        lastMessageId: thread.lastMessageId,
-        lastMessage: thread.lastMessage,
-        lastMessageAt: thread.lastMessageAt,
-        lastSenderUserId: thread.lastSenderUserId,
-        unreadCount: thread.unreadCount,
+        peerHandle: mentionByUserId.get(thread.peer_user_id) ?? "user",
+        lastMessageId: thread.last_message_id,
+        lastMessage: thread.last_message,
+        lastMessageAt,
+        lastSenderUserId: thread.last_sender_user_id,
+        unreadCount: Number(thread.unread_count ?? 0),
       };
     });
 
-  const totalCount = byPeer.size;
-  const unreadCount = Array.from(byPeer.values()).reduce((sum, item) => sum + item.unreadCount, 0);
+  const totalCount = filteredRows.length;
+  const unreadCount = filteredRows.reduce(
+    (sum, item) => sum + Number(item.unread_count ?? 0),
+    0
+  );
 
   return NextResponse.json({
     items: threadItems,
@@ -403,205 +420,226 @@ async function handleConversationView(request: Request) {
   });
 }
 
-export async function GET(request: Request) {
-  try {
-    const url = new URL(request.url);
-    const viewResult = notificationViewSchema.safeParse(url.searchParams.get("view") ?? "list");
-    const view = viewResult.success ? viewResult.data : "list";
+const getHandler = withApiLogging(
+  { route: "/api/notifications", method: "GET", feature: "notifications" },
+  async (request) => {
+    try {
+      const url = new URL(request.url);
+      const viewResult = notificationViewSchema.safeParse(url.searchParams.get("view") ?? "list");
+      const view = viewResult.success ? viewResult.data : "list";
 
-    if (view === "threads") return await handleThreadsView(request);
-    if (view === "conversation") return await handleConversationView(request);
-    return await handleListView(request);
-  } catch (error) {
-    if (error instanceof AccessControlError) {
+      if (view === "threads") return await handleThreadsView(request);
+      if (view === "conversation") return await handleConversationView(request);
+      return await handleListView(request);
+    } catch (error) {
+      if (error instanceof AccessControlError) {
+        return NextResponse.json(
+          { code: error.code, message: error.message },
+          { status: error.status }
+        );
+      }
       return NextResponse.json(
-        { code: error.code, message: error.message },
-        { status: error.status }
+        { code: "INTERNAL_SERVER_ERROR", message: "Failed to load notifications." },
+        { status: 500 }
       );
     }
-    return NextResponse.json(
-      { code: "INTERNAL_SERVER_ERROR", message: "Failed to load notifications." },
-      { status: 500 }
-    );
   }
+);
+
+const patchHandler = withApiLogging(
+  { route: "/api/notifications", method: "PATCH", feature: "notifications" },
+  async (request) => {
+    try {
+      const access = await resolveAccess(request.headers);
+      const payload = await request.json();
+      const parsed = markThreadReadSchema.safeParse(payload);
+      if (!parsed.success) {
+        return NextResponse.json(
+          {
+            code: "VALIDATION_ERROR",
+            message: parsed.error.issues[0]?.message ?? "Invalid payload.",
+          },
+          { status: 400 }
+        );
+      }
+
+      const [updated] = await db
+        .update(internalNotification)
+        .set({
+          isRead: true,
+          readAt: new Date(),
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(internalNotification.companyId, access.companyId),
+            eq(internalNotification.senderUserId, parsed.data.peerUserId),
+            eq(internalNotification.recipientUserId, access.userId),
+            eq(internalNotification.deletedByRecipient, false),
+            eq(internalNotification.isRead, false)
+          )
+        )
+        .returning({
+          id: internalNotification.id,
+        });
+
+      try {
+        if (updated) {
+          getNotificationRealtimeEmitter()?.emitRead({
+            recipientUserId: access.userId,
+            notificationId: updated.id,
+          });
+        }
+      } catch {
+        // Realtime publishing failures should not block persisted read state.
+      }
+
+      return NextResponse.json({ success: true });
+    } catch (error) {
+      if (error instanceof AccessControlError) {
+        return NextResponse.json(
+          { code: error.code, message: error.message },
+          { status: error.status }
+        );
+      }
+      return NextResponse.json(
+        { code: "INTERNAL_SERVER_ERROR", message: "Failed to update notifications." },
+        { status: 500 }
+      );
+    }
+  }
+);
+
+const postHandler = withApiLogging(
+  { route: "/api/notifications", method: "POST", feature: "notifications" },
+  async (request) => {
+    try {
+      const access = await resolveAccess(request.headers);
+      const payload = await request.json();
+      const parsed = createNotificationSchema.safeParse(payload);
+      if (!parsed.success) {
+        return NextResponse.json(
+          {
+            code: "VALIDATION_ERROR",
+            message: parsed.error.issues[0]?.message ?? "Invalid notification payload.",
+          },
+          { status: 400 }
+        );
+      }
+
+      const wordCount = countWords(parsed.data.message);
+      if (wordCount > 200) {
+        return NextResponse.json(
+          {
+            code: "VALIDATION_ERROR",
+            message: "Message must be 200 words or fewer.",
+          },
+          { status: 400 }
+        );
+      }
+
+      if (!parsed.data.recipientUserId && !parsed.data.recipientHandle) {
+        return NextResponse.json(
+          {
+            code: "VALIDATION_ERROR",
+            message: "recipientUserId or recipientHandle is required.",
+          },
+          { status: 400 }
+        );
+      }
+
+      const { directory } = await loadDirectory(access.companyId);
+
+      const byId = new Map(directory.map((entry) => [entry.id, entry]));
+      const byHandle = new Map(directory.map((entry) => [entry.mentionHandle, entry]));
+
+      const recipientFromId = parsed.data.recipientUserId
+        ? byId.get(parsed.data.recipientUserId)
+        : null;
+      const recipientFromHandle = parsed.data.recipientHandle
+        ? byHandle.get(normalizeMentionHandle(parsed.data.recipientHandle))
+        : null;
+
+      const recipient = recipientFromId ?? recipientFromHandle;
+      if (!recipient) {
+        return NextResponse.json(
+          { code: "USER_NOT_FOUND", message: "Recipient was not found in your company." },
+          { status: 404 }
+        );
+      }
+      if (!recipient.isActive) {
+        return NextResponse.json(
+          {
+            code: "USER_INACTIVE",
+            message: "Cannot send messages to an inactive user.",
+          },
+          { status: 400 }
+        );
+      }
+      if (recipient.id === access.userId) {
+        return NextResponse.json(
+          { code: "VALIDATION_ERROR", message: "Cannot send a notification to yourself." },
+          { status: 400 }
+        );
+      }
+
+      const [created] = await db
+        .insert(internalNotification)
+        .values({
+          companyId: access.companyId,
+          senderUserId: access.userId,
+          recipientUserId: recipient.id,
+          message: parsed.data.message.trim(),
+          contextTitle: null,
+          contextUrl: null,
+          isRead: false,
+          deletedBySender: false,
+          deletedByRecipient: false,
+          deliveredAt: new Date(),
+          readAt: null,
+          updatedAt: new Date(),
+        })
+        .returning({
+          id: internalNotification.id,
+          createdAt: internalNotification.createdAt,
+        });
+
+      try {
+        getNotificationRealtimeEmitter()?.emitCreated({
+          recipientUserId: recipient.id,
+          notificationId: created.id,
+        });
+      } catch {
+        // Realtime publishing failures should not block persisted notifications.
+      }
+
+      return NextResponse.json({
+        success: true,
+        notification: created,
+      });
+    } catch (error) {
+      if (error instanceof AccessControlError) {
+        return NextResponse.json(
+          { code: error.code, message: error.message },
+          { status: error.status }
+        );
+      }
+      return NextResponse.json(
+        { code: "INTERNAL_SERVER_ERROR", message: "Failed to send notification." },
+        { status: 500 }
+      );
+    }
+  }
+);
+
+export async function GET(request: Request) {
+  return getHandler(request, {});
 }
 
 export async function PATCH(request: Request) {
-  try {
-    const access = await resolveAccess(request.headers);
-    const payload = await request.json();
-    const parsed = markThreadReadSchema.safeParse(payload);
-    if (!parsed.success) {
-      return NextResponse.json(
-        {
-          code: "VALIDATION_ERROR",
-          message: parsed.error.issues[0]?.message ?? "Invalid payload.",
-        },
-        { status: 400 }
-      );
-    }
-
-    const [updated] = await db
-      .update(internalNotification)
-      .set({
-        isRead: true,
-        readAt: new Date(),
-        updatedAt: new Date(),
-      })
-      .where(
-        and(
-          eq(internalNotification.companyId, access.companyId),
-          eq(internalNotification.senderUserId, parsed.data.peerUserId),
-          eq(internalNotification.recipientUserId, access.userId),
-          eq(internalNotification.deletedByRecipient, false),
-          eq(internalNotification.isRead, false)
-        )
-      )
-      .returning({
-        id: internalNotification.id,
-      });
-
-    try {
-      if (updated) {
-        getNotificationRealtimeEmitter()?.emitRead({
-          recipientUserId: access.userId,
-          notificationId: updated.id,
-        });
-      }
-    } catch {
-      // Realtime publishing failures should not block persisted read state.
-    }
-
-    return NextResponse.json({ success: true });
-  } catch (error) {
-    if (error instanceof AccessControlError) {
-      return NextResponse.json(
-        { code: error.code, message: error.message },
-        { status: error.status }
-      );
-    }
-    return NextResponse.json(
-      { code: "INTERNAL_SERVER_ERROR", message: "Failed to update notifications." },
-      { status: 500 }
-    );
-  }
+  return patchHandler(request, {});
 }
 
 export async function POST(request: Request) {
-  try {
-    const access = await resolveAccess(request.headers);
-    const payload = await request.json();
-    const parsed = createNotificationSchema.safeParse(payload);
-    if (!parsed.success) {
-      return NextResponse.json(
-        {
-          code: "VALIDATION_ERROR",
-          message: parsed.error.issues[0]?.message ?? "Invalid notification payload.",
-        },
-        { status: 400 }
-      );
-    }
-
-    const wordCount = countWords(parsed.data.message);
-    if (wordCount > 200) {
-      return NextResponse.json(
-        {
-          code: "VALIDATION_ERROR",
-          message: "Message must be 200 words or fewer.",
-        },
-        { status: 400 }
-      );
-    }
-
-    if (!parsed.data.recipientUserId && !parsed.data.recipientHandle) {
-      return NextResponse.json(
-        {
-          code: "VALIDATION_ERROR",
-          message: "recipientUserId or recipientHandle is required.",
-        },
-        { status: 400 }
-      );
-    }
-
-    const { directory } = await loadDirectory(access.companyId);
-
-    const byId = new Map(directory.map((entry) => [entry.id, entry]));
-    const byHandle = new Map(directory.map((entry) => [entry.mentionHandle, entry]));
-
-    const recipientFromId = parsed.data.recipientUserId
-      ? byId.get(parsed.data.recipientUserId)
-      : null;
-    const recipientFromHandle = parsed.data.recipientHandle
-      ? byHandle.get(normalizeMentionHandle(parsed.data.recipientHandle))
-      : null;
-
-    const recipient = recipientFromId ?? recipientFromHandle;
-    if (!recipient) {
-      return NextResponse.json(
-        { code: "USER_NOT_FOUND", message: "Recipient was not found in your company." },
-        { status: 404 }
-      );
-    }
-    if (!recipient.isActive) {
-      return NextResponse.json(
-        {
-          code: "USER_INACTIVE",
-          message: "Cannot send messages to an inactive user.",
-        },
-        { status: 400 }
-      );
-    }
-    if (recipient.id === access.userId) {
-      return NextResponse.json(
-        { code: "VALIDATION_ERROR", message: "Cannot send a notification to yourself." },
-        { status: 400 }
-      );
-    }
-
-    const [created] = await db
-      .insert(internalNotification)
-      .values({
-        companyId: access.companyId,
-        senderUserId: access.userId,
-        recipientUserId: recipient.id,
-        message: parsed.data.message.trim(),
-        contextTitle: null,
-        contextUrl: null,
-        isRead: false,
-        deletedBySender: false,
-        deletedByRecipient: false,
-        deliveredAt: new Date(),
-        readAt: null,
-        updatedAt: new Date(),
-      })
-      .returning({
-        id: internalNotification.id,
-        createdAt: internalNotification.createdAt,
-      });
-
-    try {
-      getNotificationRealtimeEmitter()?.emitCreated({
-        recipientUserId: recipient.id,
-        notificationId: created.id,
-      });
-    } catch {
-      // Realtime publishing failures should not block persisted notifications.
-    }
-
-    return NextResponse.json({
-      success: true,
-      notification: created,
-    });
-  } catch (error) {
-    if (error instanceof AccessControlError) {
-      return NextResponse.json(
-        { code: error.code, message: error.message },
-        { status: error.status }
-      );
-    }
-    return NextResponse.json(
-      { code: "INTERNAL_SERVER_ERROR", message: "Failed to send notification." },
-      { status: 500 }
-    );
-  }
+  return postHandler(request, {});
 }

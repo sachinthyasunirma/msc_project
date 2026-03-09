@@ -1,11 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import dynamic from "next/dynamic";
 import Link from "next/link";
 import { Edit3, Plus, RefreshCw, Settings2, Trash2 } from "lucide-react";
 import { useConfirm } from "@/components/app-confirm-provider";
 import { guideImportConfig } from "@/components/batch-import/master-batch-import-config";
-import { MasterBatchImportDialog } from "@/components/batch-import/master-batch-import-dialog";
 import { notify } from "@/lib/notify";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -46,8 +46,17 @@ import {
   listGuideRecords,
   updateGuideRecord,
 } from "@/modules/guides/lib/guides-api";
+import type { GuidesManagementInitialData } from "@/modules/guides/shared/guides-management-types";
 import { listTransportRecords } from "@/modules/transport/lib/transport-api";
 import { listCurrencyRecords } from "@/modules/currency/lib/currency-api";
+
+const MasterBatchImportDialog = dynamic(
+  () =>
+    import("@/components/batch-import/master-batch-import-dialog").then(
+      (module) => module.MasterBatchImportDialog
+    ),
+  { ssr: false }
+);
 
 export type GuideResourceKey =
   | "guides"
@@ -146,24 +155,36 @@ function getBooleanMeta(fieldKey: string, value: boolean) {
 type GuidesManagementSectionProps = {
   initialResource?: GuideResourceKey;
   managedGuideId?: string;
+  initialData?: GuidesManagementInitialData | null;
   isReadOnly: boolean;
 };
 
 export function GuidesManagementSection({
   initialResource = "guides",
   managedGuideId = "",
+  initialData = null,
   isReadOnly,
 }: GuidesManagementSectionProps) {
   const confirm = useConfirm();
+  const skipInitialRecordsLoadRef = useRef(
+    Boolean(initialData && initialData.resource === initialResource)
+  );
+  const skipInitialLookupsLoadRef = useRef(Boolean(initialData));
   const [resource, setResource] = useState<GuideResourceKey>(initialResource);
   const [query, setQuery] = useState("");
-  const [records, setRecords] = useState<Array<Record<string, unknown>>>([]);
-  const [loading, setLoading] = useState(true);
+  const [records, setRecords] = useState<Array<Record<string, unknown>>>(initialData?.records ?? []);
+  const [loading, setLoading] = useState(!initialData);
   const [saving, setSaving] = useState(false);
-  const [guides, setGuides] = useState<Array<Record<string, unknown>>>([]);
-  const [languages, setLanguages] = useState<Array<Record<string, unknown>>>([]);
-  const [locations, setLocations] = useState<Array<Record<string, unknown>>>([]);
-  const [currencies, setCurrencies] = useState<Array<Record<string, unknown>>>([]);
+  const [guides, setGuides] = useState<Array<Record<string, unknown>>>(initialData?.guides ?? []);
+  const [languages, setLanguages] = useState<Array<Record<string, unknown>>>(
+    initialData?.languages ?? []
+  );
+  const [locations, setLocations] = useState<Array<Record<string, unknown>>>(
+    initialData?.locations ?? []
+  );
+  const [currencies, setCurrencies] = useState<Array<Record<string, unknown>>>(
+    initialData?.currencies ?? []
+  );
   const [dialog, setDialog] = useState<{ open: boolean; mode: "create" | "edit"; row: Record<string, unknown> | null }>({ open: false, mode: "create", row: null });
   const [form, setForm] = useState<Record<string, unknown>>({});
   const [batchOpen, setBatchOpen] = useState(false);
@@ -402,11 +423,23 @@ export function GuidesManagementSection({
   }, [records, currentPage, pageSize]);
 
   useEffect(() => {
+    if (skipInitialLookupsLoadRef.current) {
+      skipInitialLookupsLoadRef.current = false;
+      return;
+    }
     void loadLookups();
   }, [loadLookups]);
   useEffect(() => {
+    if (
+      skipInitialRecordsLoadRef.current &&
+      resource === initialResource &&
+      query.length === 0
+    ) {
+      skipInitialRecordsLoadRef.current = false;
+      return;
+    }
     void load();
-  }, [load]);
+  }, [initialResource, load, query.length, resource]);
   useEffect(() => {
     if (!visibleResources.includes(resource)) setResource(visibleResources[0]);
   }, [resource, visibleResources]);

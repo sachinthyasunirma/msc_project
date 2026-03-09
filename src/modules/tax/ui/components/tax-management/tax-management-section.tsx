@@ -1,26 +1,37 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { TablePagination } from "@/components/ui/table-pagination";
 import { useTaxManagement } from "@/modules/tax/lib/use-tax-management";
+import type { TaxManagementInitialData } from "@/modules/tax/shared/tax-management-types";
 import type { TaxResourceKey } from "@/modules/tax/ui/components/tax-management/tax-management-config";
 import { TaxManagementHeader } from "@/modules/tax/ui/components/tax-management/tax-management-header";
-import { TaxRecordDialog } from "@/modules/tax/ui/components/tax-management/tax-record-dialog";
 import { TaxRecordsTable } from "@/modules/tax/ui/components/tax-management/tax-records-table";
+
+const TaxRecordDialog = dynamic(
+  () =>
+    import("@/modules/tax/ui/components/tax-management/tax-record-dialog").then(
+      (module) => module.TaxRecordDialog
+    ),
+  { ssr: false }
+);
 
 type TaxManagementSectionProps = {
   initialResource?: TaxResourceKey;
   managedTaxId?: string;
+  initialData?: TaxManagementInitialData | null;
   isReadOnly: boolean;
 };
 
 export function TaxManagementSection({
   initialResource = "taxes",
   managedTaxId = "",
+  initialData = null,
   isReadOnly,
 }: TaxManagementSectionProps) {
-  const state = useTaxManagement({ initialResource, managedTaxId, isReadOnly });
+  const state = useTaxManagement({ initialResource, managedTaxId, initialData, isReadOnly });
 
   return (
     <Card>

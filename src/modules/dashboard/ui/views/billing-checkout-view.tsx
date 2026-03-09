@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Check, CreditCard } from "lucide-react";
 import { notify } from "@/lib/notify";
@@ -17,19 +17,7 @@ import {
   PLAN_META,
   type SubscriptionDuration,
 } from "@/modules/dashboard/lib/billing-pricing";
-
-type CompanyProfile = {
-  code: string;
-  name: string;
-  email: string;
-  joinSecretCode: string | null;
-  managerPrivilegeCode: string | null;
-  baseCurrencyCode: string;
-  transportRateBasis: "VEHICLE_CATEGORY" | "VEHICLE_TYPE";
-  helpEnabled: boolean;
-  country: string | null;
-  image: string | null;
-};
+import { useDashboardShell } from "@/modules/dashboard/ui/components/dashboard-shell-provider";
 
 function parsePlan(value: string | null): PlanCode {
   if (value === "GROWTH" || value === "ENTERPRISE") return value;
@@ -41,15 +29,20 @@ function parseDuration(value: string | null): SubscriptionDuration {
   return "YEARLY";
 }
 
+function addDays(date: Date, days: number) {
+  const next = new Date(date);
+  next.setDate(next.getDate() + days);
+  return next;
+}
+
 export function BillingCheckoutView() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { company, access, updateShellData } = useDashboardShell();
 
   const selectedPlan = parsePlan(searchParams.get("plan"));
   const selectedDuration = parseDuration(searchParams.get("duration"));
 
-  const [company, setCompany] = useState<CompanyProfile | null>(null);
-  const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
 
   const selectedPlanMeta = useMemo(
@@ -75,28 +68,6 @@ export function BillingCheckoutView() {
     selectedPlanMeta.includedUsers,
     selectedDuration
   );
-
-  useEffect(() => {
-    let active = true;
-    (async () => {
-      try {
-        const response = await fetch("/api/companies/me", { cache: "no-store" });
-        const body = (await response.json()) as { company?: CompanyProfile | null; message?: string };
-        if (!response.ok) throw new Error(body.message || "Failed to load company.");
-        if (!active) return;
-        setCompany(body.company ?? null);
-      } catch (error) {
-        if (active) {
-          notify.error(error instanceof Error ? error.message : "Failed to load checkout.");
-        }
-      } finally {
-        if (active) setLoading(false);
-      }
-    })();
-    return () => {
-      active = false;
-    };
-  }, []);
 
   const confirmSubscription = async () => {
     if (!company) {
@@ -126,9 +97,30 @@ export function BillingCheckoutView() {
       const body = (await response.json()) as { message?: string };
       if (!response.ok) throw new Error(body.message || "Failed to confirm subscription.");
 
+      const startedAt = new Date();
+      const endsAt = addDays(
+        startedAt,
+        selectedDuration === "QUARTERLY" ? 90 : 365
+      ).toISOString();
+      updateShellData({
+        company: {
+          ...company,
+          subscriptionPlan: selectedPlanMeta.code,
+          subscriptionStatus: "ACTIVE",
+          subscriptionStartsAt: startedAt.toISOString(),
+          subscriptionEndsAt: endsAt,
+        },
+        access: access
+          ? {
+              ...access,
+              plan: selectedPlanMeta.code,
+              subscriptionStatus: "ACTIVE",
+              subscriptionEndsAt: endsAt,
+            }
+          : null,
+      });
       notify.success("Subscription activated.");
       router.replace("/billing/plans");
-      router.refresh();
     } catch (error) {
       notify.error(error instanceof Error ? error.message : "Failed to confirm subscription.");
     } finally {
@@ -192,7 +184,7 @@ export function BillingCheckoutView() {
             <Button
               className="w-full"
               onClick={() => void confirmSubscription()}
-              disabled={loading || submitting || !company}
+              disabled={submitting || !company}
             >
               <CreditCard className="mr-2 size-4" />
               {submitting ? "Processing..." : "Confirm Subscription"}

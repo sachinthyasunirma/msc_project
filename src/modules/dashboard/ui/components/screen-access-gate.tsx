@@ -2,14 +2,8 @@
 
 import { useEffect, useMemo, useRef } from "react";
 import { usePathname, useRouter } from "next/navigation";
-import { authClient } from "@/lib/auth-client";
 import { notify } from "@/lib/notify";
-
-type AccessBody = {
-  code?: string;
-  privileges?: string[];
-  message?: string;
-};
+import { useDashboardShell } from "@/modules/dashboard/ui/components/dashboard-shell-provider";
 
 const PATH_PRIVILEGE_RULES: Array<{ prefix: string; privilege: string }> = [
   { prefix: "/master-data/accommodations", privilege: "SCREEN_MASTER_ACCOMMODATIONS" },
@@ -34,7 +28,7 @@ const PUBLIC_DASHBOARD_PATH_PREFIXES = ["/support/contact-us", "/notifications"]
 export function ScreenAccessGate() {
   const router = useRouter();
   const pathname = usePathname();
-  const { data: session } = authClient.useSession();
+  const { access, accessErrorCode, needsSetup, viewer } = useDashboardShell();
   const lastWarnedPath = useRef<string | null>(null);
 
   const requiredPrivilege = useMemo(() => {
@@ -45,41 +39,21 @@ export function ScreenAccessGate() {
   }, [pathname]);
 
   useEffect(() => {
-    if (!session?.user || !requiredPrivilege) return;
-    let active = true;
+    if (!viewer || needsSetup || !requiredPrivilege) return;
 
-    (async () => {
-      try {
-        const response = await fetch("/api/companies/access-control", { cache: "no-store" });
-        if (!active) return;
+    if (accessErrorCode === "SUBSCRIPTION_REQUIRED") {
+      router.replace("/billing/plans");
+      return;
+    }
 
-        const body = (await response.json()) as AccessBody;
-        if (!response.ok) {
-          if (body.code === "SUBSCRIPTION_REQUIRED") {
-            router.replace("/billing/plans");
-            return;
-          }
-          return;
-        }
+    if (access?.privileges.includes(requiredPrivilege)) return;
 
-        const privileges = Array.isArray(body.privileges) ? body.privileges : [];
-        if (privileges.includes(requiredPrivilege)) return;
-
-        router.replace("/");
-        if (lastWarnedPath.current !== pathname) {
-          lastWarnedPath.current = pathname;
-          notify.warning("You do not have access to this screen. Please upgrade your plan.");
-        }
-      } catch {
-        // no-op
-      }
-    })();
-
-    return () => {
-      active = false;
-    };
-  }, [pathname, requiredPrivilege, router, session?.user]);
+    router.replace("/");
+    if (lastWarnedPath.current !== pathname) {
+      lastWarnedPath.current = pathname;
+      notify.warning("You do not have access to this screen. Please upgrade your plan.");
+    }
+  }, [access, accessErrorCode, needsSetup, pathname, requiredPrivilege, router, viewer]);
 
   return null;
 }
-

@@ -1,35 +1,55 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { useMemo } from "react";
 import {
   activityImportConfig,
   activityRateImportConfig,
 } from "@/components/batch-import/master-batch-import-config";
-import { MasterBatchImportDialog } from "@/components/batch-import/master-batch-import-dialog";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { createActivityRecord } from "@/modules/activity/lib/activity-api";
 import { useActivityManagement } from "@/modules/activity/lib/use-activity-management";
 import { ACTIVITY_TAB_LABELS } from "@/modules/activity/shared/activity-management-constants";
-import type { ActivityResourceKey } from "@/modules/activity/shared/activity-management-types";
-import { ActivityRecordDialog } from "@/modules/activity/ui/components/activity-record-dialog";
+import type {
+  ActivityManagementInitialData,
+  ActivityResourceKey,
+} from "@/modules/activity/shared/activity-management-types";
 import { ActivityRecordTableCard } from "@/modules/activity/ui/components/activity-record-table-card";
 import { ActivityAvailabilityTab } from "@/modules/activity/ui/components/activity-manage/activity-availability-tab";
 import { ActivityRatesTab } from "@/modules/activity/ui/components/activity-manage/activity-rates-tab";
 import { ActivitySupplementsTab } from "@/modules/activity/ui/components/activity-manage/activity-supplements-tab";
 
+const MasterBatchImportDialog = dynamic(
+  () =>
+    import("@/components/batch-import/master-batch-import-dialog").then(
+      (module) => module.MasterBatchImportDialog
+    ),
+  { ssr: false }
+);
+
+const ActivityRecordDialog = dynamic(
+  () =>
+    import("@/modules/activity/ui/components/activity-record-dialog").then(
+      (module) => module.ActivityRecordDialog
+    ),
+  { ssr: false }
+);
+
 type ActivityManagementSectionProps = {
   activityId?: string;
   showActivityList?: boolean;
+  initialData?: ActivityManagementInitialData | null;
   isReadOnly: boolean;
 };
 
 export function ActivityManagementSection({
   activityId,
   showActivityList = true,
+  initialData = null,
   isReadOnly,
 }: ActivityManagementSectionProps) {
-  const state = useActivityManagement({ activityId, showActivityList, isReadOnly });
+  const state = useActivityManagement({ activityId, showActivityList, initialData, isReadOnly });
 
   const activityRateBatchConfig = useMemo(() => {
     const activityCodeOptions = state.activities.map((item) => ({

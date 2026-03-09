@@ -1,20 +1,15 @@
 "use client";
 
-import { authClient } from "@/lib/auth-client";
+import { useDashboardAccessState } from "@/modules/dashboard/ui/components/dashboard-shell-provider";
+import type { SeasonListResponse } from "@/modules/season/lib/season-api";
 import { SeasonManagementSection } from "@/modules/season/ui/components/season-management-section";
 
-export const SeasonManagementView = () => {
-  const { data: session } = authClient.useSession();
-  const accessUser = session?.user as
-    | { readOnly?: boolean; role?: string | null; canWriteMasterData?: boolean }
-    | undefined;
-  const canWrite =
-    Boolean(accessUser) &&
-    !Boolean(accessUser?.readOnly) &&
-    (accessUser?.role === "ADMIN" ||
-      accessUser?.role === "MANAGER" ||
-      Boolean(accessUser?.canWriteMasterData));
-  const isReadOnly = !canWrite;
+type Props = {
+  initialSeasons?: SeasonListResponse | null;
+};
 
-  return <SeasonManagementSection isReadOnly={isReadOnly} />;
+export const SeasonManagementView = ({ initialSeasons = null }: Props) => {
+  const { isReadOnly } = useDashboardAccessState();
+
+  return <SeasonManagementSection isReadOnly={isReadOnly} initialSeasons={initialSeasons} />;
 };

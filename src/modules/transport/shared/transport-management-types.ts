@@ -23,3 +23,14 @@ export type CompanySettingsResponse = {
     transportRateBasis?: "VEHICLE_CATEGORY" | "VEHICLE_TYPE" | null;
   } | null;
 };
+
+export type TransportManagementInitialData = {
+  resource: TransportResourceKey;
+  records: Array<Record<string, unknown>>;
+  catalogs: {
+    locations: Array<Record<string, unknown>>;
+    vehicleCategories: Array<Record<string, unknown>>;
+    vehicleTypes: Array<Record<string, unknown>>;
+  };
+  transportRateBasis: "VEHICLE_CATEGORY" | "VEHICLE_TYPE";
+};

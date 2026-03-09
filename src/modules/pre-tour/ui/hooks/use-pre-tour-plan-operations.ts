@@ -2,20 +2,22 @@
 
 import { useCallback, useState } from "react";
 import { notify } from "@/lib/notify";
-import { createPreTourRecord, listPreTourRecords } from "@/modules/pre-tour/lib/pre-tour-api";
+import {
+  createPreTourRecord,
+  createPreTourVersion,
+  listPreTourRecords,
+} from "@/modules/pre-tour/lib/pre-tour-api";
 import type { Row } from "@/modules/pre-tour/shared/pre-tour-management-types";
 
 type UsePreTourPlanOperationsParams = {
   canViewCosting: boolean;
   companyBaseCurrencyCode: string;
-  plans: Row[];
   onSuccess: () => Promise<void>;
 };
 
 export function usePreTourPlanOperations({
   canViewCosting,
   companyBaseCurrencyCode,
-  plans,
   onSuccess,
 }: UsePreTourPlanOperationsParams) {
   const [creatingVersion, setCreatingVersion] = useState(false);
@@ -159,48 +161,12 @@ export function usePreTourPlanOperations({
         return;
       }
 
-      const sourceReferenceNo = String(sourcePlan.referenceNo || sourcePlan.planCode || "");
-      const versions = plans
-        .filter((plan) => String(plan.referenceNo || "") === sourceReferenceNo)
-        .map((plan) => Number(plan.version || 1));
-      const nextVersion = (versions.length ? Math.max(...versions) : 1) + 1;
-      const sourcePlanCode = String(sourcePlan.planCode || sourcePlan.code || "PRE_TOUR");
-      const codePrefix = `${sourcePlanCode}_V${nextVersion}`;
-
-      const headerPayload: Record<string, unknown> = {
-        referenceNo: sourceReferenceNo,
-        planCode: codePrefix.slice(0, 80),
-        title: String(sourcePlan.title || "") || "Pre-Tour",
-        categoryId: sourcePlan.categoryId,
-        operatorOrgId: sourcePlan.operatorOrgId,
-        marketOrgId: sourcePlan.marketOrgId,
-        status: "DRAFT",
-        startDate: new Date(String(sourcePlan.startDate)).toISOString(),
-        endDate: new Date(String(sourcePlan.endDate)).toISOString(),
-        totalNights: Number(sourcePlan.totalNights || 0),
-        adults: Number(sourcePlan.adults || 1),
-        children: Number(sourcePlan.children || 0),
-        infants: Number(sourcePlan.infants || 0),
-        preferredLanguage: sourcePlan.preferredLanguage ?? null,
-        roomPreference: sourcePlan.roomPreference ?? null,
-        mealPreference: sourcePlan.mealPreference ?? null,
-        notes: sourcePlan.notes ?? null,
-        currencyCode: String(sourcePlan.currencyCode || companyBaseCurrencyCode),
-        priceMode: String(sourcePlan.priceMode || "EXCLUSIVE"),
-        pricingPolicy: sourcePlan.pricingPolicy ?? null,
-        baseTotal: Number(sourcePlan.baseTotal || 0),
-        taxTotal: Number(sourcePlan.taxTotal || 0),
-        grandTotal: Number(sourcePlan.grandTotal || 0),
-        version: nextVersion,
-        isLocked: false,
-        isActive: Boolean(sourcePlan.isActive ?? true),
-      };
-
       setCreatingVersion(true);
       try {
-        const createdPlan = await createPreTourRecord("pre-tours", headerPayload);
-        await clonePlanChildren(sourcePlan, String(createdPlan.id), codePrefix);
-        notify.success(`Version V${nextVersion} created.`);
+        const createdPlan = await createPreTourVersion(String(sourcePlan.id));
+        notify.success(
+          `Version V${String(createdPlan.version ?? "").trim() || "new"} created.`
+        );
         await onSuccess();
       } catch (error) {
         notify.error(error instanceof Error ? error.message : "Failed to create version.");
@@ -208,7 +174,7 @@ export function usePreTourPlanOperations({
         setCreatingVersion(false);
       }
     },
-    [clonePlanChildren, companyBaseCurrencyCode, onSuccess, plans]
+    [onSuccess]
   );
 
   return { clonePlanChildren, createVersionFromPlan, creatingVersion };

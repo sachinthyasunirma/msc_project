@@ -1,4 +1,4 @@
-import { Dispatch, SetStateAction, useCallback, useEffect, useMemo, useState } from "react";
+import { Dispatch, SetStateAction, useCallback, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import {
   Building2,
@@ -33,6 +33,7 @@ import {
   CommandList,
   CommandShortcut,
 } from "@/components/ui/command";
+import { useDashboardAccessState } from "@/modules/dashboard/ui/components/dashboard-shell-provider";
 
 interface Props {
   open: boolean;
@@ -367,32 +368,14 @@ const navigationItems = [
 
 export const DashboardCommands = ({ open, setOpen }: Props) => {
   const router = useRouter();
-  const [privileges, setPrivileges] = useState<string[] | null>(null);
-
-  useEffect(() => {
-    let active = true;
-    (async () => {
-      try {
-        const response = await fetch("/api/companies/access-control", { cache: "no-store" });
-        if (!response.ok || !active) return;
-        const body = (await response.json()) as { privileges?: string[] };
-        if (!active) return;
-        setPrivileges(Array.isArray(body.privileges) ? body.privileges : []);
-      } catch {
-        if (active) setPrivileges(null);
-      }
-    })();
-    return () => {
-      active = false;
-    };
-  }, []);
+  const { privileges } = useDashboardAccessState();
 
   const goTo = (href: string) => {
     setOpen(false);
     router.push(href);
   };
 
-  const has = useCallback((code: string) => privileges?.includes(code) ?? false, [privileges]);
+  const has = useCallback((code: string) => privileges.includes(code), [privileges]);
 
   const canAccessHref = useCallback((href: string) => {
     const byUrl: Record<string, string> = {

@@ -1,26 +1,42 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { TablePagination } from "@/components/ui/table-pagination";
 import { useCurrencyManagement } from "@/modules/currency/lib/use-currency-management";
+import type { CurrencyManagementInitialData } from "@/modules/currency/shared/currency-management-types";
 import type { CurrencyResourceKey } from "@/modules/currency/ui/components/currency-management/currency-management-config";
 import { CurrencyManagementHeader } from "@/modules/currency/ui/components/currency-management/currency-management-header";
-import { CurrencyRecordDialog } from "@/modules/currency/ui/components/currency-management/currency-record-dialog";
 import { CurrencyRecordsTable } from "@/modules/currency/ui/components/currency-management/currency-records-table";
+
+const CurrencyRecordDialog = dynamic(
+  () =>
+    import("@/modules/currency/ui/components/currency-management/currency-record-dialog").then(
+      (module) => module.CurrencyRecordDialog
+    ),
+  { ssr: false }
+);
 
 type CurrencyManagementSectionProps = {
   initialResource?: CurrencyResourceKey;
   managedCurrencyId?: string;
+  initialData?: CurrencyManagementInitialData | null;
   isReadOnly: boolean;
 };
 
 export function CurrencyManagementSection({
   initialResource = "currencies",
   managedCurrencyId = "",
+  initialData = null,
   isReadOnly,
 }: CurrencyManagementSectionProps) {
-  const state = useCurrencyManagement({ initialResource, managedCurrencyId, isReadOnly });
+  const state = useCurrencyManagement({
+    initialResource,
+    managedCurrencyId,
+    initialData,
+    isReadOnly,
+  });
 
   return (
     <Card>

@@ -1,10 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Plus, RefreshCw } from "lucide-react";
 import { notify } from "@/lib/notify";
 import { useConfirm } from "@/components/app-confirm-provider";
-import { authClient } from "@/lib/auth-client";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -36,6 +35,7 @@ import {
 } from "@/components/ui/table";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { TablePagination } from "@/components/ui/table-pagination";
+import { useDashboardAccessState } from "@/modules/dashboard/ui/components/dashboard-shell-provider";
 import { listHotels } from "@/modules/accommodation/lib/accommodation-api";
 import { listActivityRecords } from "@/modules/activity/lib/activity-api";
 import { listGuideRecords } from "@/modules/guides/lib/guides-api";
@@ -47,6 +47,10 @@ import {
   listTechnicalVisitRecords,
   updateTechnicalVisitRecord,
 } from "@/modules/technical-visit/lib/technical-visit-api";
+import type {
+  TechnicalVisitLookupHotel,
+  TechnicalVisitManagementInitialData,
+} from "@/modules/technical-visit/shared/technical-visit-management-types";
 import type { TechnicalVisitResourceKey } from "@/modules/technical-visit/shared/technical-visit-schemas";
 
 type Row = Record<string, unknown>;
@@ -149,37 +153,33 @@ function formatCell(value: unknown, lookups: Record<string, string>) {
 
 export function TechnicalVisitManagementView({
   initialResource = "technical-visits",
+  initialData = null,
 }: {
   initialResource?: TechnicalVisitResourceKey;
+  initialData?: TechnicalVisitManagementInitialData | null;
 }) {
   const confirm = useConfirm();
-  const { data: session } = authClient.useSession();
-  const accessUser = session?.user as
-    | { readOnly?: boolean; role?: string | null; canWriteMasterData?: boolean }
-    | undefined;
-  const canWrite =
-    Boolean(accessUser) &&
-    !Boolean(accessUser?.readOnly) &&
-    (accessUser?.role === "ADMIN" ||
-      accessUser?.role === "MANAGER" ||
-      Boolean(accessUser?.canWriteMasterData));
-  const isReadOnly = !canWrite;
+  const { isReadOnly } = useDashboardAccessState();
+  const skipInitialLookupsLoadRef = useRef(Boolean(initialData));
+  const skipInitialRecordsLoadRef = useRef(
+    Boolean(initialData && initialData.resource === initialResource)
+  );
 
   const [resource, setResource] = useState<TechnicalVisitResourceKey>(initialResource);
   const [query, setQuery] = useState("");
-  const [rows, setRows] = useState<Row[]>([]);
-  const [visits, setVisits] = useState<Row[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [rows, setRows] = useState<Row[]>(initialData?.rows ?? []);
+  const [visits, setVisits] = useState<Row[]>(initialData?.visits ?? []);
+  const [loading, setLoading] = useState(!initialData);
   const [saving, setSaving] = useState(false);
 
-  const [guides, setGuides] = useState<Row[]>([]);
-  const [activities, setActivities] = useState<Row[]>([]);
-  const [vehicleTypes, setVehicleTypes] = useState<Row[]>([]);
-  const [hotels, setHotels] = useState<Array<{ id: string; code: string; name: string }>>([]);
-  const [restaurants, setRestaurants] = useState<Row[]>([]);
-  const [users, setUsers] = useState<Row[]>([]);
+  const [guides, setGuides] = useState<Row[]>(initialData?.guides ?? []);
+  const [activities, setActivities] = useState<Row[]>(initialData?.activities ?? []);
+  const [vehicleTypes, setVehicleTypes] = useState<Row[]>(initialData?.vehicleTypes ?? []);
+  const [hotels, setHotels] = useState<TechnicalVisitLookupHotel[]>(initialData?.hotels ?? []);
+  const [restaurants, setRestaurants] = useState<Row[]>(initialData?.restaurants ?? []);
+  const [users, setUsers] = useState<Row[]>(initialData?.users ?? []);
 
-  const [selectedVisitId, setSelectedVisitId] = useState("");
+  const [selectedVisitId, setSelectedVisitId] = useState(initialData?.selectedVisitId ?? "");
   const [pageSize, setPageSize] = useState(25);
   const [page, setPage] = useState(1);
 
@@ -440,14 +440,27 @@ export function TechnicalVisitManagementView({
   }, [query, resource, selectedVisitId]);
 
   useEffect(() => {
+    if (skipInitialLookupsLoadRef.current) {
+      skipInitialLookupsLoadRef.current = false;
+      return;
+    }
     void loadLookups().catch((error) => {
       notify.error(error instanceof Error ? error.message : "Failed to load lookup data.");
     });
   }, [loadLookups]);
 
   useEffect(() => {
+    if (
+      skipInitialRecordsLoadRef.current &&
+      resource === initialResource &&
+      query.length === 0 &&
+      selectedVisitId === (initialData?.selectedVisitId ?? "")
+    ) {
+      skipInitialRecordsLoadRef.current = false;
+      return;
+    }
     void loadRecords();
-  }, [loadRecords]);
+  }, [initialData?.selectedVisitId, initialResource, loadRecords, query.length, resource, selectedVisitId]);
 
   useEffect(() => {
     setPage(1);

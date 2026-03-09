@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Edit3, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { useConfirm } from "@/components/app-confirm-provider";
 import { notify } from "@/lib/notify";
@@ -38,13 +38,14 @@ import {
 } from "@/components/ui/table";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
-import { authClient } from "@/lib/auth-client";
+import { useDashboardAccessState } from "@/modules/dashboard/ui/components/dashboard-shell-provider";
 import {
   createTourCategoryRecord,
   deleteTourCategoryRecord,
   listTourCategoryRecords,
   updateTourCategoryRecord,
 } from "@/modules/tour-category/lib/tour-category-api";
+import type { TourCategoryManagementInitialData } from "@/modules/tour-category/shared/tour-category-management-types";
 import type { TourCategoryResourceKey } from "@/modules/tour-category/shared/tour-category-schemas";
 
 type Field = {
@@ -118,28 +119,26 @@ function toOptionalNumber(value: unknown) {
 
 export function TourCategoryManagementView({
   initialResource = "tour-category-types",
+  initialData = null,
 }: {
   initialResource?: TourCategoryResourceKey;
+  initialData?: TourCategoryManagementInitialData | null;
 }) {
   const confirm = useConfirm();
-  const { data: session } = authClient.useSession();
-  const accessUser = session?.user as
-    | { readOnly?: boolean; role?: string | null; canWriteMasterData?: boolean }
-    | undefined;
-  const canWrite =
-    Boolean(accessUser) &&
-    !Boolean(accessUser?.readOnly) &&
-    (accessUser?.role === "ADMIN" ||
-      accessUser?.role === "MANAGER" ||
-      Boolean(accessUser?.canWriteMasterData));
-  const isReadOnly = !canWrite;
+  const { isReadOnly } = useDashboardAccessState();
+  const skipInitialLookupsLoadRef = useRef(Boolean(initialData));
+  const skipInitialRecordsLoadRef = useRef(
+    Boolean(initialData && initialData.resource === initialResource)
+  );
 
   const [resource, setResource] = useState<TourCategoryResourceKey>(initialResource);
   const [query, setQuery] = useState("");
-  const [records, setRecords] = useState<Array<Record<string, unknown>>>([]);
-  const [types, setTypes] = useState<Array<Record<string, unknown>>>([]);
-  const [categories, setCategories] = useState<Array<Record<string, unknown>>>([]);
-  const [loading, setLoading] = useState(true);
+  const [records, setRecords] = useState<Array<Record<string, unknown>>>(initialData?.records ?? []);
+  const [types, setTypes] = useState<Array<Record<string, unknown>>>(initialData?.types ?? []);
+  const [categories, setCategories] = useState<Array<Record<string, unknown>>>(
+    initialData?.categories ?? []
+  );
+  const [loading, setLoading] = useState(!initialData);
   const [saving, setSaving] = useState(false);
   const [pageSize, setPageSize] = useState(25);
   const [currentPage, setCurrentPage] = useState(1);
@@ -290,12 +289,24 @@ export function TourCategoryManagementView({
   }, [query, resource]);
 
   useEffect(() => {
+    if (skipInitialLookupsLoadRef.current) {
+      skipInitialLookupsLoadRef.current = false;
+      return;
+    }
     void loadLookups();
   }, [loadLookups]);
 
   useEffect(() => {
+    if (
+      skipInitialRecordsLoadRef.current &&
+      resource === initialResource &&
+      query.length === 0
+    ) {
+      skipInitialRecordsLoadRef.current = false;
+      return;
+    }
     void load();
-  }, [load]);
+  }, [initialResource, load, query.length, resource]);
 
   const totalPages = useMemo(
     () => Math.max(1, Math.ceil(records.length / pageSize)),

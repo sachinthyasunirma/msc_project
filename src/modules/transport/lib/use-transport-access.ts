@@ -1,24 +1,15 @@
 "use client";
 
 import { useMemo } from "react";
-import { authClient } from "@/lib/auth-client";
+import { useDashboardAccessState } from "@/modules/dashboard/ui/components/dashboard-shell-provider";
 
 export function useTransportAccess() {
-  const { data: session } = authClient.useSession();
-  const accessUser = session?.user as
-    | { readOnly?: boolean; role?: string | null; canWriteMasterData?: boolean }
-    | undefined;
-  const canWrite =
-    Boolean(accessUser) &&
-    !Boolean(accessUser?.readOnly) &&
-    (accessUser?.role === "ADMIN" ||
-      accessUser?.role === "MANAGER" ||
-      Boolean(accessUser?.canWriteMasterData));
+  const { isReadOnly } = useDashboardAccessState();
 
   return useMemo(
     () => ({
-      isReadOnly: !canWrite,
+      isReadOnly,
     }),
-    [canWrite]
+    [isReadOnly]
   );
 }

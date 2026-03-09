@@ -759,6 +759,26 @@ function validatePlanDateRange(startDate: string, endDate: string) {
   }
 }
 
+const clonePreTourVersionSchema = z.object({
+  sourcePlanId: z.string().trim().min(1),
+});
+
+function normalizeCloneCode(value: string) {
+  return value.trim().toUpperCase().slice(0, 80);
+}
+
+function buildCloneCode(prefix: string, suffix: string) {
+  return normalizeCloneCode(`${prefix}_${suffix}`);
+}
+
+type PreTourPlanInsert = typeof schema.preTourPlan.$inferInsert;
+type PreTourPlanDayInsert = typeof schema.preTourPlanDay.$inferInsert;
+type PreTourPlanItemInsert = typeof schema.preTourPlanItem.$inferInsert;
+type PreTourPlanItemAddonInsert = typeof schema.preTourPlanItemAddon.$inferInsert;
+type PreTourPlanTotalInsert = typeof schema.preTourPlanTotal.$inferInsert;
+type PreTourPlanCategoryInsert = typeof schema.preTourPlanCategory.$inferInsert;
+type PreTourPlanTechnicalVisitInsert = typeof schema.preTourPlanTechnicalVisit.$inferInsert;
+
 async function generatePreTourReferenceNo(companyId: string) {
   const now = new Date();
   const y = now.getFullYear();
@@ -1411,6 +1431,373 @@ export async function createPreTourRecord(
     default:
       throw new PreTourError(404, "RESOURCE_NOT_FOUND", "Pre-tour resource not found.");
   }
+}
+
+export async function createPreTourVersionFromPlan(payload: unknown, headers: Headers) {
+  const parsed = clonePreTourVersionSchema.safeParse(payload);
+  if (!parsed.success) {
+    throw new PreTourError(400, "VALIDATION_ERROR", normalizeZodError(parsed.error));
+  }
+
+  const access = await ensureWritable(headers, "pre-tours");
+  const { companyId, userId, userName } = access;
+
+  const [sourcePlan] = await db
+    .select()
+    .from(schema.preTourPlan)
+    .where(
+      and(
+        eq(schema.preTourPlan.id, parsed.data.sourcePlanId),
+        eq(schema.preTourPlan.companyId, companyId),
+        isNull(schema.preTourPlan.deletedAt)
+      )
+    )
+    .limit(1);
+
+  if (!sourcePlan) {
+    throw new PreTourError(404, "PLAN_NOT_FOUND", "Source pre-tour plan not found.");
+  }
+
+  if (!sourcePlan.categoryId || !sourcePlan.operatorOrgId || !sourcePlan.marketOrgId) {
+    throw new PreTourError(
+      400,
+      "VALIDATION_ERROR",
+      "Source pre-tour must have Category, Operator and Market before creating a version."
+    );
+  }
+
+  const sourceReferenceNo = String(
+    sourcePlan.referenceNo || sourcePlan.planCode || sourcePlan.code || ""
+  )
+    .trim()
+    .toUpperCase();
+  if (!sourceReferenceNo) {
+    throw new PreTourError(
+      400,
+      "VALIDATION_ERROR",
+      "Source pre-tour reference number is missing."
+    );
+  }
+
+  const sourcePlanCode = normalizeCloneCode(
+    String(sourcePlan.planCode || sourcePlan.code || "PRE_TOUR")
+  );
+  if (!sourcePlanCode) {
+    throw new PreTourError(400, "VALIDATION_ERROR", "Source pre-tour code is invalid.");
+  }
+
+  const [latestVersion] = await db
+    .select({ version: schema.preTourPlan.version })
+    .from(schema.preTourPlan)
+    .where(
+      and(
+        eq(schema.preTourPlan.companyId, companyId),
+        eq(schema.preTourPlan.referenceNo, sourceReferenceNo),
+        isNull(schema.preTourPlan.deletedAt)
+      )
+    )
+    .orderBy(desc(schema.preTourPlan.version), desc(schema.preTourPlan.createdAt))
+    .limit(1);
+
+  const nextVersion = Number(latestVersion?.version ?? sourcePlan.version ?? 1) + 1;
+  const codePrefix = normalizeCloneCode(`${sourcePlanCode}_V${nextVersion}`);
+
+  validatePlanDateRange(
+    sourcePlan.startDate.toISOString(),
+    sourcePlan.endDate.toISOString()
+  );
+  await ensureTourCategory(companyId, sourcePlan.categoryId);
+  const categoryRule = await ensureTourCategoryRule(companyId, sourcePlan.categoryId);
+  validateHeaderAgainstTourCategoryRule({
+    totalNights: Number(sourcePlan.totalNights ?? 0),
+    startDate: sourcePlan.startDate.toISOString(),
+    endDate: sourcePlan.endDate.toISOString(),
+    rule: categoryRule,
+  });
+  if (sourcePlan.operatorOrgId === sourcePlan.marketOrgId) {
+    throw new PreTourError(
+      400,
+      "VALIDATION_ERROR",
+      "Operator and market organizations must be different."
+    );
+  }
+  await ensureOrganizationType(
+    companyId,
+    sourcePlan.operatorOrgId,
+    ["OPERATOR", "SUPPLIER"],
+    "INVALID_OPERATOR_ORGANIZATION"
+  );
+  await ensureOrganizationType(
+    companyId,
+    sourcePlan.marketOrgId,
+    ["MARKET", "MARKETING"],
+    "INVALID_MARKET_ORGANIZATION"
+  );
+  await ensureOperatorMarketCompatibility(
+    companyId,
+    sourcePlan.operatorOrgId,
+    sourcePlan.marketOrgId
+  );
+  const currencyContext = await resolvePreTourCurrencyContext(companyId, {
+    planCurrencyCode: sourcePlan.currencyCode,
+    startDate: sourcePlan.startDate.toISOString(),
+    exchangeRateMode:
+      sourcePlan.exchangeRateMode === "MANUAL" ? "MANUAL" : "AUTO",
+    exchangeRate: Number(sourcePlan.exchangeRate ?? 0),
+    exchangeRateDate: sourcePlan.exchangeRateDate?.toISOString() ?? null,
+  });
+
+  const canCloneTotals =
+    access.role === "ADMIN" ||
+    access.role === "MANAGER" ||
+    access.privileges.includes("PRE_TOUR_COSTING");
+
+  return db.transaction(async (tx) => {
+    const [createdPlan] = await tx
+      .insert(schema.preTourPlan)
+      .values({
+        companyId,
+        code: codePrefix,
+        customerId: sourcePlan.customerId,
+        agentId: sourcePlan.agentId,
+        leadId: sourcePlan.leadId,
+        operatorOrgId: sourcePlan.operatorOrgId,
+        marketOrgId: sourcePlan.marketOrgId,
+        categoryId: sourcePlan.categoryId,
+        referenceNo: sourceReferenceNo,
+        planCode: codePrefix,
+        title: String(sourcePlan.title || "Pre-Tour"),
+        status: "DRAFT",
+        startDate: sourcePlan.startDate,
+        endDate: sourcePlan.endDate,
+        totalNights: sourcePlan.totalNights,
+        adults: sourcePlan.adults,
+        children: sourcePlan.children,
+        infants: sourcePlan.infants,
+        preferredLanguage: sourcePlan.preferredLanguage,
+        roomPreference: sourcePlan.roomPreference,
+        mealPreference: sourcePlan.mealPreference,
+        notes: sourcePlan.notes,
+        currencyCode: sourcePlan.currencyCode,
+        baseCurrencyCode: currencyContext.baseCurrencyCode,
+        exchangeRateMode: currencyContext.exchangeRateMode,
+        exchangeRate: toDecimal(currencyContext.exchangeRate, 8) ?? "0",
+        exchangeRateDate: currencyContext.exchangeRateDate,
+        priceMode: sourcePlan.priceMode,
+        pricingPolicy: sourcePlan.pricingPolicy,
+        baseTotal: toDecimal(sourcePlan.baseTotal),
+        taxTotal: toDecimal(sourcePlan.taxTotal),
+        grandTotal: toDecimal(sourcePlan.grandTotal),
+        version: nextVersion,
+        isLocked: false,
+        isActive: Boolean(sourcePlan.isActive ?? true),
+        updatedByUserId: userId,
+        updatedByName: userName,
+        deletedAt: null,
+        deletedByUserId: null,
+        deletedByName: null,
+      } satisfies PreTourPlanInsert)
+      .returning();
+
+    const sourceDays = await tx
+      .select()
+      .from(schema.preTourPlanDay)
+      .where(
+        and(
+          eq(schema.preTourPlanDay.companyId, companyId),
+          eq(schema.preTourPlanDay.planId, sourcePlan.id)
+        )
+      )
+      .orderBy(schema.preTourPlanDay.dayNumber, schema.preTourPlanDay.createdAt);
+
+    const dayIdMap = new Map<string, string>();
+    for (const sourceDay of sourceDays) {
+      const [createdDay] = await tx
+        .insert(schema.preTourPlanDay)
+        .values({
+          companyId,
+          code: buildCloneCode(
+            codePrefix,
+            `DAY_${String(sourceDay.dayNumber).padStart(2, "0")}`
+          ),
+          planId: createdPlan.id,
+          dayNumber: sourceDay.dayNumber,
+          date: sourceDay.date,
+          title: sourceDay.title,
+          notes: sourceDay.notes,
+          startLocationId: sourceDay.startLocationId,
+          endLocationId: sourceDay.endLocationId,
+          isActive: Boolean(sourceDay.isActive ?? true),
+        } satisfies PreTourPlanDayInsert)
+        .returning({ id: schema.preTourPlanDay.id });
+      dayIdMap.set(sourceDay.id, createdDay.id);
+    }
+
+    const sourceItems = await tx
+      .select()
+      .from(schema.preTourPlanItem)
+      .where(
+        and(
+          eq(schema.preTourPlanItem.companyId, companyId),
+          eq(schema.preTourPlanItem.planId, sourcePlan.id)
+        )
+      )
+      .orderBy(
+        schema.preTourPlanItem.dayId,
+        schema.preTourPlanItem.sortOrder,
+        schema.preTourPlanItem.createdAt
+      );
+
+    const itemIdMap = new Map<string, string>();
+    for (const sourceItem of sourceItems) {
+      const mappedDayId = dayIdMap.get(sourceItem.dayId);
+      if (!mappedDayId) continue;
+      const [createdItem] = await tx
+        .insert(schema.preTourPlanItem)
+        .values({
+          companyId,
+          code: buildCloneCode(codePrefix, `ITEM_${sourceItem.id.slice(-6)}`),
+          planId: createdPlan.id,
+          dayId: mappedDayId,
+          itemType: sourceItem.itemType,
+          serviceId: sourceItem.serviceId,
+          startAt: sourceItem.startAt,
+          endAt: sourceItem.endAt,
+          sortOrder: sourceItem.sortOrder,
+          pax: sourceItem.pax,
+          units: sourceItem.units,
+          nights: sourceItem.nights,
+          rooms: sourceItem.rooms,
+          fromLocationId: sourceItem.fromLocationId,
+          toLocationId: sourceItem.toLocationId,
+          locationId: sourceItem.locationId,
+          rateId: sourceItem.rateId,
+          currencyCode: sourceItem.currencyCode,
+          priceMode: sourceItem.priceMode,
+          baseAmount: sourceItem.baseAmount,
+          taxAmount: sourceItem.taxAmount,
+          totalAmount: sourceItem.totalAmount,
+          pricingSnapshot: sourceItem.pricingSnapshot,
+          title: sourceItem.title,
+          description: sourceItem.description,
+          notes: sourceItem.notes,
+          status: sourceItem.status,
+          isActive: Boolean(sourceItem.isActive ?? true),
+        } satisfies PreTourPlanItemInsert)
+        .returning({ id: schema.preTourPlanItem.id });
+      itemIdMap.set(sourceItem.id, createdItem.id);
+    }
+
+    const sourceAddons = await tx
+      .select()
+      .from(schema.preTourPlanItemAddon)
+      .where(
+        and(
+          eq(schema.preTourPlanItemAddon.companyId, companyId),
+          eq(schema.preTourPlanItemAddon.planId, sourcePlan.id)
+        )
+      )
+      .orderBy(schema.preTourPlanItemAddon.createdAt);
+
+    for (const sourceAddon of sourceAddons) {
+      const mappedItemId = itemIdMap.get(sourceAddon.planItemId);
+      if (!mappedItemId) continue;
+      await tx.insert(schema.preTourPlanItemAddon).values({
+        companyId,
+        code: buildCloneCode(codePrefix, `ADDON_${sourceAddon.id.slice(-6)}`),
+        planId: createdPlan.id,
+        planItemId: mappedItemId,
+        addonType: sourceAddon.addonType,
+        addonServiceId: sourceAddon.addonServiceId,
+        title: sourceAddon.title,
+        qty: sourceAddon.qty,
+        currencyCode: sourceAddon.currencyCode,
+        baseAmount: sourceAddon.baseAmount,
+        taxAmount: sourceAddon.taxAmount,
+        totalAmount: sourceAddon.totalAmount,
+        snapshot: sourceAddon.snapshot,
+        isActive: Boolean(sourceAddon.isActive ?? true),
+      } satisfies PreTourPlanItemAddonInsert);
+    }
+
+    if (canCloneTotals) {
+      const sourceTotals = await tx
+        .select()
+        .from(schema.preTourPlanTotal)
+        .where(
+          and(
+            eq(schema.preTourPlanTotal.companyId, companyId),
+            eq(schema.preTourPlanTotal.planId, sourcePlan.id)
+          )
+        )
+        .limit(1);
+
+      for (const sourceTotal of sourceTotals) {
+        await tx.insert(schema.preTourPlanTotal).values({
+          companyId,
+          code: buildCloneCode(codePrefix, "TOTAL"),
+          planId: createdPlan.id,
+          currencyCode: sourceTotal.currencyCode,
+          totalsByType: sourceTotal.totalsByType,
+          baseTotal: sourceTotal.baseTotal,
+          taxTotal: sourceTotal.taxTotal,
+          grandTotal: sourceTotal.grandTotal,
+          snapshot: sourceTotal.snapshot,
+          isActive: Boolean(sourceTotal.isActive ?? true),
+        } satisfies PreTourPlanTotalInsert);
+      }
+    }
+
+    const sourceCategories = await tx
+      .select()
+      .from(schema.preTourPlanCategory)
+      .where(
+        and(
+          eq(schema.preTourPlanCategory.companyId, companyId),
+          eq(schema.preTourPlanCategory.planId, sourcePlan.id)
+        )
+      )
+      .orderBy(schema.preTourPlanCategory.createdAt);
+
+    for (const sourceCategory of sourceCategories) {
+      await tx.insert(schema.preTourPlanCategory).values({
+        companyId,
+        code: buildCloneCode(codePrefix, `CAT_${sourceCategory.id.slice(-6)}`),
+        planId: createdPlan.id,
+        typeId: sourceCategory.typeId,
+        categoryId: sourceCategory.categoryId,
+        notes: sourceCategory.notes,
+        isActive: Boolean(sourceCategory.isActive ?? true),
+      } satisfies PreTourPlanCategoryInsert);
+    }
+
+    const sourceTechnicalVisits = await tx
+      .select()
+      .from(schema.preTourPlanTechnicalVisit)
+      .where(
+        and(
+          eq(schema.preTourPlanTechnicalVisit.companyId, companyId),
+          eq(schema.preTourPlanTechnicalVisit.planId, sourcePlan.id)
+        )
+      )
+      .orderBy(schema.preTourPlanTechnicalVisit.createdAt);
+
+    for (const sourceTechnicalVisit of sourceTechnicalVisits) {
+      await tx.insert(schema.preTourPlanTechnicalVisit).values({
+        companyId,
+        code: buildCloneCode(codePrefix, `TV_${sourceTechnicalVisit.id.slice(-6)}`),
+        planId: createdPlan.id,
+        dayId: sourceTechnicalVisit.dayId
+          ? (dayIdMap.get(sourceTechnicalVisit.dayId) ?? null)
+          : null,
+        technicalVisitId: sourceTechnicalVisit.technicalVisitId,
+        notes: sourceTechnicalVisit.notes,
+        isActive: Boolean(sourceTechnicalVisit.isActive ?? true),
+      } satisfies PreTourPlanTechnicalVisitInsert);
+    }
+
+    return createdPlan;
+  });
 }
 
 export async function updatePreTourRecord(

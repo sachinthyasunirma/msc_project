@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import { loadGuidesManagementInitialData } from "@/modules/guides/server/guides-management-loader";
 import {
   GuidesManagementView,
   type GuideResourceKey,
@@ -27,10 +28,12 @@ const GuidesResourcePage = async ({ params }: PageProps) => {
   if (!allowedResources.includes(resolved.resource as GuideResourceKey)) {
     notFound();
   }
+  const resource = resolved.resource as GuideResourceKey;
+  const initialData = await loadGuidesManagementInitialData(resource);
 
   return (
     <div className="p-4 md:p-6">
-      <GuidesManagementView initialResource={resolved.resource as GuideResourceKey} />
+      <GuidesManagementView initialResource={resource} initialData={initialData} />
     </div>
   );
 };

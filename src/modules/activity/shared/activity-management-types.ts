@@ -14,3 +14,11 @@ export type ActivityField = {
   nullable?: boolean;
   placeholder?: string;
 };
+
+export type ActivityManagementInitialData = {
+  resource: ActivityResourceKey;
+  records: Array<Record<string, unknown>>;
+  activities: Array<Record<string, unknown>>;
+  locations: Array<Record<string, unknown>>;
+  images: Array<Record<string, unknown>>;
+};

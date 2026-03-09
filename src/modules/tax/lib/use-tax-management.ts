@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useConfirm } from "@/components/app-confirm-provider";
 import { notify } from "@/lib/notify";
 import {
@@ -9,6 +9,7 @@ import {
   listTaxRecords,
   updateTaxRecord,
 } from "@/modules/tax/lib/tax-api";
+import type { TaxManagementInitialData } from "@/modules/tax/shared/tax-management-types";
 import {
   TAX_META,
   type TaxField,
@@ -23,26 +24,40 @@ import {
 type UseTaxManagementOptions = {
   initialResource?: TaxResourceKey;
   managedTaxId?: string;
+  initialData?: TaxManagementInitialData | null;
   isReadOnly: boolean;
 };
 
 export function useTaxManagement({
   initialResource = "taxes",
   managedTaxId = "",
+  initialData = null,
   isReadOnly,
 }: UseTaxManagementOptions) {
   const confirm = useConfirm();
+  const skipInitialRecordsLoadRef = useRef(
+    Boolean(initialData && initialData.resource === initialResource)
+  );
+  const skipInitialLookupsLoadRef = useRef(Boolean(initialData));
   const [resource, setResource] = useState<TaxResourceKey>(initialResource);
   const [query, setQuery] = useState("");
-  const [records, setRecords] = useState<Array<Record<string, unknown>>>([]);
-  const [loading, setLoading] = useState(true);
+  const [records, setRecords] = useState<Array<Record<string, unknown>>>(initialData?.records ?? []);
+  const [loading, setLoading] = useState(!initialData);
   const [saving, setSaving] = useState(false);
-  const [taxes, setTaxes] = useState<Array<Record<string, unknown>>>([]);
-  const [jurisdictions, setJurisdictions] = useState<Array<Record<string, unknown>>>([]);
-  const [currencies, setCurrencies] = useState<Array<Record<string, unknown>>>([]);
-  const [ruleSets, setRuleSets] = useState<Array<Record<string, unknown>>>([]);
-  const [rules, setRules] = useState<Array<Record<string, unknown>>>([]);
-  const [snapshots, setSnapshots] = useState<Array<Record<string, unknown>>>([]);
+  const [taxes, setTaxes] = useState<Array<Record<string, unknown>>>(initialData?.taxes ?? []);
+  const [jurisdictions, setJurisdictions] = useState<Array<Record<string, unknown>>>(
+    initialData?.jurisdictions ?? []
+  );
+  const [currencies, setCurrencies] = useState<Array<Record<string, unknown>>>(
+    initialData?.currencies ?? []
+  );
+  const [ruleSets, setRuleSets] = useState<Array<Record<string, unknown>>>(
+    initialData?.ruleSets ?? []
+  );
+  const [rules, setRules] = useState<Array<Record<string, unknown>>>(initialData?.rules ?? []);
+  const [snapshots, setSnapshots] = useState<Array<Record<string, unknown>>>(
+    initialData?.snapshots ?? []
+  );
   const [dialog, setDialog] = useState<{ open: boolean; mode: "create" | "edit"; row: Record<string, unknown> | null }>({ open: false, mode: "create", row: null });
   const [form, setForm] = useState<Record<string, unknown>>({});
   const [pageSize, setPageSize] = useState(25);
@@ -250,12 +265,24 @@ export function useTaxManagement({
   }, [isTaxManageMode, managedTaxId, query, resource, taxScopedResources]);
 
   useEffect(() => {
+    if (skipInitialLookupsLoadRef.current) {
+      skipInitialLookupsLoadRef.current = false;
+      return;
+    }
     void Promise.all([loadLookups(), loadCurrencies()]);
   }, [loadCurrencies, loadLookups]);
 
   useEffect(() => {
+    if (
+      skipInitialRecordsLoadRef.current &&
+      resource === initialResource &&
+      query.length === 0
+    ) {
+      skipInitialRecordsLoadRef.current = false;
+      return;
+    }
     void load();
-  }, [load]);
+  }, [initialResource, load, query.length, resource]);
 
   useEffect(() => {
     if (!visibleResources.includes(resource)) {

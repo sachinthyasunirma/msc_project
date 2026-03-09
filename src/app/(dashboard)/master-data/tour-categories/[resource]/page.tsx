@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import { loadTourCategoryManagementInitialData } from "@/modules/tour-category/server/tour-category-management-loader";
 import {
   TourCategoryManagementView,
 } from "@/modules/tour-category/ui/views/tour-category-management-view";
@@ -20,9 +21,15 @@ const TourCategoriesResourcePage = async ({ params }: PageProps) => {
     notFound();
   }
 
+  const initialResource = resolved.resource as TourCategoryResourceKey;
+  const initialData = await loadTourCategoryManagementInitialData(initialResource);
+
   return (
     <div className="p-4 md:p-6">
-      <TourCategoryManagementView initialResource={resolved.resource as TourCategoryResourceKey} />
+      <TourCategoryManagementView
+        initialResource={initialResource}
+        initialData={initialData}
+      />
     </div>
   );
 };

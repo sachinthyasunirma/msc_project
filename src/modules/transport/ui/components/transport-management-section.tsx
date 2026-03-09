@@ -1,5 +1,6 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { useMemo } from "react";
 import {
   locationImportConfig,
@@ -11,7 +12,6 @@ import {
   transportVehicleTypeImportConfig,
 } from "@/components/batch-import/master-batch-import-config";
 import {
-  MasterBatchImportDialog,
   type ImportEntityConfig,
 } from "@/components/batch-import/master-batch-import-dialog";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -19,7 +19,10 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { createTransportRecord } from "@/modules/transport/lib/transport-api";
 import { useTransportManagement } from "@/modules/transport/lib/use-transport-management";
 import { TRANSPORT_RESOURCE_META } from "@/modules/transport/shared/transport-management-constants";
-import type { TransportResourceKey } from "@/modules/transport/shared/transport-management-types";
+import type {
+  TransportManagementInitialData,
+  TransportResourceKey,
+} from "@/modules/transport/shared/transport-management-types";
 import { BaggageRatesTab } from "@/modules/transport/ui/components/transport-manage/baggage-rates-tab";
 import { LocationExpensesTab } from "@/modules/transport/ui/components/transport-manage/location-expenses-tab";
 import { LocationRatesTab } from "@/modules/transport/ui/components/transport-manage/location-rates-tab";
@@ -27,18 +30,35 @@ import { LocationsTab } from "@/modules/transport/ui/components/transport-manage
 import { PaxVehicleRatesTab } from "@/modules/transport/ui/components/transport-manage/pax-vehicle-rates-tab";
 import { VehicleCategoriesTab } from "@/modules/transport/ui/components/transport-manage/vehicle-categories-tab";
 import { VehicleTypesTab } from "@/modules/transport/ui/components/transport-manage/vehicle-types-tab";
-import { TransportRecordDialog } from "@/modules/transport/ui/components/transport-record-dialog";
+
+const MasterBatchImportDialog = dynamic(
+  () =>
+    import("@/components/batch-import/master-batch-import-dialog").then(
+      (module) => module.MasterBatchImportDialog
+    ),
+  { ssr: false }
+);
+
+const TransportRecordDialog = dynamic(
+  () =>
+    import("@/modules/transport/ui/components/transport-record-dialog").then(
+      (module) => module.TransportRecordDialog
+    ),
+  { ssr: false }
+);
 
 type TransportManagementSectionProps = {
   initialResource?: TransportResourceKey;
+  initialData?: TransportManagementInitialData | null;
   isReadOnly: boolean;
 };
 
 export function TransportManagementSection({
   initialResource = "locations",
+  initialData = null,
   isReadOnly,
 }: TransportManagementSectionProps) {
-  const state = useTransportManagement({ initialResource, isReadOnly });
+  const state = useTransportManagement({ initialResource, initialData, isReadOnly });
 
   const batchConfig = useMemo<ImportEntityConfig>(() => {
     const locationCodeOptions = state.catalogs.locations.map((row) => ({

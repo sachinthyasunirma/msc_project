@@ -40,5 +40,30 @@ export const internalNotification = pgTable(
     index("idx_internal_notification_recipient").on(table.recipientUserId),
     index("idx_internal_notification_sender").on(table.senderUserId),
     index("idx_internal_notification_created").on(table.createdAt),
+    index("idx_internal_notification_inbox_feed").on(
+      table.companyId,
+      table.recipientUserId,
+      table.deletedByRecipient,
+      table.isRead,
+      table.createdAt
+    ),
+    index("idx_internal_notification_sent_feed").on(
+      table.companyId,
+      table.senderUserId,
+      table.deletedBySender,
+      table.createdAt
+    ),
+    index("idx_internal_notification_thread_pair_sender").on(
+      table.companyId,
+      table.senderUserId,
+      table.recipientUserId,
+      table.createdAt
+    ),
+    index("idx_internal_notification_thread_pair_recipient").on(
+      table.companyId,
+      table.recipientUserId,
+      table.senderUserId,
+      table.createdAt
+    ),
   ]
 );

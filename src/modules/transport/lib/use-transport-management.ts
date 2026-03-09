@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useConfirm } from "@/components/app-confirm-provider";
 import { notify } from "@/lib/notify";
 import {
@@ -15,31 +15,39 @@ import {
   toLocalDateTime,
 } from "@/modules/transport/lib/transport-management-utils";
 import type {
-  CompanySettingsResponse,
   TransportFormField,
+  TransportManagementInitialData,
   TransportResourceKey,
 } from "@/modules/transport/shared/transport-management-types";
 
 type UseTransportManagementOptions = {
   initialResource?: TransportResourceKey;
+  initialData?: TransportManagementInitialData | null;
   isReadOnly: boolean;
 };
 
 export function useTransportManagement({
   initialResource = "locations",
+  initialData = null,
   isReadOnly,
 }: UseTransportManagementOptions) {
   const confirm = useConfirm();
+  const skipInitialCatalogsLoadRef = useRef(Boolean(initialData));
+  const skipInitialRecordsLoadRef = useRef(
+    Boolean(initialData && initialData.resource === initialResource)
+  );
   const [resource, setResource] = useState<TransportResourceKey>(initialResource);
   const [query, setQuery] = useState("");
-  const [records, setRecords] = useState<Array<Record<string, unknown>>>([]);
-  const [loading, setLoading] = useState(true);
+  const [records, setRecords] = useState<Array<Record<string, unknown>>>(initialData?.records ?? []);
+  const [loading, setLoading] = useState(!initialData);
   const [saving, setSaving] = useState(false);
-  const [catalogs, setCatalogs] = useState({
-    locations: [] as Array<Record<string, unknown>>,
-    vehicleCategories: [] as Array<Record<string, unknown>>,
-    vehicleTypes: [] as Array<Record<string, unknown>>,
-  });
+  const [catalogs, setCatalogs] = useState(
+    initialData?.catalogs ?? {
+      locations: [] as Array<Record<string, unknown>>,
+      vehicleCategories: [] as Array<Record<string, unknown>>,
+      vehicleTypes: [] as Array<Record<string, unknown>>,
+    }
+  );
   const [dialog, setDialog] = useState<{
     open: boolean;
     mode: "create" | "edit";
@@ -49,8 +57,8 @@ export function useTransportManagement({
   const [batchOpen, setBatchOpen] = useState(false);
   const [pageSize, setPageSize] = useState(25);
   const [currentPage, setCurrentPage] = useState(1);
-  const [transportRateBasis, setTransportRateBasis] = useState<"VEHICLE_CATEGORY" | "VEHICLE_TYPE">(
-    "VEHICLE_TYPE"
+  const [transportRateBasis] = useState<"VEHICLE_CATEGORY" | "VEHICLE_TYPE">(
+    initialData?.transportRateBasis ?? "VEHICLE_TYPE"
   );
 
   const lookupMap = useMemo(() => {
@@ -256,30 +264,24 @@ export function useTransportManagement({
   }, [records, currentPage, pageSize]);
 
   useEffect(() => {
+    if (skipInitialCatalogsLoadRef.current) {
+      skipInitialCatalogsLoadRef.current = false;
+      return;
+    }
     void loadCatalogs();
   }, [loadCatalogs]);
 
   useEffect(() => {
+    if (
+      skipInitialRecordsLoadRef.current &&
+      resource === initialResource &&
+      query.length === 0
+    ) {
+      skipInitialRecordsLoadRef.current = false;
+      return;
+    }
     void load();
-  }, [load]);
-
-  useEffect(() => {
-    let active = true;
-    (async () => {
-      try {
-        const response = await fetch("/api/companies/me", { cache: "no-store" });
-        if (!response.ok) return;
-        const body = (await response.json()) as CompanySettingsResponse;
-        if (!active) return;
-        setTransportRateBasis(body.company?.transportRateBasis === "VEHICLE_CATEGORY" ? "VEHICLE_CATEGORY" : "VEHICLE_TYPE");
-      } catch {
-        if (active) setTransportRateBasis("VEHICLE_TYPE");
-      }
-    })();
-    return () => {
-      active = false;
-    };
-  }, []);
+  }, [initialResource, load, query.length, resource]);
 
   useEffect(() => {
     setResource(initialResource);

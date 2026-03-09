@@ -2,6 +2,12 @@ import { and, desc, eq, ilike, lt, or, sql, SQL } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
 import * as schema from "@/db/schema";
+import {
+  getOrSetMasterDataCache,
+  invalidateMasterDataCacheByPrefixes,
+  masterDataCachePrefix,
+  masterDataListCacheKey,
+} from "@/lib/cache/master-data-cache";
 import { AccessControlError, resolveAccess } from "@/lib/security/access-control";
 import {
   createSeasonSchema,
@@ -122,32 +128,35 @@ export async function listSeasons(searchParams: URLSearchParams, headers: Header
     );
   }
 
-  const rows = await db
-    .select({
-      id: schema.season.id,
-      code: schema.season.code,
-      name: schema.season.name,
-      description: schema.season.description,
-      startDate: schema.season.startDate,
-      endDate: schema.season.endDate,
-      createdAt: schema.season.createdAt,
-      updatedAt: schema.season.updatedAt,
-    })
-    .from(schema.season)
-    .where(and(...clauses))
-    .orderBy(desc(schema.season.createdAt), desc(schema.season.id))
-    .limit(query.limit + 1);
+  const cacheKey = masterDataListCacheKey("season", companyId, "seasons", query);
+  return getOrSetMasterDataCache(cacheKey, async () => {
+    const rows = await db
+      .select({
+        id: schema.season.id,
+        code: schema.season.code,
+        name: schema.season.name,
+        description: schema.season.description,
+        startDate: schema.season.startDate,
+        endDate: schema.season.endDate,
+        createdAt: schema.season.createdAt,
+        updatedAt: schema.season.updatedAt,
+      })
+      .from(schema.season)
+      .where(and(...clauses))
+      .orderBy(desc(schema.season.createdAt), desc(schema.season.id))
+      .limit(query.limit + 1);
 
-  const hasNext = rows.length > query.limit;
-  const items = hasNext ? rows.slice(0, query.limit) : rows;
-  const last = items[items.length - 1];
+    const hasNext = rows.length > query.limit;
+    const items = hasNext ? rows.slice(0, query.limit) : rows;
+    const last = items[items.length - 1];
 
-  return {
-    items,
-    nextCursor: hasNext && last ? buildCursor(last) : null,
-    hasNext,
-    limit: query.limit,
-  };
+    return {
+      items,
+      nextCursor: hasNext && last ? buildCursor(last) : null,
+      hasNext,
+      limit: query.limit,
+    };
+  });
 }
 
 export async function createSeason(payload: unknown, headers: Headers) {
@@ -158,15 +167,19 @@ export async function createSeason(payload: unknown, headers: Headers) {
   }
 
   const companyId = await getCompanyId(headers);
-  const [created] = await db
-    .insert(schema.season)
-    .values({
-      ...parsed.data,
-      companyId,
-    })
-    .returning();
+  try {
+    const [created] = await db
+      .insert(schema.season)
+      .values({
+        ...parsed.data,
+        companyId,
+      })
+      .returning();
 
-  return created;
+    return created;
+  } finally {
+    await invalidateMasterDataCacheByPrefixes([masterDataCachePrefix("season", companyId)]);
+  }
 }
 
 export async function updateSeason(seasonId: string, payload: unknown, headers: Headers) {
@@ -177,32 +190,40 @@ export async function updateSeason(seasonId: string, payload: unknown, headers: 
   }
 
   const companyId = await getCompanyId(headers);
-  const [updated] = await db
-    .update(schema.season)
-    .set({
-      ...parsed.data,
-      updatedAt: new Date(),
-    })
-    .where(and(eq(schema.season.id, seasonId), eq(schema.season.companyId, companyId)))
-    .returning();
+  try {
+    const [updated] = await db
+      .update(schema.season)
+      .set({
+        ...parsed.data,
+        updatedAt: new Date(),
+      })
+      .where(and(eq(schema.season.id, seasonId), eq(schema.season.companyId, companyId)))
+      .returning();
 
-  if (!updated) {
-    throw new SeasonError(404, "SEASON_NOT_FOUND", "Season not found.");
+    if (!updated) {
+      throw new SeasonError(404, "SEASON_NOT_FOUND", "Season not found.");
+    }
+
+    return updated;
+  } finally {
+    await invalidateMasterDataCacheByPrefixes([masterDataCachePrefix("season", companyId)]);
   }
-
-  return updated;
 }
 
 export async function deleteSeason(seasonId: string, headers: Headers) {
   await ensureWritable(headers);
   const companyId = await getCompanyId(headers);
-  const [deleted] = await db
-    .delete(schema.season)
-    .where(and(eq(schema.season.id, seasonId), eq(schema.season.companyId, companyId)))
-    .returning({ id: schema.season.id });
+  try {
+    const [deleted] = await db
+      .delete(schema.season)
+      .where(and(eq(schema.season.id, seasonId), eq(schema.season.companyId, companyId)))
+      .returning({ id: schema.season.id });
 
-  if (!deleted) {
-    throw new SeasonError(404, "SEASON_NOT_FOUND", "Season not found.");
+    if (!deleted) {
+      throw new SeasonError(404, "SEASON_NOT_FOUND", "Season not found.");
+    }
+  } finally {
+    await invalidateMasterDataCacheByPrefixes([masterDataCachePrefix("season", companyId)]);
   }
 }
 

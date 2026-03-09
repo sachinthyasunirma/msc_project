@@ -22,14 +22,19 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import type { SeasonListResponse } from "@/modules/season/lib/season-api";
 import { useSeasonManagement } from "@/modules/season/lib/use-season-management";
 
 type SeasonManagementSectionProps = {
   isReadOnly: boolean;
+  initialSeasons?: SeasonListResponse | null;
 };
 
-export function SeasonManagementSection({ isReadOnly }: SeasonManagementSectionProps) {
-  const state = useSeasonManagement({ isReadOnly });
+export function SeasonManagementSection({
+  isReadOnly,
+  initialSeasons = null,
+}: SeasonManagementSectionProps) {
+  const state = useSeasonManagement({ isReadOnly, initialData: initialSeasons });
 
   return (
     <Card>
