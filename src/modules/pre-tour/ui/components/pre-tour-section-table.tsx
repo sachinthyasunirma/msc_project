@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { CalendarDays, CopyPlus, PanelLeftOpen, Plus, Settings2, Trash2 } from "lucide-react";
+import { CalendarDays, CopyPlus, PanelLeftOpen, Pencil, Plus, Settings2, Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -185,11 +185,11 @@ export function SectionTable({
             onClick={() => onEdit(row)}
             disabled={isReadOnly}
           >
-            <Settings2 className="size-4" />
+            <Pencil className="size-4" />
           </Button>
         ) : (
           <Button size="sm" variant="outline" onClick={() => onEdit(row)} disabled={isReadOnly}>
-            <Settings2 className="mr-1 size-4" />
+            <Pencil className="mr-1 size-4" />
             {editLabel || "Edit"}
           </Button>
         )

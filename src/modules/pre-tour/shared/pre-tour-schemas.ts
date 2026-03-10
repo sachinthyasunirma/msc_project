@@ -4,6 +4,7 @@ export const preTourResourceSchema = z.enum([
   "pre-tours",
   "pre-tour-days",
   "pre-tour-items",
+  "pre-tour-guide-allocations",
   "pre-tour-item-addons",
   "pre-tour-totals",
   "pre-tour-categories",
@@ -165,6 +166,34 @@ export const updatePreTourItemAddonSchema = createPreTourItemAddonSchema.partial
     message: "At least one addon field is required.",
   }
 );
+
+export const createPreTourGuideAllocationSchema = baseCodeSchema.extend({
+  planId: z.string().min(1),
+  serviceId: z.string().trim().min(1).optional().nullable(),
+  coverageMode: z.enum(["FULL_TOUR", "DAY_RANGE"]).default("FULL_TOUR"),
+  startDayId: z.string().min(1).optional().nullable(),
+  endDayId: z.string().min(1).optional().nullable(),
+  language: z.string().trim().max(40).optional().nullable(),
+  guideBasis: z.string().trim().max(60).optional().nullable(),
+  pax: z.coerce.number().int().min(0).max(9999).optional().nullable(),
+  units: z.coerce.number().min(0).max(999999).optional().nullable(),
+  rateId: z.string().trim().min(1).optional().nullable(),
+  currencyCode: z.string().trim().toUpperCase().min(1).max(10),
+  priceMode: z.enum(["EXCLUSIVE", "INCLUSIVE"]).default("EXCLUSIVE"),
+  baseAmount: z.coerce.number().min(0).max(999999999).default(0),
+  taxAmount: z.coerce.number().min(0).max(999999999).default(0),
+  totalAmount: z.coerce.number().min(0).max(999999999).default(0),
+  pricingSnapshot: z.record(z.string(), z.unknown()).optional().nullable(),
+  title: z.string().trim().max(200).optional().nullable(),
+  notes: z.string().trim().max(2000).optional().nullable(),
+  status: z.enum(["PLANNED", "CONFIRMED", "CANCELLED", "COMPLETED"]).default("PLANNED"),
+});
+
+export const updatePreTourGuideAllocationSchema = createPreTourGuideAllocationSchema
+  .partial()
+  .refine((value) => Object.keys(value).length > 0, {
+    message: "At least one guide allocation field is required.",
+  });
 
 export const createPreTourTotalSchema = baseCodeSchema.extend({
   planId: z.string().min(1),

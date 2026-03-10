@@ -1,48 +1,34 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useConfirm } from "@/components/app-confirm-provider";
 import { notify } from "@/lib/notify";
 import {
   createAvailability,
   createHotelImage,
-  createRoomRate,
-  createRoomRateHeader,
   createRoomType,
   deleteAvailability,
   deleteHotelImage,
-  deleteRoomRate,
-  deleteRoomRateHeader,
   deleteRoomType,
   getHotel,
   listAvailability,
   listHotelImages,
-  listRoomRateHeaders,
-  listRoomRates,
   listRoomTypes,
   updateAvailability,
   updateHotelImage,
-  updateRoomRate,
-  updateRoomRateHeader,
   updateRoomType,
   type Availability,
   type Hotel,
   type HotelImage,
-  type RoomRate,
-  type RoomRateHeader,
   type RoomType,
 } from "@/modules/accommodation/lib/accommodation-api";
 import {
   getInitialAvailabilityForm,
   getInitialImageForm,
-  getInitialRoomRateForm,
-  getInitialRoomRateHeaderForm,
   getInitialRoomTypeForm,
   getInitialSeasonForm,
   type AvailabilityFormState,
   type ImageFormState,
-  type RoomRateFormState,
-  type RoomRateHeaderFormState,
   type RoomTypeFormState,
   type SeasonFormState,
 } from "@/modules/accommodation/lib/accommodation-view-helpers";
@@ -50,8 +36,6 @@ import { useAccommodationFormDialog } from "@/modules/accommodation/lib/use-acco
 import {
   createAvailabilitySchema,
   createHotelImageSchema,
-  createRoomRateHeaderSchema,
-  createRoomRateSchema,
   createRoomTypeSchema,
 } from "@/modules/accommodation/shared/accommodation-schemas";
 import { createSeason, deleteSeason, listSeasons, updateSeason } from "@/modules/season/lib/season-api";
@@ -82,15 +66,6 @@ export function useAccommodationHotelDetail({
   const [roomTypes, setRoomTypes] = useState<RoomType[]>(
     (initialData?.roomTypes as RoomType[] | undefined) ?? []
   );
-  const [roomRateHeaders, setRoomRateHeaders] = useState<RoomRateHeader[]>(
-    (initialData?.roomRateHeaders as RoomRateHeader[] | undefined) ?? []
-  );
-  const [selectedRoomRateHeaderId, setSelectedRoomRateHeaderId] = useState<string | null>(
-    (initialData?.roomRateHeaders?.[0]?.id as string | undefined) ?? null
-  );
-  const [roomRates, setRoomRates] = useState<RoomRate[]>(
-    (initialData?.roomRates as RoomRate[] | undefined) ?? []
-  );
   const [availability, setAvailability] = useState<Availability[]>(
     (initialData?.availability as Availability[] | undefined) ?? []
   );
@@ -100,19 +75,9 @@ export function useAccommodationHotelDetail({
   const [seasons, setSeasons] = useState<SeasonOption[]>(
     (initialData?.seasons as SeasonOption[] | undefined) ?? []
   );
-  const [roomRateLineSearch, setRoomRateLineSearch] = useState("");
-  const [roomRateLineStatusFilter, setRoomRateLineStatusFilter] = useState("all");
-  const [roomRateLinePageSize, setRoomRateLinePageSize] = useState("10");
-  const [roomRateLinePage, setRoomRateLinePage] = useState(1);
 
   const roomTypeDialog = useAccommodationFormDialog<RoomTypeFormState, RoomType>((row) =>
     getInitialRoomTypeForm(row ?? null)
-  );
-  const roomRateHeaderDialog = useAccommodationFormDialog<RoomRateHeaderFormState, RoomRateHeader>((row) =>
-    getInitialRoomRateHeaderForm(row ?? null)
-  );
-  const roomRateDialog = useAccommodationFormDialog<RoomRateFormState, RoomRate>((row) =>
-    getInitialRoomRateForm(row ?? null, selectedRoomRateHeaderId, roomTypes[0]?.id ?? "")
   );
   const availabilityDialog = useAccommodationFormDialog<AvailabilityFormState, Availability>((row) =>
     getInitialAvailabilityForm(row ?? null, roomTypes[0]?.id ?? "")
@@ -123,52 +88,6 @@ export function useAccommodationHotelDetail({
   const seasonDialog = useAccommodationFormDialog<SeasonFormState, SeasonOption>((row) =>
     getInitialSeasonForm(row ?? null)
   );
-
-  const filteredRoomRates = useMemo(
-    () =>
-      selectedRoomRateHeaderId
-        ? roomRates.filter((item) => item.roomRateHeaderId === selectedRoomRateHeaderId)
-        : roomRates,
-    [roomRates, selectedRoomRateHeaderId]
-  );
-
-  const visibleRoomRates = useMemo(() => {
-    if (!roomRateLineSearch.trim()) return filteredRoomRates;
-    const term = roomRateLineSearch.toLowerCase();
-    return filteredRoomRates.filter((item) =>
-      [item.roomCategory, item.roomTypeName, item.roomBasis, item.baseRatePerNight, item.currency]
-        .filter(Boolean)
-        .some((value) => String(value).toLowerCase().includes(term))
-    );
-  }, [filteredRoomRates, roomRateLineSearch]);
-
-  const statusFilteredRoomRates = useMemo(
-    () =>
-      roomRateLineStatusFilter === "all"
-        ? visibleRoomRates
-        : visibleRoomRates.filter((item) =>
-            roomRateLineStatusFilter === "active" ? item.isActive : !item.isActive
-          ),
-    [roomRateLineStatusFilter, visibleRoomRates]
-  );
-
-  const roomRateLineTotalPages = useMemo(
-    () => Math.max(1, Math.ceil(statusFilteredRoomRates.length / Number(roomRateLinePageSize))),
-    [roomRateLinePageSize, statusFilteredRoomRates.length]
-  );
-
-  const pagedRoomRates = useMemo(() => {
-    const pageSize = Number(roomRateLinePageSize);
-    const start = (roomRateLinePage - 1) * pageSize;
-    return statusFilteredRoomRates.slice(start, start + pageSize);
-  }, [roomRateLinePage, roomRateLinePageSize, statusFilteredRoomRates]);
-
-  const selectedRoomRateHeader = useMemo(
-    () => roomRateHeaders.find((item) => item.id === selectedRoomRateHeaderId) || null,
-    [roomRateHeaders, selectedRoomRateHeaderId]
-  );
-
-  const roomTypesAvailable = roomTypes.length > 0;
 
   const loadHotel = useCallback(async () => {
     if (!hotelId) {
@@ -194,38 +113,6 @@ export function useAccommodationHotelDetail({
     } catch {
       notify.error("Failed to load room types.");
       setRoomTypes([]);
-    }
-  }, [hotelId]);
-
-  const loadRoomRateHeaders = useCallback(async () => {
-    if (!hotelId) {
-      setRoomRateHeaders([]);
-      setSelectedRoomRateHeaderId(null);
-      return;
-    }
-    try {
-      const headers = await listRoomRateHeaders(hotelId);
-      setRoomRateHeaders(headers);
-      setSelectedRoomRateHeaderId((prev) =>
-        prev && headers.some((item) => item.id === prev) ? prev : (headers[0]?.id ?? null)
-      );
-    } catch {
-      notify.error("Failed to load room rate headers.");
-      setRoomRateHeaders([]);
-      setSelectedRoomRateHeaderId(null);
-    }
-  }, [hotelId]);
-
-  const loadRoomRates = useCallback(async () => {
-    if (!hotelId) {
-      setRoomRates([]);
-      return;
-    }
-    try {
-      setRoomRates(await listRoomRates(hotelId));
-    } catch {
-      notify.error("Failed to load room rates.");
-      setRoomRates([]);
     }
   }, [hotelId]);
 
@@ -283,8 +170,6 @@ export function useAccommodationHotelDetail({
       await Promise.all([
         loadHotel(),
         loadRoomTypes(),
-        loadRoomRateHeaders(),
-        loadRoomRates(),
         loadAvailability(),
         loadImages(),
         loadSeasons(),
@@ -292,7 +177,7 @@ export function useAccommodationHotelDetail({
     } finally {
       setLoadingDetails(false);
     }
-  }, [hotelId, loadAvailability, loadHotel, loadImages, loadRoomRateHeaders, loadRoomRates, loadRoomTypes, loadSeasons]);
+  }, [hotelId, loadAvailability, loadHotel, loadImages, loadRoomTypes, loadSeasons]);
 
   useEffect(() => {
     if (skipInitialLoadRef.current) {
@@ -301,16 +186,6 @@ export function useAccommodationHotelDetail({
     }
     void loadDetails();
   }, [loadDetails]);
-
-  useEffect(() => {
-    setRoomRateLinePage(1);
-  }, [roomRateLinePageSize, roomRateLineSearch, roomRateLineStatusFilter, selectedRoomRateHeaderId]);
-
-  useEffect(() => {
-    if (roomRateLinePage > roomRateLineTotalPages) {
-      setRoomRateLinePage(roomRateLineTotalPages);
-    }
-  }, [roomRateLinePage, roomRateLineTotalPages]);
 
   const withSave = useCallback(async (callback: () => Promise<void>) => {
     try {
@@ -352,17 +227,6 @@ export function useAccommodationHotelDetail({
     roomTypeDialog.openDialog(mode, row);
   }, [guardCreate, roomTypeDialog]);
 
-  const openRoomRateHeaderDialog = useCallback(async (mode: "create" | "edit", row: RoomRateHeader | null = null) => {
-    if (!guardCreate(mode)) return;
-    await loadSeasons();
-    roomRateHeaderDialog.openDialog(mode, row);
-  }, [guardCreate, loadSeasons, roomRateHeaderDialog]);
-
-  const openRoomRateDialog = useCallback((mode: "create" | "edit", row: RoomRate | null = null) => {
-    if (!guardCreate(mode)) return;
-    roomRateDialog.openDialog(mode, row);
-  }, [guardCreate, roomRateDialog]);
-
   const openAvailabilityDialog = useCallback((mode: "create" | "edit", row: Availability | null = null) => {
     if (!guardCreate(mode)) return;
     availabilityDialog.openDialog(mode, row);
@@ -403,53 +267,6 @@ export function useAccommodationHotelDetail({
       roomTypeDialog.closeDialog();
     });
   }, [hotelId, roomTypeDialog, withSave]);
-
-  const submitRoomRateHeader = useCallback(async () => {
-    if (!hotelId) return;
-    const parsed = createRoomRateHeaderSchema.safeParse({
-      ...roomRateHeaderDialog.form,
-      seasonId: roomRateHeaderDialog.form.seasonId || null,
-    });
-    if (!parsed.success) {
-      notify.error(parsed.error.issues[0]?.message || "Invalid room rate header data.");
-      return;
-    }
-    await withSave(async () => {
-      if (roomRateHeaderDialog.dialog.mode === "create") {
-        const created = await createRoomRateHeader(hotelId, parsed.data);
-        setRoomRateHeaders((prev) => [...prev, created]);
-        setSelectedRoomRateHeaderId(created.id);
-        notify.success("Room rate header created.");
-      } else if (roomRateHeaderDialog.dialog.row) {
-        const updated = await updateRoomRateHeader(hotelId, roomRateHeaderDialog.dialog.row.id, parsed.data);
-        setRoomRateHeaders((prev) => prev.map((row) => (row.id === updated.id ? updated : row)));
-        notify.success("Room rate header updated.");
-      }
-      roomRateHeaderDialog.closeDialog();
-      await loadSeasons();
-    });
-  }, [hotelId, loadSeasons, roomRateHeaderDialog, withSave]);
-
-  const submitRoomRate = useCallback(async () => {
-    if (!hotelId) return;
-    const parsed = createRoomRateSchema.safeParse(roomRateDialog.form);
-    if (!parsed.success) {
-      notify.error(parsed.error.issues[0]?.message || "Invalid room rate data.");
-      return;
-    }
-    await withSave(async () => {
-      if (roomRateDialog.dialog.mode === "create") {
-        const created = await createRoomRate(hotelId, parsed.data);
-        setRoomRates((prev) => [...prev, created]);
-        notify.success("Room rate created.");
-      } else if (roomRateDialog.dialog.row) {
-        const updated = await updateRoomRate(hotelId, roomRateDialog.dialog.row.id, parsed.data);
-        setRoomRates((prev) => prev.map((row) => (row.id === updated.id ? updated : row)));
-        notify.success("Room rate updated.");
-      }
-      roomRateDialog.closeDialog();
-    });
-  }, [hotelId, roomRateDialog, withSave]);
 
   const submitAvailability = useCallback(async () => {
     if (!hotelId) return;
@@ -531,17 +348,6 @@ export function useAccommodationHotelDetail({
     });
   }, [confirmDelete, hotelId]);
 
-  const deleteRoomRateHeaderRecord = useCallback(async (row: RoomRateHeader) => {
-    if (!hotelId) return;
-    await confirmDelete("Delete room rate header and linked lines?", async () => {
-      await deleteRoomRateHeader(hotelId, row.id);
-      setRoomRateHeaders((prev) => prev.filter((item) => item.id !== row.id));
-      setRoomRates((prev) => prev.filter((item) => item.roomRateHeaderId !== row.id));
-      setSelectedRoomRateHeaderId((prev) => (prev === row.id ? null : prev));
-      notify.success("Room rate header deleted.");
-    });
-  }, [confirmDelete, hotelId]);
-
   const deleteAvailabilityRecord = useCallback(async (row: Availability) => {
     if (!hotelId) return;
     await confirmDelete("Delete availability record?", async () => {
@@ -560,89 +366,35 @@ export function useAccommodationHotelDetail({
     });
   }, [confirmDelete, hotelId]);
 
-  const deleteRoomRateRecord = useCallback(async (row: RoomRate) => {
-    if (!hotelId) return;
-    await confirmDelete("Delete room rate line?", async () => {
-      await deleteRoomRate(hotelId, row.id);
-      setRoomRates((prev) => prev.filter((item) => item.id !== row.id));
-      notify.success("Room rate line deleted.");
-    });
-  }, [confirmDelete, hotelId]);
-
   const deleteSeasonRecord = useCallback(async (row: SeasonOption) => {
     await confirmDelete("Delete this season? Linked room rates may be deleted due cascade.", async () => {
       await deleteSeason(row.id);
       setSeasons((prev) => prev.filter((item) => item.id !== row.id));
       notify.success("Season deleted.");
-      await loadRoomRateHeaders();
-      await loadRoomRates();
     });
-  }, [confirmDelete, loadRoomRateHeaders, loadRoomRates]);
-
-  const openRoomRateLines = useCallback((header: RoomRateHeader) => {
-    setSelectedRoomRateHeaderId(header.id);
-    setRoomRateLineSearch("");
-    setRoomRateLineStatusFilter("all");
-    setRoomRateLinePageSize("10");
-    setRoomRateLinePage(1);
-  }, []);
-
-  const closeRoomRateLines = useCallback(() => {
-    setRoomRateLineSearch("");
-    setRoomRateLineStatusFilter("all");
-    setRoomRateLinePageSize("10");
-    setRoomRateLinePage(1);
-    setSelectedRoomRateHeaderId(null);
-  }, []);
+  }, [confirmDelete]);
 
   return {
     loadingDetails,
     saving,
     selectedHotel,
     roomTypes,
-    roomRateHeaders,
-    selectedRoomRateHeaderId,
-    setSelectedRoomRateHeaderId,
     availability,
     images,
     seasons,
-    roomTypesAvailable,
-    roomRateLineSearch,
-    setRoomRateLineSearch,
-    roomRateLineStatusFilter,
-    setRoomRateLineStatusFilter,
-    roomRateLinePageSize,
-    setRoomRateLinePageSize,
-    roomRateLinePage,
-    setRoomRateLinePage,
-    roomRateLineTotalPages,
-    filteredRoomRatesCount: filteredRoomRates.length,
-    statusFilteredRoomRatesCount: statusFilteredRoomRates.length,
-    pagedRoomRates,
-    selectedRoomRateHeader,
     openRoomTypeDialog,
-    openRoomRateHeaderDialog,
-    openRoomRateDialog,
     openAvailabilityDialog,
     openImageDialog,
     openSeasonDialog,
     submitRoomType,
-    submitRoomRateHeader,
-    submitRoomRate,
     submitAvailability,
     submitImage,
     submitSeason,
     deleteRoomTypeRecord,
-    deleteRoomRateHeaderRecord,
     deleteAvailabilityRecord,
     deleteImageRecord,
-    deleteRoomRateRecord,
     deleteSeasonRecord,
-    openRoomRateLines,
-    closeRoomRateLines,
     roomTypeDialog,
-    roomRateHeaderDialog,
-    roomRateDialog,
     availabilityDialog,
     imageDialog,
     seasonDialog,

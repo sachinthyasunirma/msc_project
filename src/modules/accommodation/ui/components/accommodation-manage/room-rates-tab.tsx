@@ -1,5 +1,6 @@
 "use client";
 
+import { memo } from "react";
 import { Edit3, Plus, Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -43,7 +44,7 @@ type RoomRatesTabProps = {
   onCloseRateLines: () => void;
 };
 
-export function RoomRatesTab({
+function RoomRatesTabComponent({
   loadingDetails,
   roomRateHeaders,
   selectedRoomRateHeaderId,
@@ -230,3 +231,5 @@ export function RoomRatesTab({
     </div>
   );
 }
+
+export const RoomRatesTab = memo(RoomRatesTabComponent);

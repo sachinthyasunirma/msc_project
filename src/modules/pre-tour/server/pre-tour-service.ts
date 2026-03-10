@@ -7,6 +7,7 @@ import type { AppPrivilegeCode } from "@/lib/security/privileges";
 import {
   createPreTourCategorySchema,
   createPreTourDaySchema,
+  createPreTourGuideAllocationSchema,
   createPreTourItemAddonSchema,
   createPreTourItemSchema,
   createPreTourSchema,
@@ -16,6 +17,7 @@ import {
   preTourResourceSchema,
   updatePreTourCategorySchema,
   updatePreTourDaySchema,
+  updatePreTourGuideAllocationSchema,
   updatePreTourItemAddonSchema,
   updatePreTourItemSchema,
   updatePreTourSchema,
@@ -126,6 +128,76 @@ async function ensureDay(companyId: string, id: string) {
   }
 
   return record;
+}
+
+async function ensureGuideAllocation(companyId: string, id: string) {
+  const [record] = await db
+    .select({
+      id: schema.preTourPlanGuideAllocation.id,
+      planId: schema.preTourPlanGuideAllocation.planId,
+      coverageMode: schema.preTourPlanGuideAllocation.coverageMode,
+      startDayId: schema.preTourPlanGuideAllocation.startDayId,
+      endDayId: schema.preTourPlanGuideAllocation.endDayId,
+    })
+    .from(schema.preTourPlanGuideAllocation)
+    .where(
+      and(
+        eq(schema.preTourPlanGuideAllocation.id, id),
+        eq(schema.preTourPlanGuideAllocation.companyId, companyId)
+      )
+    )
+    .limit(1);
+
+  if (!record) {
+    throw new PreTourError(400, "GUIDE_ALLOCATION_NOT_FOUND", "Pre-tour guide allocation not found in this company.");
+  }
+
+  return record;
+}
+
+async function ensureGuideCoverageRange(
+  companyId: string,
+  input: { planId: string; coverageMode: string; startDayId?: string | null; endDayId?: string | null }
+) {
+  if (String(input.coverageMode).toUpperCase() !== "DAY_RANGE") return;
+  if (!input.startDayId || !input.endDayId) {
+    throw new PreTourError(
+      400,
+      "VALIDATION_ERROR",
+      "Start day and end day are required for a guide day-range allocation."
+    );
+  }
+
+  const startDay = await ensureDay(companyId, input.startDayId);
+  const endDay = await ensureDay(companyId, input.endDayId);
+  if (String(startDay.planId) !== input.planId || String(endDay.planId) !== input.planId) {
+    throw new PreTourError(
+      400,
+      "VALIDATION_ERROR",
+      "Guide coverage days must belong to the selected pre-tour plan."
+    );
+  }
+
+  const [startBounds] = await db
+    .select({ dayNumber: schema.preTourPlanDay.dayNumber })
+    .from(schema.preTourPlanDay)
+    .where(eq(schema.preTourPlanDay.id, input.startDayId))
+    .limit(1);
+
+  const [endBounds] = await db
+    .select({ dayNumber: schema.preTourPlanDay.dayNumber })
+    .from(schema.preTourPlanDay)
+    .where(eq(schema.preTourPlanDay.id, input.endDayId))
+    .limit(1);
+
+  if (!startBounds || !endBounds) return;
+  if (Number(startBounds.dayNumber) > Number(endBounds.dayNumber)) {
+    throw new PreTourError(
+      400,
+      "VALIDATION_ERROR",
+      "Guide coverage start day cannot be after the end day."
+    );
+  }
 }
 
 async function ensureUniqueDayNumber(
@@ -774,6 +846,7 @@ function buildCloneCode(prefix: string, suffix: string) {
 type PreTourPlanInsert = typeof schema.preTourPlan.$inferInsert;
 type PreTourPlanDayInsert = typeof schema.preTourPlanDay.$inferInsert;
 type PreTourPlanItemInsert = typeof schema.preTourPlanItem.$inferInsert;
+type PreTourPlanGuideAllocationInsert = typeof schema.preTourPlanGuideAllocation.$inferInsert;
 type PreTourPlanItemAddonInsert = typeof schema.preTourPlanItemAddon.$inferInsert;
 type PreTourPlanTotalInsert = typeof schema.preTourPlanTotal.$inferInsert;
 type PreTourPlanCategoryInsert = typeof schema.preTourPlanCategory.$inferInsert;
@@ -997,6 +1070,28 @@ export async function listPreTourRecords(
           )
         )
         .orderBy(schema.preTourPlanItem.sortOrder, desc(schema.preTourPlanItem.createdAt))
+        .limit(limit);
+
+    case "pre-tour-guide-allocations":
+      return db
+        .select()
+        .from(schema.preTourPlanGuideAllocation)
+        .where(
+          and(
+            eq(schema.preTourPlanGuideAllocation.companyId, companyId),
+            planId ? eq(schema.preTourPlanGuideAllocation.planId, planId) : undefined,
+            q
+              ? or(
+                  ilike(schema.preTourPlanGuideAllocation.code, q),
+                  ilike(schema.preTourPlanGuideAllocation.coverageMode, q),
+                  ilike(schema.preTourPlanGuideAllocation.language, q),
+                  ilike(schema.preTourPlanGuideAllocation.guideBasis, q),
+                  ilike(schema.preTourPlanGuideAllocation.title, q)
+                )
+              : undefined
+          )
+        )
+        .orderBy(desc(schema.preTourPlanGuideAllocation.createdAt))
         .limit(limit);
 
     case "pre-tour-item-addons":
@@ -1354,6 +1449,35 @@ export async function createPreTourRecord(
       return created;
     }
 
+    case "pre-tour-guide-allocations": {
+      const parsed = createPreTourGuideAllocationSchema.safeParse(payload);
+      if (!parsed.success) {
+        throw new PreTourError(400, "VALIDATION_ERROR", normalizeZodError(parsed.error));
+      }
+
+      await ensurePlan(companyId, parsed.data.planId);
+      await ensureGuideCoverageRange(companyId, {
+        planId: parsed.data.planId,
+        coverageMode: parsed.data.coverageMode,
+        startDayId: parsed.data.startDayId ?? null,
+        endDayId: parsed.data.endDayId ?? null,
+      });
+
+      const [created] = await db
+        .insert(schema.preTourPlanGuideAllocation)
+        .values({
+          ...parsed.data,
+          companyId,
+          units: toDecimal(parsed.data.units),
+          baseAmount: toDecimal(parsed.data.baseAmount),
+          taxAmount: toDecimal(parsed.data.taxAmount),
+          totalAmount: toDecimal(parsed.data.totalAmount),
+        } as any)
+        .returning();
+
+      return created;
+    }
+
     case "pre-tour-totals": {
       const parsed = createPreTourTotalSchema.safeParse(payload);
       if (!parsed.success) {
@@ -1686,6 +1810,48 @@ export async function createPreTourVersionFromPlan(payload: unknown, headers: He
         } satisfies PreTourPlanItemInsert)
         .returning({ id: schema.preTourPlanItem.id });
       itemIdMap.set(sourceItem.id, createdItem.id);
+    }
+
+    const sourceGuideAllocations = await tx
+      .select()
+      .from(schema.preTourPlanGuideAllocation)
+      .where(
+        and(
+          eq(schema.preTourPlanGuideAllocation.companyId, companyId),
+          eq(schema.preTourPlanGuideAllocation.planId, sourcePlan.id)
+        )
+      )
+      .orderBy(schema.preTourPlanGuideAllocation.createdAt);
+
+    for (const sourceGuideAllocation of sourceGuideAllocations) {
+      await tx.insert(schema.preTourPlanGuideAllocation).values({
+        companyId,
+        code: buildCloneCode(codePrefix, `GUIDE_${sourceGuideAllocation.id.slice(-6)}`),
+        planId: createdPlan.id,
+        serviceId: sourceGuideAllocation.serviceId,
+        coverageMode: sourceGuideAllocation.coverageMode,
+        startDayId: sourceGuideAllocation.startDayId
+          ? (dayIdMap.get(sourceGuideAllocation.startDayId) ?? null)
+          : null,
+        endDayId: sourceGuideAllocation.endDayId
+          ? (dayIdMap.get(sourceGuideAllocation.endDayId) ?? null)
+          : null,
+        language: sourceGuideAllocation.language,
+        guideBasis: sourceGuideAllocation.guideBasis,
+        pax: sourceGuideAllocation.pax,
+        units: sourceGuideAllocation.units,
+        rateId: sourceGuideAllocation.rateId,
+        currencyCode: sourceGuideAllocation.currencyCode,
+        priceMode: sourceGuideAllocation.priceMode,
+        baseAmount: sourceGuideAllocation.baseAmount,
+        taxAmount: sourceGuideAllocation.taxAmount,
+        totalAmount: sourceGuideAllocation.totalAmount,
+        pricingSnapshot: sourceGuideAllocation.pricingSnapshot,
+        title: sourceGuideAllocation.title,
+        notes: sourceGuideAllocation.notes,
+        status: sourceGuideAllocation.status,
+        isActive: Boolean(sourceGuideAllocation.isActive ?? true),
+      } satisfies PreTourPlanGuideAllocationInsert);
     }
 
     const sourceAddons = await tx
@@ -2157,6 +2323,52 @@ export async function updatePreTourRecord(
       return updated;
     }
 
+    case "pre-tour-guide-allocations": {
+      const parsed = updatePreTourGuideAllocationSchema.safeParse(payload);
+      if (!parsed.success) {
+        throw new PreTourError(400, "VALIDATION_ERROR", normalizeZodError(parsed.error));
+      }
+
+      if (parsed.data.planId) {
+        await ensurePlan(companyId, parsed.data.planId);
+      }
+
+      const current = await ensureGuideAllocation(companyId, id);
+      const nextPlanId = String(parsed.data.planId ?? current.planId);
+      await ensureGuideCoverageRange(companyId, {
+        planId: nextPlanId,
+        coverageMode: String(parsed.data.coverageMode ?? current.coverageMode ?? "FULL_TOUR"),
+        startDayId: parsed.data.startDayId ?? current.startDayId ?? null,
+        endDayId: parsed.data.endDayId ?? current.endDayId ?? null,
+      });
+
+      const [updated] = await db
+        .update(schema.preTourPlanGuideAllocation)
+        .set({
+          ...parsed.data,
+          units: parsed.data.units !== undefined ? toDecimal(parsed.data.units) : undefined,
+          baseAmount:
+            parsed.data.baseAmount !== undefined ? toDecimal(parsed.data.baseAmount) : undefined,
+          taxAmount: parsed.data.taxAmount !== undefined ? toDecimal(parsed.data.taxAmount) : undefined,
+          totalAmount:
+            parsed.data.totalAmount !== undefined ? toDecimal(parsed.data.totalAmount) : undefined,
+          updatedAt: new Date(),
+        } as any)
+        .where(
+          and(
+            eq(schema.preTourPlanGuideAllocation.id, id),
+            eq(schema.preTourPlanGuideAllocation.companyId, companyId)
+          )
+        )
+        .returning();
+
+      if (!updated) {
+        throw new PreTourError(404, "NOT_FOUND", "Pre-tour guide allocation not found.");
+      }
+
+      return updated;
+    }
+
     case "pre-tour-totals": {
       const parsed = updatePreTourTotalSchema.safeParse(payload);
       if (!parsed.success) {
@@ -2612,6 +2824,21 @@ export async function deletePreTourRecord(
         )
         .returning({ id: schema.preTourPlanItemAddon.id });
       if (!deleted) throw new PreTourError(404, "NOT_FOUND", "Pre-tour addon not found.");
+      return;
+    }
+    case "pre-tour-guide-allocations": {
+      const [deleted] = await db
+        .delete(schema.preTourPlanGuideAllocation)
+        .where(
+          and(
+            eq(schema.preTourPlanGuideAllocation.id, id),
+            eq(schema.preTourPlanGuideAllocation.companyId, companyId)
+          )
+        )
+        .returning({ id: schema.preTourPlanGuideAllocation.id });
+      if (!deleted) {
+        throw new PreTourError(404, "NOT_FOUND", "Pre-tour guide allocation not found.");
+      }
       return;
     }
     case "pre-tour-totals": {

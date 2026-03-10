@@ -2,6 +2,7 @@ export type PreTourResourceKey =
   | "pre-tours"
   | "pre-tour-days"
   | "pre-tour-items"
+  | "pre-tour-guide-allocations"
   | "pre-tour-item-addons"
   | "pre-tour-totals"
   | "pre-tour-categories"

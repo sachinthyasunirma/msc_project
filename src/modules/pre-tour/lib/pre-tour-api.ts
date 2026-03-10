@@ -1,3 +1,7 @@
+import type {
+  ResolveAccommodationRateResponse,
+} from "@/modules/pre-tour/shared/pre-tour-item-allocation-types";
+
 type ApiError = { message?: string };
 
 async function parseResponse<T>(response: Response): Promise<T> {
@@ -70,4 +74,21 @@ export async function deletePreTourRecord(resource: string, id: string) {
     method: "DELETE",
   });
   return parseResponse<{ success: boolean }>(response);
+}
+
+export async function resolvePreTourAccommodationRates(payload: {
+  hotelId: string;
+  travelDate: string;
+  roomTypeId?: string | null;
+  roomBasis?: string | null;
+}) {
+  const response = await fetch("/api/pre-tours/rate-resolution", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      itemType: "ACCOMMODATION",
+      ...payload,
+    }),
+  });
+  return parseResponse<ResolveAccommodationRateResponse>(response);
 }

@@ -13,6 +13,10 @@ export const META: Record<PreTourResourceKey, { title: string; description: stri
     title: "Plan Items",
     description: "Service lines for selected day.",
   },
+  "pre-tour-guide-allocations": {
+    title: "Guide Allocations",
+    description: "Tour-level guide costing and assignment across the itinerary.",
+  },
   "pre-tour-item-addons": {
     title: "Item Addons",
     description: "Supplements and misc charges for selected service item.",
@@ -59,6 +63,16 @@ export const COLUMNS: Record<PreTourResourceKey, Array<{ key: string; label: str
     { key: "dayId", label: "Day" },
     { key: "itemType", label: "Type" },
     { key: "title", label: "Title" },
+    { key: "currencyCode", label: "Currency" },
+    { key: "totalAmount", label: "Total" },
+    { key: "status", label: "Status" },
+  ],
+  "pre-tour-guide-allocations": [
+    { key: "code", label: "Code" },
+    { key: "coverageMode", label: "Coverage" },
+    { key: "serviceId", label: "Guide" },
+    { key: "language", label: "Language" },
+    { key: "guideBasis", label: "Basis" },
     { key: "currencyCode", label: "Currency" },
     { key: "totalAmount", label: "Total" },
     { key: "status", label: "Status" },

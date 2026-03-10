@@ -25,10 +25,11 @@ export function usePreTourPlanOperations({
   const clonePlanChildren = useCallback(
     async (sourcePlan: Row, newPlanId: string, codePrefix: string) => {
       const sourcePlanId = String(sourcePlan.id);
-      const [sourceDays, sourceItems, sourceAddons, sourceTotals, sourceCategories, sourceTechnicalVisits] =
+      const [sourceDays, sourceItems, sourceGuideAllocations, sourceAddons, sourceTotals, sourceCategories, sourceTechnicalVisits] =
         await Promise.all([
           listPreTourRecords("pre-tour-days", { planId: sourcePlanId, limit: 1000 }),
           listPreTourRecords("pre-tour-items", { planId: sourcePlanId, limit: 2000 }),
+          listPreTourRecords("pre-tour-guide-allocations", { planId: sourcePlanId, limit: 500 }),
           listPreTourRecords("pre-tour-item-addons", { planId: sourcePlanId, limit: 2000 }),
           canViewCosting
             ? listPreTourRecords("pre-tour-totals", { planId: sourcePlanId, limit: 10 })
@@ -109,6 +110,38 @@ export function usePreTourPlanOperations({
           totalAmount: Number(sourceAddon.totalAmount || 0),
           snapshot: sourceAddon.snapshot ?? null,
           isActive: Boolean(sourceAddon.isActive ?? true),
+        });
+      }
+
+      for (const sourceGuideAllocation of sourceGuideAllocations) {
+        await createPreTourRecord("pre-tour-guide-allocations", {
+          code: `${codePrefix}_GUIDE_${String(sourceGuideAllocation.id).slice(-6)}`.slice(0, 80),
+          planId: newPlanId,
+          serviceId: sourceGuideAllocation.serviceId ?? null,
+          coverageMode: String(sourceGuideAllocation.coverageMode || "FULL_TOUR"),
+          startDayId: sourceGuideAllocation.startDayId
+            ? (dayIdMap.get(String(sourceGuideAllocation.startDayId)) ?? null)
+            : null,
+          endDayId: sourceGuideAllocation.endDayId
+            ? (dayIdMap.get(String(sourceGuideAllocation.endDayId)) ?? null)
+            : null,
+          language: sourceGuideAllocation.language ?? null,
+          guideBasis: sourceGuideAllocation.guideBasis ?? null,
+          pax: sourceGuideAllocation.pax ?? null,
+          units: sourceGuideAllocation.units ?? 1,
+          rateId: sourceGuideAllocation.rateId ?? null,
+          currencyCode: String(
+            sourceGuideAllocation.currencyCode || sourcePlan.currencyCode || companyBaseCurrencyCode
+          ),
+          priceMode: String(sourceGuideAllocation.priceMode || "EXCLUSIVE"),
+          baseAmount: Number(sourceGuideAllocation.baseAmount || 0),
+          taxAmount: Number(sourceGuideAllocation.taxAmount || 0),
+          totalAmount: Number(sourceGuideAllocation.totalAmount || 0),
+          pricingSnapshot: sourceGuideAllocation.pricingSnapshot ?? null,
+          title: sourceGuideAllocation.title ?? null,
+          notes: sourceGuideAllocation.notes ?? null,
+          status: String(sourceGuideAllocation.status || "PLANNED"),
+          isActive: Boolean(sourceGuideAllocation.isActive ?? true),
         });
       }
 

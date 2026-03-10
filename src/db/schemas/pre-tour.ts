@@ -260,6 +260,51 @@ export const preTourPlanItemAddon = pgTable(
   ]
 );
 
+export const preTourPlanGuideAllocation = pgTable(
+  "pre_tour_plan_guide_allocation",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => nanoid()),
+    companyId: text("company_id")
+      .notNull()
+      .references(() => company.id, { onDelete: "cascade" }),
+    code: text("code").notNull(),
+    planId: text("plan_id")
+      .notNull()
+      .references(() => preTourPlan.id, { onDelete: "cascade" }),
+    serviceId: text("service_id"),
+    coverageMode: text("coverage_mode").notNull().default("FULL_TOUR"),
+    startDayId: text("start_day_id").references(() => preTourPlanDay.id, { onDelete: "set null" }),
+    endDayId: text("end_day_id").references(() => preTourPlanDay.id, { onDelete: "set null" }),
+    language: text("language"),
+    guideBasis: text("guide_basis"),
+    pax: integer("pax"),
+    units: decimal("units", { precision: 10, scale: 2 }),
+    rateId: text("rate_id"),
+    currencyCode: text("currency_code").notNull(),
+    priceMode: text("price_mode").notNull().default("EXCLUSIVE"),
+    baseAmount: decimal("base_amount", { precision: 14, scale: 2 }).notNull().default("0"),
+    taxAmount: decimal("tax_amount", { precision: 14, scale: 2 }).notNull().default("0"),
+    totalAmount: decimal("total_amount", { precision: 14, scale: 2 }).notNull().default("0"),
+    pricingSnapshot: jsonb("pricing_snapshot").$type<Record<string, unknown> | null>(),
+    title: text("title"),
+    notes: text("notes"),
+    status: text("status").notNull().default("PLANNED"),
+    isActive: boolean("is_active").notNull().default(true),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (table) => [
+    unique("uq_pre_tour_guide_allocation_company_code").on(table.companyId, table.code),
+    index("idx_pre_tour_guide_allocation_company").on(table.companyId),
+    index("idx_pre_tour_guide_allocation_plan").on(table.planId),
+    index("idx_pre_tour_guide_allocation_service").on(table.serviceId),
+    index("idx_pre_tour_guide_allocation_coverage").on(table.coverageMode),
+    index("idx_pre_tour_guide_allocation_status").on(table.status),
+  ]
+);
+
 export const preTourPlanTotal = pgTable(
   "pre_tour_plan_total",
   {

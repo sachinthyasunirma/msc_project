@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { ArrowLeft, MapPinned, RefreshCw } from "lucide-react";
 import { notify } from "@/lib/notify";
@@ -32,6 +32,8 @@ import { ManagedDayEditor } from "@/modules/pre-tour/ui/components/managed-day-e
 import { PreTourCopyDialogController } from "@/modules/pre-tour/ui/components/pre-tour-copy-dialog-controller";
 import { PreTourDayWorkspace } from "@/modules/pre-tour/ui/components/pre-tour-day-workspace";
 import { PreTourDetailSheet } from "@/modules/pre-tour/ui/components/pre-tour-detail-sheet";
+import { PreTourGuideAllocationDialog } from "@/modules/pre-tour/ui/components/pre-tour-guide-allocation-dialog";
+import { PreTourItemAllocationDialog } from "@/modules/pre-tour/ui/components/pre-tour-item-allocation-dialog";
 import { PreTourRecordDialog } from "@/modules/pre-tour/ui/components/pre-tour-record-dialog";
 import { PreTourRouteMapDialogController } from "@/modules/pre-tour/ui/components/pre-tour-route-map-dialog-controller";
 import { SectionTable } from "@/modules/pre-tour/ui/components/pre-tour-section-table";
@@ -51,11 +53,20 @@ type PreTourPlanManageViewProps = {
   initialMasters?: PreTourMastersData | null;
 };
 
+function isMissingGuideAllocationTableError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  const normalized = message.toLowerCase();
+  return (
+    normalized.includes("pre_tour_plan_guide_allocation") &&
+    normalized.includes("does not exist")
+  );
+}
+
 export function PreTourPlanManageView({
   planId,
   initialMasters = null,
 }: PreTourPlanManageViewProps) {
-  const { isReadOnly, canViewRouteMap, canViewCosting } = usePreTourAccess();
+  const { isReadOnly, isAdmin, canViewRouteMap, canViewCosting } = usePreTourAccess();
   const {
     locations,
     vehicleTypes,
@@ -79,6 +90,7 @@ export function PreTourPlanManageView({
   const [plans, setPlans] = useState<Row[]>([]);
   const [days, setDays] = useState<Row[]>([]);
   const [items, setItems] = useState<Row[]>([]);
+  const [guideAllocations, setGuideAllocations] = useState<Row[]>([]);
   const [addons, setAddons] = useState<Row[]>([]);
   const [totals, setTotals] = useState<Row[]>([]);
   const [planTechnicalVisits, setPlanTechnicalVisits] = useState<Row[]>([]);
@@ -95,6 +107,8 @@ export function PreTourPlanManageView({
     kind: "generic",
     row: null,
   });
+  const autoDaySyncPlanIdRef = useRef<string | null>(null);
+  const guideAllocationUnavailableNotifiedRef = useRef(false);
   const [dialog, setDialog] = useState<{
     open: boolean;
     mode: "create" | "edit";
@@ -108,9 +122,19 @@ export function PreTourPlanManageView({
       const planRows = await listPreTourRecords("pre-tours", { limit: 400 });
       setPlans(planRows);
 
-      const [dayRows, itemRows, addonRows, totalRows, technicalVisitRows] = await Promise.all([
+      const [dayRows, itemRows, guideAllocationRows, addonRows, totalRows, technicalVisitRows] = await Promise.all([
         listPreTourRecords("pre-tour-days", { limit: 500, planId }),
         listPreTourRecords("pre-tour-items", { limit: 500, planId }),
+        listPreTourRecords("pre-tour-guide-allocations", { limit: 200, planId }).catch((error) => {
+          if (!isMissingGuideAllocationTableError(error)) throw error;
+          if (!guideAllocationUnavailableNotifiedRef.current) {
+            guideAllocationUnavailableNotifiedRef.current = true;
+            notify.warning(
+              "Guide allocations are disabled until the pre_tour_plan_guide_allocation table is created."
+            );
+          }
+          return [] as Row[];
+        }),
         listPreTourRecords("pre-tour-item-addons", { limit: 500, planId }),
         canViewCosting
           ? listPreTourRecords("pre-tour-totals", { limit: 500, planId })
@@ -120,6 +144,7 @@ export function PreTourPlanManageView({
 
       setDays(dayRows);
       setItems(itemRows);
+      setGuideAllocations(guideAllocationRows);
       setAddons(addonRows);
       setTotals(totalRows);
       setPlanTechnicalVisits(technicalVisitRows);
@@ -771,6 +796,54 @@ export function PreTourPlanManageView({
     }
   };
 
+  const onSaveAllocationItem = async (payload: Record<string, unknown>) => {
+    setSaving(true);
+    try {
+      if (dialog.mode === "create") {
+        await createPreTourRecord("pre-tour-items", payload);
+        notify.success("Item allocated.");
+      } else {
+        await updatePreTourRecord("pre-tour-items", String(dialog.row?.id || ""), payload);
+        notify.success("Item allocation updated.");
+      }
+
+      setDialog({ open: false, mode: "create", resource: "pre-tour-days", row: null });
+      await loadData();
+    } catch (error) {
+      notify.error(error instanceof Error ? error.message : "Failed to save item allocation.");
+      throw error;
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const onSaveGuideAllocation = async (payload: Record<string, unknown>) => {
+    setSaving(true);
+    try {
+      if (dialog.mode === "create") {
+        await createPreTourRecord("pre-tour-guide-allocations", payload);
+        notify.success("Guide allocation created.");
+      } else {
+        await updatePreTourRecord("pre-tour-guide-allocations", String(dialog.row?.id || ""), payload);
+        notify.success("Guide allocation updated.");
+      }
+
+      setDialog({ open: false, mode: "create", resource: "pre-tour-days", row: null });
+      await loadData();
+    } catch (error) {
+      if (isMissingGuideAllocationTableError(error)) {
+        notify.error(
+          "Guide allocations cannot be saved yet. Run scripts/add-pre-tour-guide-allocation.sql on the database first."
+        );
+      } else {
+        notify.error(error instanceof Error ? error.message : "Failed to save guide allocation.");
+      }
+      throw error;
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const onDelete = async (resource: PreTourResourceKey, row: Row) => {
     if (isReadOnly) {
       notify.warning("You are in read-only mode.");
@@ -784,6 +857,21 @@ export function PreTourPlanManageView({
       notify.error(error instanceof Error ? error.message : "Failed to delete record.");
     }
   };
+
+  const openItemEditor = useCallback(
+    (dayId: string, item: Row) => {
+      if (String(item.itemType || "").toUpperCase() === "GUIDE") {
+        notify.warning(
+          "Guide allocation is not handled day-wise. It should be managed as a tour-level service."
+        );
+        return;
+      }
+      setSelectedDayId(String(dayId));
+      setSelectedItemId(String(item.id || ""));
+      setDialog({ open: true, mode: "edit", resource: "pre-tour-items", row: item });
+    },
+    []
+  );
 
   const moveItemWithinDay = useCallback(async (dayId: string, fromItemId: string, toItemId: string) => {
     if (!fromItemId || !toItemId || fromItemId === toItemId) return;
@@ -856,14 +944,26 @@ export function PreTourPlanManageView({
   }, [loadData, planId, selectedPlan]);
 
   useEffect(() => {
-    if (!selectedPlan || syncingDays || days.length > 0) return;
+    if (!selectedPlan || loading || syncingDays || days.length > 0) return;
+    if (autoDaySyncPlanIdRef.current === planId) return;
+    autoDaySyncPlanIdRef.current = planId;
     void syncDaysFromRange();
-  }, [days.length, selectedPlan, syncDaysFromRange, syncingDays]);
+  }, [days.length, loading, planId, selectedPlan, syncDaysFromRange, syncingDays]);
+
+  useEffect(() => {
+    if (days.length > 0 && autoDaySyncPlanIdRef.current === planId) {
+      autoDaySyncPlanIdRef.current = null;
+    }
+  }, [days.length, planId]);
 
   const filteredAddonRows = useMemo(() => {
     const rows = selectedItemId ? addons.filter((row) => String(row.planItemId) === selectedItemId) : addons;
     return rows.filter((row) => matchesQuery("pre-tour-item-addons", row, query));
   }, [addons, query, selectedItemId]);
+  const filteredGuideAllocationRows = useMemo(
+    () => guideAllocations.filter((row) => matchesQuery("pre-tour-guide-allocations", row, query)),
+    [guideAllocations, query]
+  );
   const filteredTotalRows = useMemo(
     () => totals.filter((row) => matchesQuery("pre-tour-totals", row, query)),
     [query, totals]
@@ -957,11 +1057,7 @@ export function PreTourPlanManageView({
             setDialog({ open: true, mode: "edit", resource: "pre-tour-item-addons", row: addon });
           }}
           onShareItem={setSharingItem}
-          onEditItem={(day, item) => {
-            setSelectedDayId(String(day.id));
-            setSelectedItemId(String(item.id));
-            setDialog({ open: true, mode: "edit", resource: "pre-tour-items", row: item });
-          }}
+          onEditItem={(day, item) => openItemEditor(String(day.id), item)}
           onDeleteItem={(item) => void onDelete("pre-tour-items", item)}
           onMoveItemWithinDay={(dayId, dragItemId, targetItemId) => void moveItemWithinDay(dayId, dragItemId, targetItemId)}
         />
@@ -976,6 +1072,25 @@ export function PreTourPlanManageView({
           onView={(row) => setDetailSheet({ open: true, title: "Field Visit Link Details", description: "Selected field visit link details.", row, kind: "generic" })}
           onEdit={(row) => setDialog({ open: true, mode: "edit", resource: "pre-tour-technical-visits", row })}
           onDelete={(row) => void onDelete("pre-tour-technical-visits", row)}
+        />
+        <SectionTable
+          resource="pre-tour-guide-allocations"
+          rows={filteredGuideAllocationRows}
+          loading={loading}
+          isReadOnly={isReadOnly}
+          lookups={lookups}
+          onAdd={() => setDialog({ open: true, mode: "create", resource: "pre-tour-guide-allocations", row: null })}
+          onView={(row) =>
+            setDetailSheet({
+              open: true,
+              title: "Guide Allocation Details",
+              description: "Selected tour-level guide allocation details.",
+              row,
+              kind: "generic",
+            })
+          }
+          onEdit={(row) => setDialog({ open: true, mode: "edit", resource: "pre-tour-guide-allocations", row })}
+          onDelete={(row) => void onDelete("pre-tour-guide-allocations", row)}
         />
         <SectionTable
           resource="pre-tour-item-addons"
@@ -1053,10 +1168,8 @@ export function PreTourPlanManageView({
           setDetailSheet((prev) => ({ ...prev, open: false }));
         }}
         onEditItem={(row, dayId) => {
-          setSelectedDayId(String(dayId || row.dayId || ""));
-          setSelectedItemId(String(row.id || ""));
           setDetailSheet((prev) => ({ ...prev, open: false }));
-          setDialog({ open: true, mode: "edit", resource: "pre-tour-items", row });
+          openItemEditor(String(dayId || row.dayId || ""), row);
         }}
         onDeleteItem={(row) => {
           setDetailSheet((prev) => ({ ...prev, open: false }));
@@ -1082,30 +1195,63 @@ export function PreTourPlanManageView({
         onSuccess={loadData}
       />
 
-      <PreTourRecordDialog
-        open={dialog.open}
-        onOpenChange={(open) => setDialog((prev) => ({ ...prev, open, row: open ? prev.row : null }))}
-        mode={dialog.mode}
-        resource={dialog.resource}
-        row={dialog.row}
-        isReadOnly={isReadOnly}
-        saving={saving}
-        visibleFields={buildVisibleFields(dialog.resource, dialogInitialForm)}
-        buildVisibleFields={(form) => buildVisibleFields(dialog.resource, form)}
-        initialForm={dialogInitialForm}
-        initialDayTransportForm={dialogInitialDayTransportForm}
-        selectedDialogMarketOrgId={String(dialogInitialForm.marketOrgId ?? dialog.row?.marketOrgId ?? "")}
-        hasContractForSelectedDialogMarket={true}
-        getHasContractForSelectedDialogMarket={(form) => {
-          const marketOrgId = String(form.marketOrgId ?? "");
-          if (!marketOrgId) return true;
-          return (operatorIdsByMarketId.get(marketOrgId)?.length ?? 0) > 0;
-        }}
-        selectedPreTourItemType={String(dialogInitialForm.itemType ?? dialog.row?.itemType ?? "").toUpperCase()}
-        lookupLabel={lookupLabel}
-        transportVehicleOptions={transportVehicleOptions}
-        onSubmit={(payload) => void onSave(payload)}
-      />
+      {dialog.resource === "pre-tour-items" ? (
+        <PreTourItemAllocationDialog
+          open={dialog.open}
+          onOpenChange={(open) => setDialog((prev) => ({ ...prev, open, row: open ? prev.row : null }))}
+          mode={dialog.mode}
+          row={dialog.row}
+          isReadOnly={isReadOnly}
+          saving={saving}
+          selectedPlan={selectedPlan}
+          selectedDay={selectedManagedDay}
+          companyBaseCurrencyCode={companyBaseCurrencyCode}
+          hotelOptions={activeHotelOptions.map(({ value, label }) => ({ value, label }))}
+          activityOptions={activities.map((row) => ({ value: String(row.id), label: `${row.code} - ${row.name}` }))}
+          transportOptions={vehicleTypes.map((row) => ({ value: String(row.id), label: `${row.code} - ${row.name}` }))}
+          canOverrideContractRates={!isReadOnly && (isAdmin || canViewCosting)}
+          onSubmit={(payload) => onSaveAllocationItem(payload)}
+        />
+      ) : dialog.resource === "pre-tour-guide-allocations" ? (
+        <PreTourGuideAllocationDialog
+          open={dialog.open}
+          onOpenChange={(open) => setDialog((prev) => ({ ...prev, open, row: open ? prev.row : null }))}
+          mode={dialog.mode}
+          row={dialog.row}
+          isReadOnly={isReadOnly}
+          saving={saving}
+          selectedPlan={selectedPlan}
+          companyBaseCurrencyCode={companyBaseCurrencyCode}
+          guideOptions={guides.map((row) => ({ value: String(row.id), label: `${row.code} - ${row.fullName}` }))}
+          dayOptions={dayOptions}
+          onSubmit={(payload) => onSaveGuideAllocation(payload)}
+        />
+      ) : (
+        <PreTourRecordDialog
+          open={dialog.open}
+          onOpenChange={(open) => setDialog((prev) => ({ ...prev, open, row: open ? prev.row : null }))}
+          mode={dialog.mode}
+          resource={dialog.resource}
+          row={dialog.row}
+          isReadOnly={isReadOnly}
+          saving={saving}
+          visibleFields={buildVisibleFields(dialog.resource, dialogInitialForm)}
+          buildVisibleFields={(form) => buildVisibleFields(dialog.resource, form)}
+          initialForm={dialogInitialForm}
+          initialDayTransportForm={dialogInitialDayTransportForm}
+          selectedDialogMarketOrgId={String(dialogInitialForm.marketOrgId ?? dialog.row?.marketOrgId ?? "")}
+          hasContractForSelectedDialogMarket={true}
+          getHasContractForSelectedDialogMarket={(form) => {
+            const marketOrgId = String(form.marketOrgId ?? "");
+            if (!marketOrgId) return true;
+            return (operatorIdsByMarketId.get(marketOrgId)?.length ?? 0) > 0;
+          }}
+          selectedPreTourItemType={String(dialogInitialForm.itemType ?? dialog.row?.itemType ?? "").toUpperCase()}
+          lookupLabel={lookupLabel}
+          transportVehicleOptions={transportVehicleOptions}
+          onSubmit={(payload) => void onSave(payload)}
+        />
+      )}
     </Card>
   );
 }

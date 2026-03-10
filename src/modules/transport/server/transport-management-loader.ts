@@ -4,7 +4,7 @@ import type {
   TransportManagementInitialData,
   TransportResourceKey,
 } from "@/modules/transport/shared/transport-management-types";
-import { resolveDashboardShellData } from "@/modules/dashboard/server/dashboard-shell-service";
+import { loadDashboardShellData } from "@/modules/dashboard/server/dashboard-shell-service";
 
 function toPlainRecord<T extends Record<string, unknown>>(record: T): T {
   const next = { ...record };
@@ -25,7 +25,7 @@ export async function loadTransportManagementInitialData(
 ): Promise<TransportManagementInitialData | null> {
   try {
     const requestHeaders = await headers();
-    const shellData = await resolveDashboardShellData(requestHeaders);
+    const shellData = await loadDashboardShellData(requestHeaders);
     const [records, locations, vehicleCategories, vehicleTypes] = await Promise.all([
       listTransportRecords(resource, new URLSearchParams({ limit: "200" }), requestHeaders),
       listTransportRecords("locations", new URLSearchParams({ limit: "200" }), requestHeaders),

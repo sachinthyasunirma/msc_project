@@ -6,54 +6,31 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import type { Availability, Hotel, HotelImage, RoomRate, RoomRateHeader, RoomType } from "@/modules/accommodation/lib/accommodation-api";
+import type { Availability, Hotel, HotelImage, RoomType } from "@/modules/accommodation/lib/accommodation-api";
 import { AvailabilityTab } from "@/modules/accommodation/ui/components/accommodation-manage/availability-tab";
 import { ImagesTab } from "@/modules/accommodation/ui/components/accommodation-manage/images-tab";
-import { RoomRatesTab } from "@/modules/accommodation/ui/components/accommodation-manage/room-rates-tab";
 import { RoomTypesTab } from "@/modules/accommodation/ui/components/accommodation-manage/room-types-tab";
+import type { AccommodationRoomRatesInitialData } from "@/modules/accommodation/shared/accommodation-room-rates.types";
+import { AccommodationRoomRatesTab } from "@/modules/accommodation/ui/components/manage-tabs/accommodation-room-rates-tab";
 
 type AccommodationHotelDetailCardProps = {
   selectedHotel: Hotel | null;
   showHotelList: boolean;
   loadingDetails: boolean;
   roomTypes: RoomType[];
-  roomRateHeaders: RoomRateHeader[];
-  selectedRoomRateHeaderId: string | null;
   availability: Availability[];
   images: HotelImage[];
   isReadOnly: boolean;
-  roomTypesAvailable: boolean;
-  roomRateLineSearch: string;
-  roomRateLineStatusFilter: string;
-  roomRateLinePageSize: string;
-  roomRateLinePage: number;
-  roomRateLineTotalPages: number;
-  filteredRoomRatesCount: number;
-  statusFilteredRoomRatesCount: number;
-  pagedRoomRates: RoomRate[];
-  selectedRoomRateHeader: RoomRateHeader | null;
-  onSelectRoomRateHeader: (id: string | null) => void;
-  onRoomRateLineSearchChange: (value: string) => void;
-  onRoomRateLineStatusFilterChange: (value: string) => void;
-  onRoomRateLinePageSizeChange: (value: string) => void;
-  onRoomRateLinePageChange: (value: number) => void;
+  initialRoomRatesData?: AccommodationRoomRatesInitialData | null;
   onAddRoomType: () => void;
   onEditRoomType: (row: RoomType) => void;
   onDeleteRoomType: (row: RoomType) => void;
-  onAddRoomRateHeader: () => void;
-  onOpenRoomRateLines: (header: RoomRateHeader) => void;
-  onEditRoomRateHeader: (header: RoomRateHeader) => void;
-  onDeleteRoomRateHeader: (header: RoomRateHeader) => void;
   onAddAvailability: () => void;
   onEditAvailability: (row: Availability) => void;
   onDeleteAvailability: (row: Availability) => void;
   onAddImage: () => void;
   onEditImage: (row: HotelImage) => void;
   onDeleteImage: (row: HotelImage) => void;
-  onAddRateLine: () => void;
-  onEditRateLine: (row: RoomRate) => void;
-  onDeleteRateLine: (row: RoomRate) => void;
-  onCloseRateLines: () => void;
 };
 
 function AccommodationHotelDetailCardComponent({
@@ -61,43 +38,19 @@ function AccommodationHotelDetailCardComponent({
   showHotelList,
   loadingDetails,
   roomTypes,
-  roomRateHeaders,
-  selectedRoomRateHeaderId,
   availability,
   images,
   isReadOnly,
-  roomTypesAvailable,
-  roomRateLineSearch,
-  roomRateLineStatusFilter,
-  roomRateLinePageSize,
-  roomRateLinePage,
-  roomRateLineTotalPages,
-  filteredRoomRatesCount,
-  statusFilteredRoomRatesCount,
-  pagedRoomRates,
-  selectedRoomRateHeader,
-  onSelectRoomRateHeader,
-  onRoomRateLineSearchChange,
-  onRoomRateLineStatusFilterChange,
-  onRoomRateLinePageSizeChange,
-  onRoomRateLinePageChange,
+  initialRoomRatesData = null,
   onAddRoomType,
   onEditRoomType,
   onDeleteRoomType,
-  onAddRoomRateHeader,
-  onOpenRoomRateLines,
-  onEditRoomRateHeader,
-  onDeleteRoomRateHeader,
   onAddAvailability,
   onEditAvailability,
   onDeleteAvailability,
   onAddImage,
   onEditImage,
   onDeleteImage,
-  onAddRateLine,
-  onEditRateLine,
-  onDeleteRateLine,
-  onCloseRateLines,
 }: AccommodationHotelDetailCardProps) {
   return (
     <Card>
@@ -138,33 +91,12 @@ function AccommodationHotelDetailCardComponent({
             </TabsContent>
 
             <TabsContent value="room-rates">
-              <RoomRatesTab
-                loadingDetails={loadingDetails}
-                roomRateHeaders={roomRateHeaders}
-                selectedRoomRateHeaderId={selectedRoomRateHeaderId}
-                selectedRoomRateHeader={selectedRoomRateHeader}
-                filteredRoomRatesCount={filteredRoomRatesCount}
-                statusFilteredRoomRatesCount={statusFilteredRoomRatesCount}
-                pagedRoomRates={pagedRoomRates}
-                roomRateLineSearch={roomRateLineSearch}
-                roomRateLineStatusFilter={roomRateLineStatusFilter}
-                roomRateLinePageSize={roomRateLinePageSize}
-                roomRateLinePage={roomRateLinePage}
-                roomRateLineTotalPages={roomRateLineTotalPages}
-                roomTypesAvailable={roomTypesAvailable}
+              <AccommodationRoomRatesTab
+                hotelId={selectedHotel.id}
                 isReadOnly={isReadOnly}
-                onOpenRoomRateLines={onOpenRoomRateLines}
-                onAddRoomRateHeader={onAddRoomRateHeader}
-                onEditRoomRateHeader={onEditRoomRateHeader}
-                onDeleteRoomRateHeader={onDeleteRoomRateHeader}
-                onRoomRateLineSearchChange={onRoomRateLineSearchChange}
-                onRoomRateLineStatusFilterChange={onRoomRateLineStatusFilterChange}
-                onRoomRateLinePageSizeChange={onRoomRateLinePageSizeChange}
-                onRoomRateLinePageChange={onRoomRateLinePageChange}
-                onAddRateLine={onAddRateLine}
-                onEditRateLine={onEditRateLine}
-                onDeleteRateLine={onDeleteRateLine}
-                onCloseRateLines={onCloseRateLines}
+                roomTypes={roomTypes}
+                roomTypesLoading={loadingDetails && roomTypes.length === 0}
+                initialData={initialRoomRatesData}
               />
             </TabsContent>
 
@@ -172,7 +104,7 @@ function AccommodationHotelDetailCardComponent({
               <AvailabilityTab
                 loadingDetails={loadingDetails}
                 availability={availability}
-                roomTypesAvailable={roomTypesAvailable}
+                roomTypesAvailable={roomTypes.length > 0}
                 isReadOnly={isReadOnly}
                 onAddAvailability={onAddAvailability}
                 onEditAvailability={onEditAvailability}
