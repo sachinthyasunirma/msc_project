@@ -1,8 +1,12 @@
-import { and, asc, eq, gte, isNull, lte, or } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
 import * as schema from "@/db/schema";
 import { AccessControlError, resolveAccess } from "@/lib/security/access-control";
+import {
+  resolveHotelContractRates,
+  toAccommodationContractingErrorResponse,
+} from "@/modules/accommodation/server/accommodation-contracting-service";
 import type {
   PreTourAccommodationRateCard,
   ResolveAccommodationRateRequest,
@@ -56,6 +60,10 @@ export function toPreTourRateResolutionErrorResponse(error: unknown) {
       body: { message: error.message, code: error.code },
     };
   }
+  const contracting = toAccommodationContractingErrorResponse(error);
+  if (contracting.status !== 500) {
+    return contracting;
+  }
   return {
     status: 500,
     body: { message: "Failed to resolve pre-tour rate.", code: "INTERNAL_SERVER_ERROR" },
@@ -81,102 +89,81 @@ export async function resolveAccommodationRates(
   const travelDate = normalizeDateOnly(parsed.data.travelDate);
   const roomBasis = parsed.data.roomBasis?.trim().toUpperCase() || null;
 
-  const rows = await db
-    .select({
-      hotelId: schema.hotel.id,
-      hotelCode: schema.hotel.code,
-      hotelName: schema.hotel.name,
-      roomTypeId: schema.roomType.id,
-      roomTypeCode: schema.roomType.code,
-      roomTypeName: schema.roomType.name,
-      maxOccupancy: schema.roomType.maxOccupancy,
-      roomRateId: schema.roomRate.id,
-      roomRateCode: schema.roomRate.code,
-      roomBasis: schema.roomRate.roomBasis,
-      roomRateHeaderId: schema.roomRateHeader.id,
-      roomRateHeaderCode: schema.roomRateHeader.code,
-      roomRateHeaderName: schema.roomRateHeader.name,
-      seasonId: schema.roomRate.seasonId,
-      currencyCode: schema.roomRate.currency,
-      validFrom: schema.roomRate.validFrom,
-      validTo: schema.roomRate.validTo,
-      headerValidFrom: schema.roomRateHeader.validFrom,
-      headerValidTo: schema.roomRateHeader.validTo,
-      finalRatePerNight: schema.roomRate.finalRatePerNight,
-    })
-    .from(schema.roomRate)
-    .innerJoin(schema.hotel, eq(schema.hotel.id, schema.roomRate.hotelId))
-    .innerJoin(schema.roomType, eq(schema.roomType.id, schema.roomRate.roomTypeId))
-    .leftJoin(
-      schema.roomRateHeader,
-      eq(schema.roomRateHeader.id, schema.roomRate.roomRateHeaderId)
-    )
-    .where(
-      and(
-        eq(schema.hotel.companyId, access.companyId),
-        eq(schema.hotel.id, parsed.data.hotelId),
-        eq(schema.hotel.isActive, true),
-        eq(schema.roomType.isActive, true),
-        eq(schema.roomRate.isActive, true),
-        lte(schema.roomRate.validFrom, travelDate),
-        gte(schema.roomRate.validTo, travelDate),
-        parsed.data.roomTypeId ? eq(schema.roomType.id, parsed.data.roomTypeId) : undefined,
-        roomBasis ? eq(schema.roomRate.roomBasis, roomBasis) : undefined,
-        or(
-          isNull(schema.roomRate.roomRateHeaderId),
-          and(
-            eq(schema.roomRateHeader.isActive, true),
-            lte(schema.roomRateHeader.validFrom, travelDate),
-            gte(schema.roomRateHeader.validTo, travelDate)
-          )
-        )
-      )
-    )
-    .orderBy(
-      asc(schema.roomType.name),
-      asc(schema.roomRate.roomBasis),
-      asc(schema.roomRate.validFrom)
-    );
+  const [hotel] = await accessCompanyHotel(parsed.data.hotelId, access.companyId);
+  if (!hotel) {
+    throw new PreTourRateResolutionError(404, "HOTEL_NOT_FOUND", "Hotel not found.");
+  }
+  const rows = await resolveHotelContractRates(
+    {
+      hotelId: parsed.data.hotelId,
+      stayDate: travelDate,
+      roomTypeId: parsed.data.roomTypeId ?? null,
+      boardBasis: roomBasis,
+      adults: 2,
+      children: 0,
+    },
+    headers
+  );
 
   return rows.map((row) => {
-    const effectiveDate = row.headerValidFrom ?? row.validFrom ?? travelDate;
-    const hotelLabel = `${row.hotelCode} - ${row.hotelName}`;
+    const hotelLabel = `${hotel.code} - ${hotel.name}`;
     const roomLabel = `${row.roomTypeCode} - ${row.roomTypeName}`;
-    const sourceLabel = `${hotelLabel} • ${roomLabel}${row.roomBasis ? ` • ${row.roomBasis}` : ""}`;
+    const sourceLabel = `${hotelLabel} • ${roomLabel}${row.boardBasis ? ` • ${row.boardBasis}` : ""}`;
     return {
       sourceRateId: row.roomRateId,
-      sourceType: "MASTER_RATE",
+      sourceType: "CONTRACT_RATE",
       sourceLabel,
-      serviceId: row.hotelId,
+      serviceId: parsed.data.hotelId,
       serviceLabel: hotelLabel,
-      hotelId: row.hotelId,
-      hotelCode: row.hotelCode,
-      hotelName: row.hotelName,
+      hotelId: parsed.data.hotelId,
+      hotelCode: hotel.code,
+      hotelName: hotel.name,
       roomTypeId: row.roomTypeId,
       roomTypeCode: row.roomTypeCode,
       roomTypeName: row.roomTypeName,
-      roomBasis: row.roomBasis,
-      maxOccupancy: row.maxOccupancy,
-      roomRateHeaderId: row.roomRateHeaderId,
-      roomRateHeaderCode: row.roomRateHeaderCode,
-      roomRateHeaderName: row.roomRateHeaderName,
-      seasonId: row.seasonId,
+      roomBasis: row.boardBasis,
+      maxOccupancy: row.occupancy.maxAdults + row.occupancy.maxChildren,
+      roomRateHeaderId: row.ratePlanId,
+      roomRateHeaderCode: row.ratePlanCode,
+      roomRateHeaderName: row.ratePlanName,
+      seasonId: null,
       currencyCode: row.currencyCode,
-      effectiveDate,
-      validFrom: row.validFrom,
-      validTo: row.validTo,
-      buyBaseAmount: toNumber(row.finalRatePerNight),
-      buyTaxAmount: 0,
-      buyTotalAmount: toNumber(row.finalRatePerNight),
+      effectiveDate: row.stayDate,
+      validFrom: row.stayDate,
+      validTo: row.stayDate,
+      buyBaseAmount: toNumber(row.buyBaseAmount),
+      buyTaxAmount: toNumber(row.buyTaxAmount),
+      buyTotalAmount: toNumber(row.buyTotalAmount),
       pricingDimensions: {
-        hotelId: row.hotelId,
+        hotelId: parsed.data.hotelId,
+        contractId: row.contractId,
+        contractCode: row.contractCode,
         roomTypeId: row.roomTypeId,
-        roomBasis: row.roomBasis,
-        roomRateHeaderId: row.roomRateHeaderId,
-        seasonId: row.seasonId,
-        maxOccupancy: row.maxOccupancy,
+        roomBasis: row.boardBasis,
+        roomRateHeaderId: row.ratePlanId,
+        roomRateHeaderCode: row.ratePlanCode,
+        roomRateHeaderName: row.ratePlanName,
+        pricingModel: "PER_ROOM_PER_NIGHT",
+        adults: row.occupancy.adults,
+        children: row.occupancy.children,
+        maxOccupancy: row.occupancy.maxAdults + row.occupancy.maxChildren,
+        applicableFees: row.applicableFees,
+        applicableRestrictions: row.applicableRestrictions,
+        singleSupplementRate: row.singleSupplementRate,
       },
       locked: true,
     };
   });
+}
+
+async function accessCompanyHotel(hotelId: string, companyId: string) {
+  return db
+    .select({
+      id: schema.hotel.id,
+      code: schema.hotel.code,
+      name: schema.hotel.name,
+    })
+    .from(schema.hotel)
+    .where(and(eq(schema.hotel.id, hotelId), eq(schema.hotel.companyId, companyId)))
+    .limit(1);
 }

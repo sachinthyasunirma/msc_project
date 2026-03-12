@@ -3,8 +3,7 @@ import type { ActivityResourceKey } from "@/modules/activity/shared/activity-man
 export const ACTIVITY_META: Record<ActivityResourceKey, { title: string; description: string }> = {
   activities: {
     title: "Activities",
-    description:
-      "Create and maintain activities. Cover image is managed inside the activity form.",
+    description: "Create and maintain activities. Media is managed through the shared asset workspace.",
   },
   "activity-availability": {
     title: "Activity Availability",
@@ -33,7 +32,6 @@ export const ACTIVITY_COLUMNS: Record<ActivityResourceKey, Array<{ key: string; 
     { key: "name", label: "Name" },
     { key: "type", label: "Type" },
     { key: "locationId", label: "Location" },
-    { key: "coverImageUrl", label: "Cover Image" },
     { key: "isActive", label: "Status" },
   ],
   "activity-availability": [

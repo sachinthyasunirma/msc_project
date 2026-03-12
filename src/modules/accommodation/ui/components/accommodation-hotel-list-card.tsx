@@ -2,11 +2,12 @@
 
 import { memo } from "react";
 import Link from "next/link";
-import { Edit3, Loader2, Plus, RefreshCw, Settings2, Trash2 } from "lucide-react";
+import { Edit3, Plus, RefreshCw, Settings2, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { TableLoadingRow } from "@/components/ui/table-loading-row";
 import {
   Select,
   SelectContent,
@@ -124,14 +125,11 @@ function AccommodationHotelListCardComponent({
           </TableHeader>
           <TableBody>
             {loadingHotels ? (
-              <TableRow>
-                <TableCell colSpan={5} className="h-24 text-center">
-                  <span className="inline-flex items-center gap-2 text-muted-foreground">
-                    <Loader2 className="size-4 animate-spin" />
-                    Loading hotels...
-                  </span>
-                </TableCell>
-              </TableRow>
+              <TableLoadingRow
+                colSpan={5}
+                title="Mapping accommodation stops"
+                description="Loading hotels, destinations, and property details."
+              />
             ) : hotels.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={5} className="h-24 text-center text-muted-foreground">

@@ -1,6 +1,7 @@
 "use client";
 
 import type { Dispatch, SetStateAction } from "react";
+import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -45,6 +46,11 @@ type PreTourRecordFormProps = {
   dayTransportForm: DayTransportForm;
   setDayTransportForm: Dispatch<SetStateAction<DayTransportForm>>;
   transportVehicleOptions: Array<{ value: string; label: string }>;
+  autoCodeFieldKey?: "code" | "planCode" | null;
+  autoCodeEnabled?: boolean;
+  onAutoCodeEnabledChange?: (enabled: boolean) => void;
+  autoCodeHint?: string;
+  generatedCode?: string;
 };
 
 export function PreTourRecordForm({
@@ -59,8 +65,19 @@ export function PreTourRecordForm({
   dayTransportForm,
   setDayTransportForm,
   transportVehicleOptions,
+  autoCodeFieldKey = null,
+  autoCodeEnabled = false,
+  onAutoCodeEnabledChange,
+  autoCodeHint = "",
+  generatedCode = "",
 }: PreTourRecordFormProps) {
   const renderField = (field: Field) => (
+    (() => {
+      const isAutoCodeField = field.key === autoCodeFieldKey;
+      const isTextCodeField = field.type === "text" && isAutoCodeField;
+      const textInputValue = String(form[field.key] ?? "");
+
+      return (
     <div
       key={field.key}
       className={field.type === "textarea" || field.type === "json" ? "md:col-span-2" : ""}
@@ -69,6 +86,43 @@ export function PreTourRecordForm({
         {field.label}
         {field.required ? " *" : ""}
       </Label>
+
+      {isTextCodeField ? (
+        <div className="mb-2 rounded-lg border border-border/70 bg-muted/20 px-3 py-2">
+          <div className="flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-xs font-medium text-foreground">Auto-generate</p>
+              <p className="text-[11px] text-muted-foreground">{autoCodeHint}</p>
+            </div>
+            <Switch
+              checked={autoCodeEnabled}
+              onCheckedChange={(checked) => onAutoCodeEnabledChange?.(checked)}
+            />
+          </div>
+          {autoCodeEnabled && generatedCode ? (
+            <div className="mt-2 flex items-center justify-between gap-3 rounded-md bg-background px-2.5 py-2">
+              <div className="min-w-0">
+                <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Generated Code</p>
+                <p className="truncate font-mono text-xs text-foreground">{generatedCode}</p>
+              </div>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="shrink-0"
+                onClick={() =>
+                  setForm((prev) => ({
+                    ...prev,
+                    [field.key]: generatedCode,
+                  }))
+                }
+              >
+                Refresh
+              </Button>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
 
       {field.type === "boolean" ? (
         <div className="flex h-9 items-center justify-between rounded-md border px-3">
@@ -143,8 +197,15 @@ export function PreTourRecordForm({
 
       {field.type === "text" ? (
         <Input
-          value={String(form[field.key] ?? "")}
-          onChange={(event) => setForm((prev) => ({ ...prev, [field.key]: event.target.value }))}
+          value={textInputValue}
+          readOnly={isTextCodeField && autoCodeEnabled}
+          className={isTextCodeField && autoCodeEnabled ? "bg-muted/30 text-muted-foreground" : undefined}
+          onChange={(event) =>
+            setForm((prev) => ({
+              ...prev,
+              [field.key]: isTextCodeField ? event.target.value.toUpperCase() : event.target.value,
+            }))
+          }
         />
       ) : null}
 
@@ -193,6 +254,8 @@ export function PreTourRecordForm({
         />
       ) : null}
     </div>
+      );
+    })()
   );
 
   const renderDayTransport = () => {
@@ -427,4 +490,3 @@ export function PreTourRecordForm({
     </div>
   );
 }
-

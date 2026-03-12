@@ -11,7 +11,6 @@ import {
 } from "@/modules/activity/lib/activity-api";
 import {
   defaultValue,
-  makeActivityCode,
   toIsoDateTime,
   toLocalDateTime,
 } from "@/modules/activity/lib/activity-management-utils";
@@ -39,7 +38,6 @@ export function useActivityManagement({
   const confirm = useConfirm();
   const initialResource: ActivityResourceKey = showActivityList ? "activities" : "activity-rates";
   const skipInitialLookupsLoadRef = useRef(Boolean(initialData));
-  const skipInitialImagesLoadRef = useRef(Boolean(initialData));
   const skipInitialRecordsLoadRef = useRef(
     Boolean(initialData && initialData.resource === initialResource)
   );
@@ -54,7 +52,6 @@ export function useActivityManagement({
   const [locations, setLocations] = useState<Array<Record<string, unknown>>>(
     initialData?.locations ?? []
   );
-  const [images, setImages] = useState<Array<Record<string, unknown>>>(initialData?.images ?? []);
   const [dialog, setDialog] = useState<{
     open: boolean;
     mode: "create" | "edit";
@@ -69,16 +66,6 @@ export function useActivityManagement({
     if (!activityId) return null;
     return activities.find((item) => String(item.id) === activityId) ?? null;
   }, [activities, activityId]);
-
-  const coverImageMap = useMemo(() => {
-    const map = new Map<string, Record<string, unknown>>();
-    images.forEach((item) => {
-      if (item.activityId && item.isCover) {
-        map.set(String(item.activityId), item);
-      }
-    });
-    return map;
-  }, [images]);
 
   const lookups = useMemo(() => {
     const items: Array<[string, string]> = [];
@@ -165,8 +152,6 @@ export function useActivityManagement({
           { key: "inclusions", label: "Inclusions JSON", type: "json" },
           { key: "exclusions", label: "Exclusions JSON", type: "json" },
           { key: "notes", label: "Notes", type: "text" },
-          { key: "coverImageUrl", label: "Cover Image URL", type: "text", nullable: true },
-          { key: "coverImageAltText", label: "Cover Image Alt Text", type: "text", nullable: true },
           { key: "isActive", label: "Active", type: "boolean", defaultValue: true },
         ];
       case "activity-availability": {
@@ -293,18 +278,6 @@ export function useActivityManagement({
     }
   }, []);
 
-  const loadImages = useCallback(async () => {
-    try {
-      const rows = await listActivityRecords("activity-images", {
-        limit: 500,
-        activityId: activityId || undefined,
-      });
-      setImages(rows);
-    } catch {
-      setImages([]);
-    }
-  }, [activityId]);
-
   const load = useCallback(async () => {
     setLoading(true);
     try {
@@ -318,20 +291,13 @@ export function useActivityManagement({
       }
 
       const rows = await listActivityRecords(resource, params);
-      setRecords(
-        resource === "activities"
-          ? rows.map((row) => ({
-              ...row,
-              coverImageUrl: coverImageMap.get(String(row.id))?.url ?? null,
-            }))
-          : rows
-      );
+      setRecords(rows);
     } catch (error) {
       notify.error(error instanceof Error ? error.message : "Failed to load records.");
     } finally {
       setLoading(false);
     }
-  }, [activityId, coverImageMap, query, resource, showActivityList]);
+  }, [activityId, query, resource, showActivityList]);
 
   const totalPages = useMemo(() => Math.max(1, Math.ceil(records.length / pageSize)), [records.length, pageSize]);
   const pagedRecords = useMemo(() => {
@@ -345,12 +311,7 @@ export function useActivityManagement({
     } else {
       void loadLookups();
     }
-    if (skipInitialImagesLoadRef.current) {
-      skipInitialImagesLoadRef.current = false;
-    } else {
-      void loadImages();
-    }
-  }, [loadImages, loadLookups]);
+  }, [loadLookups]);
 
   useEffect(() => {
     if (
@@ -373,40 +334,8 @@ export function useActivityManagement({
   }, [currentPage, totalPages]);
 
   const refreshAll = useCallback(async () => {
-    await Promise.all([load(), loadImages(), loadLookups()]);
-  }, [load, loadImages, loadLookups]);
-
-  const upsertCoverImage = useCallback(async (targetActivityId: string, imageUrlRaw: unknown, altTextRaw: unknown) => {
-    const imageUrl = String(imageUrlRaw ?? "").trim();
-    const altText = String(altTextRaw ?? "").trim();
-    const currentCover = coverImageMap.get(targetActivityId);
-
-    if (!imageUrl) {
-      if (currentCover?.id) {
-        await deleteActivityRecord("activity-images", String(currentCover.id));
-      }
-      return;
-    }
-
-    if (currentCover?.id) {
-      await updateActivityRecord("activity-images", String(currentCover.id), {
-        url: imageUrl,
-        altText: altText || null,
-        isCover: true,
-        sortOrder: 0,
-      });
-      return;
-    }
-
-    await createActivityRecord("activity-images", {
-      code: makeActivityCode("AIMG"),
-      activityId: targetActivityId,
-      url: imageUrl,
-      altText: altText || null,
-      isCover: true,
-      sortOrder: 0,
-    });
-  }, [coverImageMap]);
+    await Promise.all([load(), loadLookups()]);
+  }, [load, loadLookups]);
 
   const openDialog = useCallback((mode: "create" | "edit", row?: Record<string, unknown>) => {
     if (mode === "create" && isReadOnly) {
@@ -425,13 +354,6 @@ export function useActivityManagement({
       }
     });
 
-    if (resource === "activities") {
-      const targetActivityId = mode === "edit" && row?.id ? String(row.id) : "";
-      const cover = targetActivityId ? coverImageMap.get(targetActivityId) : null;
-      next.coverImageUrl = String(cover?.url ?? "");
-      next.coverImageAltText = String(cover?.altText ?? "");
-    }
-
     if (!showActivityList && activityId) {
       if (resource === "activity-rates" || resource === "activity-availability") next.activityId = activityId;
       if (resource === "activity-supplements") next.parentActivityId = activityId;
@@ -439,7 +361,7 @@ export function useActivityManagement({
 
     setForm(next);
     setDialog({ open: true, mode, row: row ?? null });
-  }, [activityId, coverImageMap, fields, isReadOnly, resource, showActivityList]);
+  }, [activityId, fields, isReadOnly, resource, showActivityList]);
 
   const onSubmit = useCallback(async () => {
     try {
@@ -471,14 +393,11 @@ export function useActivityManagement({
       }
 
       if (resource === "activities") {
-        const { coverImageUrl, coverImageAltText, ...activityPayload } = payload;
         if (dialog.mode === "create") {
-          const created = await createActivityRecord("activities", activityPayload);
-          await upsertCoverImage(String(created.id), coverImageUrl, coverImageAltText);
+          await createActivityRecord("activities", payload);
           notify.success("Activity created.");
         } else if (dialog.row?.id) {
-          const updated = await updateActivityRecord("activities", String(dialog.row.id), activityPayload);
-          await upsertCoverImage(String(updated.id), coverImageUrl, coverImageAltText);
+          await updateActivityRecord("activities", String(dialog.row.id), payload);
           notify.success("Activity updated.");
         }
       } else {
@@ -498,7 +417,7 @@ export function useActivityManagement({
     } finally {
       setSaving(false);
     }
-  }, [activityId, dialog.mode, dialog.row, fields, form, refreshAll, resource, showActivityList, upsertCoverImage]);
+  }, [activityId, dialog.mode, dialog.row, fields, form, refreshAll, resource, showActivityList]);
 
   const onDelete = useCallback(async (row: Record<string, unknown>) => {
     if (!row.id) return;
@@ -589,6 +508,7 @@ export function useActivityManagement({
     refreshActivityExistingCodes,
     refreshActivityRateExistingCodes,
     resourceTabs,
+    selectedActivity,
     selectedActivityLabel,
     activityMeta: ACTIVITY_META[resource],
   };

@@ -6,11 +6,13 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import type { Availability, Hotel, HotelImage, RoomType } from "@/modules/accommodation/lib/accommodation-api";
+import type { Availability, Hotel, RoomType } from "@/modules/accommodation/lib/accommodation-api";
 import { AvailabilityTab } from "@/modules/accommodation/ui/components/accommodation-manage/availability-tab";
+import { ContractingTab } from "@/modules/accommodation/ui/components/accommodation-manage/contracting-tab";
 import { ImagesTab } from "@/modules/accommodation/ui/components/accommodation-manage/images-tab";
 import { RoomTypesTab } from "@/modules/accommodation/ui/components/accommodation-manage/room-types-tab";
 import type { AccommodationRoomRatesInitialData } from "@/modules/accommodation/shared/accommodation-room-rates.types";
+import type { HotelContractingBundle } from "@/modules/accommodation/shared/accommodation-contracting-types";
 import { AccommodationRoomRatesTab } from "@/modules/accommodation/ui/components/manage-tabs/accommodation-room-rates-tab";
 
 type AccommodationHotelDetailCardProps = {
@@ -19,7 +21,7 @@ type AccommodationHotelDetailCardProps = {
   loadingDetails: boolean;
   roomTypes: RoomType[];
   availability: Availability[];
-  images: HotelImage[];
+  contracting: HotelContractingBundle | null;
   isReadOnly: boolean;
   initialRoomRatesData?: AccommodationRoomRatesInitialData | null;
   onAddRoomType: () => void;
@@ -28,9 +30,6 @@ type AccommodationHotelDetailCardProps = {
   onAddAvailability: () => void;
   onEditAvailability: (row: Availability) => void;
   onDeleteAvailability: (row: Availability) => void;
-  onAddImage: () => void;
-  onEditImage: (row: HotelImage) => void;
-  onDeleteImage: (row: HotelImage) => void;
 };
 
 function AccommodationHotelDetailCardComponent({
@@ -39,7 +38,7 @@ function AccommodationHotelDetailCardComponent({
   loadingDetails,
   roomTypes,
   availability,
-  images,
+  contracting,
   isReadOnly,
   initialRoomRatesData = null,
   onAddRoomType,
@@ -48,9 +47,6 @@ function AccommodationHotelDetailCardComponent({
   onAddAvailability,
   onEditAvailability,
   onDeleteAvailability,
-  onAddImage,
-  onEditImage,
-  onDeleteImage,
 }: AccommodationHotelDetailCardProps) {
   return (
     <Card>
@@ -74,6 +70,7 @@ function AccommodationHotelDetailCardComponent({
               <TabsList className="master-tabs-list">
                 <TabsTrigger value="room-types" className="master-tab-trigger">Room Types</TabsTrigger>
                 <TabsTrigger value="room-rates" className="master-tab-trigger">Room Rates</TabsTrigger>
+                <TabsTrigger value="contracting" className="master-tab-trigger">Contracting</TabsTrigger>
                 <TabsTrigger value="availability" className="master-tab-trigger">Availability</TabsTrigger>
                 <TabsTrigger value="images" className="master-tab-trigger">Images</TabsTrigger>
               </TabsList>
@@ -112,14 +109,20 @@ function AccommodationHotelDetailCardComponent({
               />
             </TabsContent>
 
+            <TabsContent value="contracting">
+              <ContractingTab
+                hotelId={selectedHotel.id}
+                loadingDetails={loadingDetails}
+                contracting={contracting}
+                roomTypes={roomTypes}
+                isReadOnly={isReadOnly}
+              />
+            </TabsContent>
+
             <TabsContent value="images">
               <ImagesTab
-                loadingDetails={loadingDetails}
-                images={images}
+                hotelId={selectedHotel.id}
                 isReadOnly={isReadOnly}
-                onAddImage={onAddImage}
-                onEditImage={onEditImage}
-                onDeleteImage={onDeleteImage}
               />
             </TabsContent>
           </Tabs>

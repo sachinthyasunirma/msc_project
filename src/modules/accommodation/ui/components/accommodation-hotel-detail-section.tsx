@@ -4,9 +4,9 @@ import { memo, useCallback, useMemo } from "react";
 import { useAccommodationHotelDetail } from "@/modules/accommodation/lib/use-accommodation-hotel-detail";
 import type { AccommodationHotelDetailData } from "@/modules/accommodation/shared/accommodation-detail-types";
 import type { AccommodationRoomRatesInitialData } from "@/modules/accommodation/shared/accommodation-room-rates.types";
+import type { HotelContractingBundle } from "@/modules/accommodation/shared/accommodation-contracting-types";
 import { AccommodationHotelDetailCard } from "@/modules/accommodation/ui/components/accommodation-hotel-detail-card";
 import { AccommodationAvailabilityDialog } from "@/modules/accommodation/ui/components/dialogs/accommodation-availability-dialog";
-import { AccommodationImageDialog } from "@/modules/accommodation/ui/components/dialogs/accommodation-image-dialog";
 import { AccommodationRoomTypeDialog } from "@/modules/accommodation/ui/components/dialogs/accommodation-room-type-dialog";
 import { AccommodationSeasonDialog } from "@/modules/accommodation/ui/components/dialogs/accommodation-season-dialog";
 
@@ -27,10 +27,8 @@ function AccommodationHotelDetailSectionComponent({
   const {
     openRoomTypeDialog,
     openAvailabilityDialog,
-    openImageDialog,
     deleteRoomTypeRecord,
     deleteAvailabilityRecord,
-    deleteImageRecord,
   } = detail;
   const initialRoomRatesData = useMemo<AccommodationRoomRatesInitialData | null>(
     () =>
@@ -41,6 +39,10 @@ function AccommodationHotelDetailSectionComponent({
             seasons: (initialData.seasons as AccommodationRoomRatesInitialData["seasons"]) ?? [],
           }
         : null,
+    [initialData]
+  );
+  const initialContractingData = useMemo<HotelContractingBundle | null>(
+    () => (initialData?.contracting as HotelContractingBundle | null) ?? null,
     [initialData]
   );
   const handleAddRoomType = useCallback(() => openRoomTypeDialog("create"), [openRoomTypeDialog]);
@@ -65,17 +67,6 @@ function AccommodationHotelDetailSectionComponent({
     },
     [deleteAvailabilityRecord]
   );
-  const handleAddImage = useCallback(() => openImageDialog("create"), [openImageDialog]);
-  const handleEditImage = useCallback(
-    (row: Parameters<typeof deleteImageRecord>[0]) => openImageDialog("edit", row),
-    [openImageDialog]
-  );
-  const handleDeleteImage = useCallback(
-    (row: Parameters<typeof deleteImageRecord>[0]) => {
-      void deleteImageRecord(row);
-    },
-    [deleteImageRecord]
-  );
 
   return (
     <>
@@ -85,7 +76,7 @@ function AccommodationHotelDetailSectionComponent({
         loadingDetails={detail.loadingDetails}
         roomTypes={detail.roomTypes}
         availability={detail.availability}
-        images={detail.images}
+        contracting={initialContractingData}
         isReadOnly={isReadOnly}
         initialRoomRatesData={initialRoomRatesData}
         onAddRoomType={handleAddRoomType}
@@ -94,9 +85,6 @@ function AccommodationHotelDetailSectionComponent({
         onAddAvailability={handleAddAvailability}
         onEditAvailability={handleEditAvailability}
         onDeleteAvailability={handleDeleteAvailability}
-        onAddImage={handleAddImage}
-        onEditImage={handleEditImage}
-        onDeleteImage={handleDeleteImage}
       />
 
       {detail.roomTypeDialog.dialog.open ? (
@@ -127,21 +115,6 @@ function AccommodationHotelDetailSectionComponent({
           onOpenChange={detail.availabilityDialog.setOpen}
           onCancel={detail.availabilityDialog.closeDialog}
           onSubmit={() => void detail.submitAvailability()}
-        />
-      ) : null}
-
-      {detail.imageDialog.dialog.open ? (
-        <AccommodationImageDialog
-          open={detail.imageDialog.dialog.open}
-          mode={detail.imageDialog.dialog.mode}
-          row={detail.imageDialog.dialog.row}
-          form={detail.imageDialog.form}
-          setForm={detail.imageDialog.setForm}
-          saving={detail.saving}
-          isReadOnly={isReadOnly}
-          onOpenChange={detail.imageDialog.setOpen}
-          onCancel={detail.imageDialog.closeDialog}
-          onSubmit={() => void detail.submitImage()}
         />
       ) : null}
 

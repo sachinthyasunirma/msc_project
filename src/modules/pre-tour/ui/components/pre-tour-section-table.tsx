@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { TablePagination } from "@/components/ui/table-pagination";
+import { LoadingState } from "@/components/ui/loading-state";
 import {
   Table,
   TableBody,
@@ -15,6 +16,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { TableLoadingRow } from "@/components/ui/table-loading-row";
 import { cn } from "@/lib/utils";
 import { COLUMNS, META } from "@/modules/pre-tour/shared/pre-tour-management-constants";
 import type { PreTourResourceKey, Row } from "@/modules/pre-tour/shared/pre-tour-management-types";
@@ -268,11 +270,11 @@ export function SectionTable({
                 </TableHeader>
                 <TableBody>
                   {loading ? (
-                    <TableRow>
-                      <TableCell colSpan={6} className="py-6 text-center text-muted-foreground">
-                        Loading...
-                      </TableCell>
-                    </TableRow>
+                    <TableLoadingRow
+                      colSpan={6}
+                      title="Plotting pre-tour plans"
+                      description="Loading routes, versions, and planning summaries."
+                    />
                   ) : rows.length === 0 ? (
                     <TableRow>
                       <TableCell colSpan={6} className="py-6 text-center text-muted-foreground">
@@ -323,9 +325,12 @@ export function SectionTable({
 
             <div className="space-y-2 lg:hidden">
               {loading ? (
-                <div className="rounded-md border px-3 py-6 text-center text-sm text-muted-foreground">
-                  Loading...
-                </div>
+                <LoadingState
+                  compact
+                  title="Plotting pre-tour plans"
+                  description="Loading mobile cards for your current route pipeline."
+                  className="justify-center rounded-md border px-3 py-6"
+                />
               ) : rows.length === 0 ? (
                 <div className="rounded-md border px-3 py-6 text-center text-sm text-muted-foreground">
                   No records found.
@@ -368,14 +373,11 @@ export function SectionTable({
             </TableHeader>
             <TableBody>
               {loading ? (
-                <TableRow>
-                  <TableCell
-                    colSpan={COLUMNS[resource].length + 1}
-                    className="py-6 text-center text-muted-foreground"
-                  >
-                    Loading...
-                  </TableCell>
-                </TableRow>
+                <TableLoadingRow
+                  colSpan={COLUMNS[resource].length + 1}
+                  title="Loading pre-tour records"
+                  description="Pulling the latest operational records into view."
+                />
               ) : rows.length === 0 ? (
                 <TableRow>
                   <TableCell

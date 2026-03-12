@@ -12,6 +12,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { TableLoadingRow } from "@/components/ui/table-loading-row";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import type { RoomRate, RoomRateHeader } from "@/modules/accommodation/lib/accommodation-api";
 
@@ -95,7 +96,11 @@ function RoomRatesTabComponent({
           </TableHeader>
           <TableBody>
             {loadingDetails ? (
-              <TableRow><TableCell colSpan={6} className="text-center">Loading...</TableCell></TableRow>
+              <TableLoadingRow
+                colSpan={6}
+                title="Charting room rate seasons"
+                description="Loading headers, rate periods, and contracted pricing."
+              />
             ) : roomRateHeaders.length === 0 ? (
               <TableRow><TableCell colSpan={6} className="text-center text-muted-foreground">No room rate headers.</TableCell></TableRow>
             ) : (
@@ -182,7 +187,11 @@ function RoomRatesTabComponent({
             </TableHeader>
             <TableBody>
               {loadingDetails ? (
-                <TableRow><TableCell colSpan={6} className="text-center">Loading...</TableCell></TableRow>
+                <TableLoadingRow
+                  colSpan={6}
+                  title="Resolving rate lines"
+                  description="Loading filtered room rates for the selected travel period."
+                />
               ) : statusFilteredRoomRatesCount === 0 ? (
                 <TableRow><TableCell colSpan={6} className="text-center text-muted-foreground">{roomRateLineSearch ? "No matching room rate lines." : "No room rate lines for this header."}</TableCell></TableRow>
               ) : (

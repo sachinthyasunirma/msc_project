@@ -5,37 +5,29 @@ import { useConfirm } from "@/components/app-confirm-provider";
 import { notify } from "@/lib/notify";
 import {
   createAvailability,
-  createHotelImage,
   createRoomType,
   deleteAvailability,
-  deleteHotelImage,
   deleteRoomType,
   getHotel,
   listAvailability,
-  listHotelImages,
   listRoomTypes,
   updateAvailability,
-  updateHotelImage,
   updateRoomType,
   type Availability,
   type Hotel,
-  type HotelImage,
   type RoomType,
 } from "@/modules/accommodation/lib/accommodation-api";
 import {
   getInitialAvailabilityForm,
-  getInitialImageForm,
   getInitialRoomTypeForm,
   getInitialSeasonForm,
   type AvailabilityFormState,
-  type ImageFormState,
   type RoomTypeFormState,
   type SeasonFormState,
 } from "@/modules/accommodation/lib/accommodation-view-helpers";
 import { useAccommodationFormDialog } from "@/modules/accommodation/lib/use-accommodation-form-dialog";
 import {
   createAvailabilitySchema,
-  createHotelImageSchema,
   createRoomTypeSchema,
 } from "@/modules/accommodation/shared/accommodation-schemas";
 import { createSeason, deleteSeason, listSeasons, updateSeason } from "@/modules/season/lib/season-api";
@@ -69,9 +61,6 @@ export function useAccommodationHotelDetail({
   const [availability, setAvailability] = useState<Availability[]>(
     (initialData?.availability as Availability[] | undefined) ?? []
   );
-  const [images, setImages] = useState<HotelImage[]>(
-    (initialData?.images as HotelImage[] | undefined) ?? []
-  );
   const [seasons, setSeasons] = useState<SeasonOption[]>(
     (initialData?.seasons as SeasonOption[] | undefined) ?? []
   );
@@ -81,9 +70,6 @@ export function useAccommodationHotelDetail({
   );
   const availabilityDialog = useAccommodationFormDialog<AvailabilityFormState, Availability>((row) =>
     getInitialAvailabilityForm(row ?? null, roomTypes[0]?.id ?? "")
-  );
-  const imageDialog = useAccommodationFormDialog<ImageFormState, HotelImage>((row) =>
-    getInitialImageForm(row ?? null)
   );
   const seasonDialog = useAccommodationFormDialog<SeasonFormState, SeasonOption>((row) =>
     getInitialSeasonForm(row ?? null)
@@ -129,19 +115,6 @@ export function useAccommodationHotelDetail({
     }
   }, [hotelId]);
 
-  const loadImages = useCallback(async () => {
-    if (!hotelId) {
-      setImages([]);
-      return;
-    }
-    try {
-      setImages(await listHotelImages(hotelId));
-    } catch {
-      notify.error("Failed to load images.");
-      setImages([]);
-    }
-  }, [hotelId]);
-
   const loadSeasons = useCallback(async () => {
     try {
       const refreshed = await listSeasons({ limit: 100 });
@@ -156,12 +129,8 @@ export function useAccommodationHotelDetail({
     if (!hotelId) {
       setSelectedHotel(null);
       setRoomTypes([]);
-      setRoomRateHeaders([]);
-      setRoomRates([]);
       setAvailability([]);
-      setImages([]);
       setSeasons([]);
-      setSelectedRoomRateHeaderId(null);
       return;
     }
 
@@ -171,13 +140,12 @@ export function useAccommodationHotelDetail({
         loadHotel(),
         loadRoomTypes(),
         loadAvailability(),
-        loadImages(),
         loadSeasons(),
       ]);
     } finally {
       setLoadingDetails(false);
     }
-  }, [hotelId, loadAvailability, loadHotel, loadImages, loadRoomTypes, loadSeasons]);
+  }, [hotelId, loadAvailability, loadHotel, loadRoomTypes, loadSeasons]);
 
   useEffect(() => {
     if (skipInitialLoadRef.current) {
@@ -231,11 +199,6 @@ export function useAccommodationHotelDetail({
     if (!guardCreate(mode)) return;
     availabilityDialog.openDialog(mode, row);
   }, [availabilityDialog, guardCreate]);
-
-  const openImageDialog = useCallback((mode: "create" | "edit", row: HotelImage | null = null) => {
-    if (!guardCreate(mode)) return;
-    imageDialog.openDialog(mode, row);
-  }, [guardCreate, imageDialog]);
 
   const openSeasonDialog = useCallback((mode: "create" | "edit", row: SeasonOption | null = null) => {
     if (!guardCreate(mode)) return;
@@ -292,30 +255,6 @@ export function useAccommodationHotelDetail({
     });
   }, [availabilityDialog, hotelId, withSave]);
 
-  const submitImage = useCallback(async () => {
-    if (!hotelId) return;
-    const parsed = createHotelImageSchema.safeParse({
-      ...imageDialog.form,
-      caption: imageDialog.form.caption || null,
-    });
-    if (!parsed.success) {
-      notify.error(parsed.error.issues[0]?.message || "Invalid image data.");
-      return;
-    }
-    await withSave(async () => {
-      if (imageDialog.dialog.mode === "create") {
-        const created = await createHotelImage(hotelId, parsed.data);
-        setImages((prev) => [...prev, created]);
-        notify.success("Image created.");
-      } else if (imageDialog.dialog.row) {
-        const updated = await updateHotelImage(hotelId, imageDialog.dialog.row.id, parsed.data);
-        setImages((prev) => prev.map((row) => (row.id === updated.id ? updated : row)));
-        notify.success("Image updated.");
-      }
-      imageDialog.closeDialog();
-    });
-  }, [hotelId, imageDialog, withSave]);
-
   const submitSeason = useCallback(async () => {
     const parsed = createSeasonSchema.safeParse({
       ...seasonDialog.form,
@@ -357,15 +296,6 @@ export function useAccommodationHotelDetail({
     });
   }, [confirmDelete, hotelId]);
 
-  const deleteImageRecord = useCallback(async (row: HotelImage) => {
-    if (!hotelId) return;
-    await confirmDelete("Delete image?", async () => {
-      await deleteHotelImage(hotelId, row.id);
-      setImages((prev) => prev.filter((item) => item.id !== row.id));
-      notify.success("Image deleted.");
-    });
-  }, [confirmDelete, hotelId]);
-
   const deleteSeasonRecord = useCallback(async (row: SeasonOption) => {
     await confirmDelete("Delete this season? Linked room rates may be deleted due cascade.", async () => {
       await deleteSeason(row.id);
@@ -380,23 +310,18 @@ export function useAccommodationHotelDetail({
     selectedHotel,
     roomTypes,
     availability,
-    images,
     seasons,
     openRoomTypeDialog,
     openAvailabilityDialog,
-    openImageDialog,
     openSeasonDialog,
     submitRoomType,
     submitAvailability,
-    submitImage,
     submitSeason,
     deleteRoomTypeRecord,
     deleteAvailabilityRecord,
-    deleteImageRecord,
     deleteSeasonRecord,
     roomTypeDialog,
     availabilityDialog,
-    imageDialog,
     seasonDialog,
     reloadHotel: loadHotel,
   };

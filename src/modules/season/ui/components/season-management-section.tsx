@@ -4,6 +4,7 @@ import { Edit3, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { RecordAuditMeta } from "@/components/ui/record-audit-meta";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { TableLoadingRow } from "@/components/ui/table-loading-row";
 import {
   Dialog,
   DialogContent,
@@ -75,13 +76,17 @@ export function SeasonManagementSection({
               <TableHead>Description</TableHead>
               <TableHead className="text-right">Actions</TableHead>
             </TableRow>
-          </TableHeader>
-          <TableBody>
-            {state.loading ? (
-              <TableRow><TableCell colSpan={5} className="text-center text-muted-foreground">Loading...</TableCell></TableRow>
-            ) : state.seasons.length === 0 ? (
-              <TableRow><TableCell colSpan={5} className="text-center text-muted-foreground">No seasons found.</TableCell></TableRow>
-            ) : (
+        </TableHeader>
+        <TableBody>
+          {state.loading ? (
+            <TableLoadingRow
+              colSpan={5}
+              title="Setting seasonal windows"
+              description="Loading your valid seasons and date ranges."
+            />
+          ) : state.seasons.length === 0 ? (
+            <TableRow><TableCell colSpan={5} className="text-center text-muted-foreground">No seasons found.</TableCell></TableRow>
+          ) : (
               state.seasons.map((season) => (
                 <TableRow key={season.id}>
                   <TableCell>{season.code}</TableCell>

@@ -1,9 +1,11 @@
 "use client";
 
 import { Edit3, Plus, RefreshCw, Trash2 } from "lucide-react";
+import type { ReactNode } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { TableLoadingRow } from "@/components/ui/table-loading-row";
 import { TablePagination } from "@/components/ui/table-pagination";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { TRANSPORT_RESOURCE_COLUMNS, TRANSPORT_RESOURCE_META } from "@/modules/transport/shared/transport-management-constants";
@@ -28,6 +30,7 @@ type TransportResourceTabProps = {
   onDelete: (row: Record<string, unknown>) => void;
   onPageChange: (page: number) => void;
   onPageSizeChange: (pageSize: number) => void;
+  renderRowActions?: (row: Record<string, unknown>) => ReactNode;
 };
 
 export function TransportResourceTab({
@@ -48,6 +51,7 @@ export function TransportResourceTab({
   onDelete,
   onPageChange,
   onPageSizeChange,
+  renderRowActions,
 }: TransportResourceTabProps) {
   const meta = TRANSPORT_RESOURCE_META[resource];
   return (
@@ -81,7 +85,11 @@ export function TransportResourceTab({
         </TableHeader>
         <TableBody>
           {loading ? (
-            <TableRow><TableCell colSpan={TRANSPORT_RESOURCE_COLUMNS[resource].length + 1} className="text-center text-muted-foreground">Loading...</TableCell></TableRow>
+            <TableLoadingRow
+              colSpan={TRANSPORT_RESOURCE_COLUMNS[resource].length + 1}
+              title="Positioning transport routes"
+              description="Loading locations, vehicles, and transport pricing."
+            />
           ) : records.length === 0 ? (
             <TableRow><TableCell colSpan={TRANSPORT_RESOURCE_COLUMNS[resource].length + 1} className="text-center text-muted-foreground">No records found.</TableCell></TableRow>
           ) : (
@@ -100,6 +108,7 @@ export function TransportResourceTab({
                 ))}
                 <TableCell className="text-right">
                   <div className="flex justify-end gap-2">
+                    {renderRowActions ? renderRowActions(row) : null}
                     <Button size="sm" variant="outline" onClick={() => onEdit(row)}>
                       <Edit3 className="size-4" />
                     </Button>

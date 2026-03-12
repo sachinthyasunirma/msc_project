@@ -2,10 +2,12 @@
 
 import Link from "next/link";
 import { Edit3, Plus, RefreshCw, Settings2, Trash2 } from "lucide-react";
+import type { ReactNode } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { TableLoadingRow } from "@/components/ui/table-loading-row";
 import { TablePagination } from "@/components/ui/table-pagination";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -36,6 +38,7 @@ type ActivityRecordTableCardProps = {
   onDelete: (row: Record<string, unknown>) => void;
   onPageChange: (page: number) => void;
   onPageSizeChange: (pageSize: number) => void;
+  renderRowActions?: (row: Record<string, unknown>) => ReactNode;
 };
 
 export function ActivityRecordTableCard({
@@ -61,6 +64,7 @@ export function ActivityRecordTableCard({
   onDelete,
   onPageChange,
   onPageSizeChange,
+  renderRowActions,
 }: ActivityRecordTableCardProps) {
   return (
     <Card>
@@ -125,11 +129,11 @@ export function ActivityRecordTableCard({
           </TableHeader>
           <TableBody>
             {loading ? (
-              <TableRow>
-                <TableCell colSpan={ACTIVITY_COLUMNS[resource].length + 1} className="text-center text-muted-foreground">
-                  Loading...
-                </TableCell>
-              </TableRow>
+              <TableLoadingRow
+                colSpan={ACTIVITY_COLUMNS[resource].length + 1}
+                title="Planning your activity map"
+                description="Loading activity records, availability, and pricing stops."
+              />
             ) : records.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={ACTIVITY_COLUMNS[resource].length + 1} className="text-center text-muted-foreground">
@@ -172,6 +176,7 @@ export function ActivityRecordTableCard({
                           </Link>
                         </Button>
                       ) : null}
+                      {renderRowActions ? renderRowActions(row) : null}
                       <Button size="sm" variant="outline" onClick={() => onEdit(row)}>
                         <Edit3 className="size-4" />
                       </Button>

@@ -20,7 +20,6 @@ import {
   matchesQuery,
   parseFieldValue,
   sanitizeCodePart,
-  toDayCount,
   toIsoDateTime,
   toLocalDateTime,
   toNightCount,
@@ -39,6 +38,7 @@ import { PreTourRouteMapDialogController } from "@/modules/pre-tour/ui/component
 import { SectionTable } from "@/modules/pre-tour/ui/components/pre-tour-section-table";
 import { PreTourShareDialogController } from "@/modules/pre-tour/ui/components/pre-tour-share-dialog-controller";
 import { usePreTourAccess } from "@/modules/pre-tour/ui/hooks/use-pre-tour-access";
+import { usePreTourDayInitialization } from "@/modules/pre-tour/ui/hooks/use-pre-tour-day-initialization";
 import { usePreTourMasters } from "@/modules/pre-tour/ui/hooks/use-pre-tour-masters";
 import { usePreTourPlanOperations } from "@/modules/pre-tour/ui/hooks/use-pre-tour-plan-operations";
 import {
@@ -86,7 +86,6 @@ export function PreTourPlanManageView({
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [syncingDays, setSyncingDays] = useState(false);
   const [plans, setPlans] = useState<Row[]>([]);
   const [days, setDays] = useState<Row[]>([]);
   const [items, setItems] = useState<Row[]>([]);
@@ -107,7 +106,6 @@ export function PreTourPlanManageView({
     kind: "generic",
     row: null,
   });
-  const autoDaySyncPlanIdRef = useRef<string | null>(null);
   const guideAllocationUnavailableNotifiedRef = useRef(false);
   const [dialog, setDialog] = useState<{
     open: boolean;
@@ -168,6 +166,15 @@ export function PreTourPlanManageView({
     canViewCosting,
     companyBaseCurrencyCode,
     onSuccess: loadData,
+  });
+
+  const { syncingDays, syncDaysFromRange } = usePreTourDayInitialization({
+    planId,
+    selectedPlan,
+    daysCount: days.length,
+    loading,
+    isReadOnly,
+    onDaysChange: setDays,
   });
 
   const sortedDays = useMemo(
@@ -901,61 +908,6 @@ export function PreTourPlanManageView({
     }
   }, [items, loadData]);
 
-  const syncDaysFromRange = useCallback(async () => {
-    if (!selectedPlan) return;
-    const expectedDays = toDayCount(String(selectedPlan.startDate || ""), String(selectedPlan.endDate || ""));
-    if (expectedDays <= 0) {
-      notify.error("Invalid plan date range. Update pre-tour header dates first.");
-      return;
-    }
-
-    setSyncingDays(true);
-    try {
-      const latestDayRows = await listPreTourRecords("pre-tour-days", { planId, limit: 1000 });
-      const existingDayNumbers = new Set(
-        latestDayRows.map((day) => Number(day.dayNumber)).filter((value) => Number.isFinite(value))
-      );
-      const baseCode = sanitizeCodePart(String(selectedPlan.planCode || selectedPlan.code || "PRE_TOUR"));
-      const missingDayNumbers: number[] = [];
-      for (let dayNumber = 1; dayNumber <= expectedDays; dayNumber += 1) {
-        if (!existingDayNumbers.has(dayNumber)) missingDayNumbers.push(dayNumber);
-      }
-      if (missingDayNumbers.length === 0) {
-        notify.info("All days are already initialized from the date range.");
-        return;
-      }
-      for (const dayNumber of missingDayNumbers) {
-        await createPreTourRecord("pre-tour-days", {
-          code: `${baseCode}_DAY_${String(dayNumber).padStart(2, "0")}`,
-          planId,
-          dayNumber,
-          date: addDays(String(selectedPlan.startDate), dayNumber - 1).toISOString(),
-          title: `Day ${dayNumber}`,
-          isActive: true,
-        });
-      }
-      notify.success(`Initialized ${missingDayNumbers.length} day(s) from plan date range.`);
-      await loadData();
-    } catch (error) {
-      notify.error(error instanceof Error ? error.message : "Failed to initialize plan days.");
-    } finally {
-      setSyncingDays(false);
-    }
-  }, [loadData, planId, selectedPlan]);
-
-  useEffect(() => {
-    if (!selectedPlan || loading || syncingDays || days.length > 0) return;
-    if (autoDaySyncPlanIdRef.current === planId) return;
-    autoDaySyncPlanIdRef.current = planId;
-    void syncDaysFromRange();
-  }, [days.length, loading, planId, selectedPlan, syncDaysFromRange, syncingDays]);
-
-  useEffect(() => {
-    if (days.length > 0 && autoDaySyncPlanIdRef.current === planId) {
-      autoDaySyncPlanIdRef.current = null;
-    }
-  }, [days.length, planId]);
-
   const filteredAddonRows = useMemo(() => {
     const rows = selectedItemId ? addons.filter((row) => String(row.planItemId) === selectedItemId) : addons;
     return rows.filter((row) => matchesQuery("pre-tour-item-addons", row, query));
@@ -1209,6 +1161,7 @@ export function PreTourPlanManageView({
           hotelOptions={activeHotelOptions.map(({ value, label }) => ({ value, label }))}
           activityOptions={activities.map((row) => ({ value: String(row.id), label: `${row.code} - ${row.name}` }))}
           transportOptions={vehicleTypes.map((row) => ({ value: String(row.id), label: `${row.code} - ${row.name}` }))}
+          locationOptions={locationOptions}
           canOverrideContractRates={!isReadOnly && (isAdmin || canViewCosting)}
           onSubmit={(payload) => onSaveAllocationItem(payload)}
         />

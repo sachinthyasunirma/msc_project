@@ -20,5 +20,4 @@ export type ActivityManagementInitialData = {
   records: Array<Record<string, unknown>>;
   activities: Array<Record<string, unknown>>;
   locations: Array<Record<string, unknown>>;
-  images: Array<Record<string, unknown>>;
 };

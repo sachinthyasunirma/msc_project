@@ -1,7 +1,8 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useMemo } from "react";
+import { ImagePlus } from "lucide-react";
+import { useMemo, useState } from "react";
 import {
   locationImportConfig,
   transportBaggageRateImportConfig,
@@ -14,6 +15,7 @@ import {
 import {
   type ImportEntityConfig,
 } from "@/components/batch-import/master-batch-import-dialog";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { createTransportRecord } from "@/modules/transport/lib/transport-api";
@@ -47,6 +49,14 @@ const TransportRecordDialog = dynamic(
   { ssr: false }
 );
 
+const MediaAssetManagerView = dynamic(
+  () =>
+    import("@/modules/media/ui/views/media-asset-manager-view").then(
+      (module) => module.MediaAssetManagerView
+    ),
+  { ssr: false }
+);
+
 type TransportManagementSectionProps = {
   initialResource?: TransportResourceKey;
   initialData?: TransportManagementInitialData | null;
@@ -59,6 +69,7 @@ export function TransportManagementSection({
   isReadOnly,
 }: TransportManagementSectionProps) {
   const state = useTransportManagement({ initialResource, initialData, isReadOnly });
+  const [mediaTarget, setMediaTarget] = useState<{ id: string; label: string } | null>(null);
 
   const batchConfig = useMemo<ImportEntityConfig>(() => {
     const locationCodeOptions = state.catalogs.locations.map((row) => ({
@@ -142,6 +153,23 @@ export function TransportManagementSection({
     onDelete: (row: Record<string, unknown>) => void state.onDelete(row),
     onPageChange: state.setCurrentPage,
     onPageSizeChange: state.setPageSize,
+    renderRowActions:
+      state.resource === "locations"
+        ? (row: Record<string, unknown>) => (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() =>
+                setMediaTarget({
+                  id: String(row.id),
+                  label: String(row.name ?? row.code ?? "Transport Location"),
+                })
+              }
+            >
+              <ImagePlus className="size-4" />
+            </Button>
+          )
+        : undefined,
   };
 
   return (
@@ -208,6 +236,21 @@ export function TransportManagementSection({
           await state.refreshAll();
         }}
       />
+
+      {mediaTarget ? (
+        <MediaAssetManagerView
+          open={Boolean(mediaTarget)}
+          onOpenChange={(open) => {
+            if (!open) {
+              setMediaTarget(null);
+            }
+          }}
+          entityType="TRANSPORT_LOCATION"
+          entityId={mediaTarget.id}
+          entityLabel={mediaTarget.label}
+          isReadOnly={isReadOnly}
+        />
+      ) : null}
     </>
   );
 }

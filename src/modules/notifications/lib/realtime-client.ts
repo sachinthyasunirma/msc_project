@@ -5,12 +5,15 @@ import { REALTIME_EVENTS } from "@/lib/realtime/events";
 
 let socketRef: Socket | null = null;
 let notificationSubscriberCount = 0;
+const realtimeEnabled =
+  process.env.NEXT_PUBLIC_ENABLE_REALTIME === "true" || process.env.NODE_ENV === "production";
 
 function getSocket() {
   if (socketRef) return socketRef;
   socketRef = io({
     path: "/socket.io",
     withCredentials: true,
+    autoConnect: false,
     transports: ["websocket", "polling"],
     reconnection: true,
     reconnectionAttempts: Infinity,
@@ -24,6 +27,10 @@ export function subscribeToNotificationRealtime(
   onCreated: () => void,
   onRead: () => void
 ) {
+  if (!realtimeEnabled) {
+    return () => {};
+  }
+
   const socket = getSocket();
   notificationSubscriberCount += 1;
   if (!socket.connected) {

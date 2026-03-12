@@ -12,16 +12,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
 import { RecordAuditMeta } from "@/components/ui/record-audit-meta";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { notify } from "@/lib/notify";
@@ -40,11 +31,12 @@ import type {
   PreTourRateCard,
 } from "@/modules/pre-tour/shared/pre-tour-item-allocation-types";
 import type { Row } from "@/modules/pre-tour/shared/pre-tour-management-types";
-import { AccommodationAllocationTab } from "@/modules/pre-tour/ui/components/item-tabs/accommodation-allocation-tab";
-import { ActivityAllocationTab } from "@/modules/pre-tour/ui/components/item-tabs/activity-allocation-tab";
-import { SupplementAllocationTab } from "@/modules/pre-tour/ui/components/item-tabs/supplement-allocation-tab";
-import { TransportAllocationTab } from "@/modules/pre-tour/ui/components/item-tabs/transport-allocation-tab";
-import { PreTourItemPricingSummary } from "@/modules/pre-tour/ui/components/pre-tour-item-pricing-summary";
+import { AccommodationAllocationTab } from "@/modules/pre-tour/ui/components/allocation-tabs/accommodation-allocation-tab";
+import { ActivityAllocationTab } from "@/modules/pre-tour/ui/components/allocation-tabs/activity-allocation-tab";
+import { SupplementAllocationTab } from "@/modules/pre-tour/ui/components/allocation-tabs/supplement-allocation-tab";
+import { TransportAllocationTab } from "@/modules/pre-tour/ui/components/allocation-tabs/transport-allocation-tab";
+import { AllocationPricingPanel } from "@/modules/pre-tour/ui/components/pricing/allocation-pricing-panel";
+import { AllocationRateSummary } from "@/modules/pre-tour/ui/components/pricing/allocation-rate-summary";
 
 type Option = { value: string; label: string };
 
@@ -61,6 +53,7 @@ type PreTourItemAllocationDialogProps = {
   hotelOptions: Option[];
   activityOptions: Option[];
   transportOptions: Option[];
+  locationOptions: Option[];
   canOverrideContractRates: boolean;
   onSubmit: (payload: Record<string, unknown>) => Promise<void> | void;
 };
@@ -72,6 +65,17 @@ function toStringValue(value: unknown) {
 function toDateInput(value: unknown) {
   const raw = toStringValue(value);
   return raw ? raw.slice(0, 10) : "";
+}
+
+function toDateTimeInput(value: unknown) {
+  const raw = toStringValue(value);
+  if (!raw) return "";
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) return "";
+  const pad = (part: number) => String(part).padStart(2, "0");
+  return `${parsed.getFullYear()}-${pad(parsed.getMonth() + 1)}-${pad(parsed.getDate())}T${pad(
+    parsed.getHours()
+  )}:${pad(parsed.getMinutes())}`;
 }
 
 function toNumberString(value: unknown, fallback = "0") {
@@ -169,18 +173,31 @@ function createInitialState(args: {
     },
     activity: {
       activityId: itemType === "ACTIVITY" ? toStringValue(row?.serviceId) : toStringValue(readDimension(snapshot, "activityId")),
+      scheduledAt: toDateTimeInput(readDimension(snapshot, "scheduledAt") || row?.startAt || selectedDay?.date),
+      endAt: toDateTimeInput(readDimension(snapshot, "endAt") || row?.endAt),
       unitBasis: toStringValue(readDimension(snapshot, "unitBasis")),
       paxSlab: toStringValue(readDimension(snapshot, "paxSlab")),
       ageBand: toStringValue(readDimension(snapshot, "ageBand")),
       quantity: toNumberString(readDimension(snapshot, "quantity") || row?.units, "1"),
+      slotNotes: toStringValue(readDimension(snapshot, "slotNotes") || row?.description),
     },
     transport: {
       vehicleTypeId:
         itemType === "TRANSPORT" ? toStringValue(row?.serviceId) : toStringValue(readDimension(snapshot, "vehicleTypeId")),
+      tripMode: (() => {
+        const tripMode = toStringValue(readDimension(snapshot, "tripMode")).toUpperCase();
+        if (tripMode === "ROUNDTRIP" || tripMode === "CHARTER" || tripMode === "DISPOSAL") return tripMode;
+        return "TRANSFER";
+      })(),
+      fromLocationId: toStringValue(row?.fromLocationId || readDimension(snapshot, "fromLocationId") || selectedDay?.startLocationId),
+      toLocationId: toStringValue(row?.toLocationId || readDimension(snapshot, "toLocationId") || selectedDay?.endLocationId),
+      startAt: toDateTimeInput(readDimension(snapshot, "startAt") || row?.startAt || selectedDay?.date),
+      endAt: toDateTimeInput(readDimension(snapshot, "endAt") || row?.endAt),
       unitBasis: toStringValue(readDimension(snapshot, "unitBasis")),
       routeLabel: toStringValue(readDimension(snapshot, "routeLabel")),
       quantity: toNumberString(readDimension(snapshot, "quantity") || row?.units, "1"),
       pax: toNumberString(readDimension(snapshot, "pax") || row?.pax, "1"),
+      routeNotes: toStringValue(readDimension(snapshot, "routeNotes") || row?.description),
     },
     guide: {
       guideId: itemType === "GUIDE" ? toStringValue(row?.serviceId) : toStringValue(readDimension(snapshot, "guideId")),
@@ -194,8 +211,10 @@ function createInitialState(args: {
         itemType === "SUPPLEMENT" || itemType === "MISC"
           ? toStringValue(row?.title || readDimension(snapshot, "serviceLabel"))
           : toStringValue(readDimension(snapshot, "serviceLabel")),
+      chargeCategory: itemType === "MISC" ? "MISC" : "SUPPLEMENT",
       unitBasis: toStringValue(readDimension(snapshot, "unitBasis")),
       quantity: toNumberString(readDimension(snapshot, "quantity") || row?.units, "1"),
+      remarks: toStringValue(readDimension(snapshot, "remarks") || row?.description),
     },
   };
 }
@@ -225,18 +244,27 @@ function buildDimensions(
     case "ACTIVITY":
       return {
         activityId: state.activity.activityId,
+        scheduledAt: state.activity.scheduledAt || null,
+        endAt: state.activity.endAt || null,
         unitBasis: state.activity.unitBasis || null,
         paxSlab: state.activity.paxSlab || null,
         ageBand: state.activity.ageBand || null,
         quantity: Number(state.activity.quantity || "1"),
+        slotNotes: state.activity.slotNotes || null,
       };
     case "TRANSPORT":
       return {
         vehicleTypeId: state.transport.vehicleTypeId,
+        tripMode: state.transport.tripMode,
+        fromLocationId: state.transport.fromLocationId || null,
+        toLocationId: state.transport.toLocationId || null,
+        startAt: state.transport.startAt || null,
+        endAt: state.transport.endAt || null,
         unitBasis: state.transport.unitBasis || null,
         routeLabel: state.transport.routeLabel || null,
         pax: Number(state.transport.pax || "0"),
         quantity: Number(state.transport.quantity || "1"),
+        routeNotes: state.transport.routeNotes || null,
       };
     case "GUIDE":
       return {
@@ -249,8 +277,10 @@ function buildDimensions(
     default:
       return {
         serviceLabel: state.supplement.serviceLabel || null,
+        chargeCategory: state.supplement.chargeCategory,
         unitBasis: state.supplement.unitBasis || null,
         quantity: Number(state.supplement.quantity || "1"),
+        remarks: state.supplement.remarks || null,
       };
   }
 }
@@ -268,6 +298,7 @@ export function PreTourItemAllocationDialog({
   hotelOptions,
   activityOptions,
   transportOptions,
+  locationOptions,
   canOverrideContractRates,
   onSubmit,
 }: PreTourItemAllocationDialogProps) {
@@ -399,6 +430,10 @@ export function PreTourItemAllocationDialog({
     () => new Map(transportOptions.map((option) => [option.value, option.label])),
     [transportOptions]
   );
+  const locationMap = useMemo(
+    () => new Map(locationOptions.map((option) => [option.value, option.label])),
+    [locationOptions]
+  );
 
   const sourceRate: PreTourRateCard | null = selectedAccommodationRate;
   const buyFieldsLocked = Boolean(sourceRate?.locked) && !form.overrideSourceRate;
@@ -409,6 +444,11 @@ export function PreTourItemAllocationDialog({
     const travelDate = toDateInput(selectedDay?.date || form.accommodation.stayDate);
     return `${dayLabel}${travelDate ? ` • ${travelDate}` : ""}`;
   }, [form.accommodation.stayDate, selectedDay?.date, selectedDay?.dayNumber]);
+  const dayRouteSummary = useMemo(() => {
+    const start = locationMap.get(toStringValue(selectedDay?.startLocationId)) || "Route start not set";
+    const end = locationMap.get(toStringValue(selectedDay?.endLocationId)) || "Route end not set";
+    return `${start} -> ${end}`;
+  }, [locationMap, selectedDay?.endLocationId, selectedDay?.startLocationId]);
 
   const handleSave = async () => {
     try {
@@ -426,8 +466,11 @@ export function PreTourItemAllocationDialog({
       if (form.itemType === "ACTIVITY" && !form.activity.activityId) {
         throw new Error("Select an activity.");
       }
-      if (form.itemType === "TRANSPORT" && !form.transport.vehicleTypeId) {
-        throw new Error("Select a transport service.");
+      if (form.itemType === "TRANSPORT") {
+        if (!form.transport.vehicleTypeId) throw new Error("Select a transport service.");
+        if (!form.transport.fromLocationId || !form.transport.toLocationId) {
+          throw new Error("Transport requires both a start point and an end point.");
+        }
       }
       if (form.itemType === "GUIDE") {
         throw new Error("Guide allocation is no longer supported in the day-wise workspace.");
@@ -476,13 +519,15 @@ export function PreTourItemAllocationDialog({
                 : null;
 
       const defaultTitle =
-        form.title.trim() ||
+        (row?.title && toStringValue(row.title)) ||
         (form.itemType === "ACCOMMODATION"
-          ? hotelMap.get(form.accommodation.hotelId) || "Accommodation"
+          ? `${hotelMap.get(form.accommodation.hotelId) || "Accommodation"}${form.accommodation.roomBasis ? ` • ${form.accommodation.roomBasis}` : ""}${form.accommodation.nights ? ` • ${form.accommodation.nights}N` : ""}`
           : form.itemType === "ACTIVITY"
-            ? activityMap.get(form.activity.activityId) || "Activity"
+            ? `${activityMap.get(form.activity.activityId) || "Activity"}${form.activity.scheduledAt ? ` • ${form.activity.scheduledAt.slice(11, 16)}` : ""}`
             : form.itemType === "TRANSPORT"
-              ? transportMap.get(form.transport.vehicleTypeId) || "Transport"
+              ? `${transportMap.get(form.transport.vehicleTypeId) || "Transport"} • ${
+                  locationMap.get(form.transport.fromLocationId) || "Start"
+                } → ${locationMap.get(form.transport.toLocationId) || "End"}`
               : form.supplement.serviceLabel.trim() || "Supplement");
 
       const payload: Record<string, unknown> = {
@@ -494,8 +539,17 @@ export function PreTourItemAllocationDialog({
         startAt:
           form.itemType === "ACCOMMODATION" && form.accommodation.stayDate
             ? `${form.accommodation.stayDate}T00:00:00.000Z`
-            : null,
-        endAt: null,
+            : form.itemType === "ACTIVITY"
+              ? (form.activity.scheduledAt ? new Date(form.activity.scheduledAt).toISOString() : null)
+              : form.itemType === "TRANSPORT"
+                ? (form.transport.startAt ? new Date(form.transport.startAt).toISOString() : null)
+                : null,
+        endAt:
+          form.itemType === "ACTIVITY"
+            ? (form.activity.endAt ? new Date(form.activity.endAt).toISOString() : null)
+            : form.itemType === "TRANSPORT"
+              ? (form.transport.endAt ? new Date(form.transport.endAt).toISOString() : null)
+              : null,
         sortOrder: Number(row?.sortOrder ?? 0),
         pax:
           form.itemType === "TRANSPORT"
@@ -529,8 +583,8 @@ export function PreTourItemAllocationDialog({
                 },
               ]
             : null,
-        fromLocationId: null,
-        toLocationId: null,
+        fromLocationId: form.itemType === "TRANSPORT" ? form.transport.fromLocationId || null : null,
+        toLocationId: form.itemType === "TRANSPORT" ? form.transport.toLocationId || null : null,
         locationId: null,
         rateId: sourceRate?.sourceRateId || null,
         currencyCode: form.currencyCode,
@@ -540,9 +594,16 @@ export function PreTourItemAllocationDialog({
         totalAmount: buyTotalAmount,
         pricingSnapshot: snapshot as unknown as Record<string, unknown>,
         title: defaultTitle,
-        description: form.description.trim() || null,
+        description:
+          form.itemType === "TRANSPORT"
+            ? form.transport.routeNotes.trim() || null
+            : form.itemType === "ACTIVITY"
+              ? form.activity.slotNotes.trim() || null
+              : form.itemType === "SUPPLEMENT" || form.itemType === "MISC"
+                ? form.supplement.remarks.trim() || null
+                : form.description.trim() || null,
         notes: form.notes.trim() || null,
-        status: form.status,
+        status: row?.status ? toStringValue(row.status).toUpperCase() : form.status,
         isActive: true,
       };
 
@@ -579,61 +640,37 @@ export function PreTourItemAllocationDialog({
               </CardContent>
             </Card>
 
-            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-              <label className="grid gap-2 text-sm">
-                <span className="font-medium">Code</span>
-                <Input
-                  value={form.code}
-                  onChange={(event) => setForm((current) => ({ ...current, code: event.target.value.toUpperCase() }))}
-                  placeholder="Auto-generated if blank"
-                  disabled={isReadOnly}
-                />
-              </label>
-              <label className="grid gap-2 text-sm xl:col-span-2">
-                <span className="font-medium">Title</span>
-                <Input
-                  value={form.title}
-                  onChange={(event) => setForm((current) => ({ ...current, title: event.target.value }))}
-                  placeholder="Optional commercial title"
-                  disabled={isReadOnly}
-                />
-              </label>
-              <label className="grid gap-2 text-sm">
-                <span className="font-medium">Status</span>
-                <Select
-                  value={form.status}
-                  onValueChange={(status) =>
-                    setForm((current) => ({
-                      ...current,
-                      status: status as PreTourItemAllocationFormState["status"],
-                    }))
-                  }
-                  disabled={isReadOnly}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="PLANNED">Planned</SelectItem>
-                    <SelectItem value="CONFIRMED">Confirmed</SelectItem>
-                    <SelectItem value="CANCELLED">Cancelled</SelectItem>
-                    <SelectItem value="COMPLETED">Completed</SelectItem>
-                  </SelectContent>
-                </Select>
-              </label>
-            </div>
+            <Card className="border-border/70">
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base">Allocation Flow</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-1 text-sm text-muted-foreground">
+                <p>Select the operational item type first, then complete the service context, buying basis, and commercial markup.</p>
+                <p>System fields such as code, title, and workflow status are generated internally and are no longer part of manual entry.</p>
+              </CardContent>
+            </Card>
 
             <Tabs
               value={tabValue}
               onValueChange={(nextValue) =>
                 setForm((current) => ({
                   ...current,
-                  itemType: nextValue as PreTourItemAllocationFormState["itemType"],
+                  itemType:
+                    nextValue === "SUPPLEMENT"
+                      ? current.supplement.chargeCategory
+                      : (nextValue as PreTourItemAllocationFormState["itemType"]),
                   selectedRateId: "",
                   overrideSourceRate: false,
                   overrideReason: "",
                   buyBaseAmount: nextValue === current.itemType ? current.buyBaseAmount : "0",
                   buyTaxAmount: nextValue === current.itemType ? current.buyTaxAmount : "0",
+                  supplement:
+                    nextValue === "SUPPLEMENT"
+                      ? {
+                          ...current.supplement,
+                          chargeCategory: current.itemType === "MISC" ? "MISC" : current.supplement.chargeCategory,
+                        }
+                      : current.supplement,
                 }))
               }
             >
@@ -706,6 +743,8 @@ export function PreTourItemAllocationDialog({
                     <TransportAllocationTab
                       value={form.transport}
                       vehicleOptions={transportOptions}
+                      locationOptions={locationOptions}
+                      dayRouteSummary={dayRouteSummary}
                       disabled={isReadOnly}
                       onChange={(patch) =>
                         setForm((current) => ({
@@ -719,18 +758,12 @@ export function PreTourItemAllocationDialog({
 
                   <TabsContent value="SUPPLEMENT">
                     <SupplementAllocationTab
-                      itemType={form.itemType === "MISC" ? "MISC" : "SUPPLEMENT"}
                       value={form.supplement}
                       disabled={isReadOnly}
-                      onItemTypeChange={(itemType) =>
-                        setForm((current) => ({
-                          ...current,
-                          itemType,
-                        }))
-                      }
                       onChange={(patch) =>
                         setForm((current) => ({
                           ...current,
+                          itemType: (patch.chargeCategory ?? current.supplement.chargeCategory) === "MISC" ? "MISC" : "SUPPLEMENT",
                           supplement: { ...current.supplement, ...patch },
                         }))
                       }
@@ -740,161 +773,46 @@ export function PreTourItemAllocationDialog({
               )}
             </Tabs>
 
-            <div className="grid gap-3">
-              <label className="grid gap-2 text-sm">
-                <span className="font-medium">Operational notes</span>
+            <Card className="border-border/70">
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base">Planner Notes</CardTitle>
+              </CardHeader>
+              <CardContent>
                 <Textarea
                   value={form.notes}
                   onChange={(event) => setForm((current) => ({ ...current, notes: event.target.value }))}
-                  placeholder="Operational notes, confirmations, or supplier remarks."
+                  placeholder="Internal planning notes, supplier follow-up, or allocation remarks not already captured in the tab."
                   disabled={isReadOnly}
                 />
-              </label>
-              <label className="grid gap-2 text-sm">
-                <span className="font-medium">Description</span>
-                <Textarea
-                  value={form.description}
-                  onChange={(event) => setForm((current) => ({ ...current, description: event.target.value }))}
-                  placeholder="Optional internal description."
-                  disabled={isReadOnly}
-                />
-              </label>
-            </div>
+              </CardContent>
+            </Card>
           </div>
 
           <div className="min-h-0 space-y-4 overflow-y-auto pr-1">
-            <Card className="border-border/70">
-              <CardHeader className="pb-3">
-                <CardTitle className="text-base">Buy Pricing Control</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="grid gap-3">
-                  <label className="grid gap-2 text-sm">
-                    <span className="font-medium">Currency context</span>
-                    <Input value={form.currencyCode} disabled />
-                  </label>
-                  <label className="grid gap-2 text-sm">
-                    <span className="font-medium">Buy base amount</span>
-                    <Input
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      value={form.buyBaseAmount}
-                      onChange={(event) =>
-                        setForm((current) => ({ ...current, buyBaseAmount: event.target.value }))
-                      }
-                      disabled={isReadOnly || buyFieldsLocked}
-                    />
-                  </label>
-                  <label className="grid gap-2 text-sm">
-                    <span className="font-medium">Buy tax amount</span>
-                    <Input
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      value={form.buyTaxAmount}
-                      onChange={(event) =>
-                        setForm((current) => ({ ...current, buyTaxAmount: event.target.value }))
-                      }
-                      disabled={isReadOnly || buyFieldsLocked}
-                    />
-                  </label>
-                </div>
+            <AllocationPricingPanel
+              form={form}
+              currencyCode={form.currencyCode}
+              sourceRate={sourceRate}
+              buyFieldsLocked={buyFieldsLocked}
+              isReadOnly={isReadOnly}
+              canOverrideContractRates={canOverrideContractRates}
+              onChange={(patch) =>
+                setForm((current) => ({
+                  ...current,
+                  ...patch,
+                  buyBaseAmount:
+                    patch.overrideSourceRate === false && selectedAccommodationRate
+                      ? String(selectedAccommodationRate.buyBaseAmount)
+                      : patch.buyBaseAmount ?? current.buyBaseAmount,
+                  buyTaxAmount:
+                    patch.overrideSourceRate === false && selectedAccommodationRate
+                      ? String(selectedAccommodationRate.buyTaxAmount)
+                      : patch.buyTaxAmount ?? current.buyTaxAmount,
+                }))
+              }
+            />
 
-                {sourceRate?.locked ? (
-                  <div className="space-y-3 rounded-lg border border-dashed p-3">
-                    <div className="flex items-center justify-between gap-3">
-                      <div className="space-y-1">
-                        <p className="text-sm font-medium">Contracted source rate</p>
-                        <p className="text-xs text-muted-foreground">
-                          Buy fields are locked while using the resolved source rate.
-                        </p>
-                      </div>
-                      <Switch
-                        checked={form.overrideSourceRate}
-                        onCheckedChange={(checked) =>
-                          setForm((current) => ({
-                            ...current,
-                            overrideSourceRate: checked,
-                            overrideReason: checked ? current.overrideReason : "",
-                            buyBaseAmount:
-                              !checked && selectedAccommodationRate
-                                ? String(selectedAccommodationRate.buyBaseAmount)
-                                : current.buyBaseAmount,
-                            buyTaxAmount:
-                              !checked && selectedAccommodationRate
-                                ? String(selectedAccommodationRate.buyTaxAmount)
-                                : current.buyTaxAmount,
-                          }))
-                        }
-                        disabled={isReadOnly || !canOverrideContractRates}
-                      />
-                    </div>
-                    {!canOverrideContractRates ? (
-                      <p className="text-xs text-muted-foreground">
-                        Override requires admin access or pre-tour costing permission.
-                      </p>
-                    ) : null}
-                    {form.overrideSourceRate ? (
-                      <label className="grid gap-2 text-sm">
-                        <span className="font-medium">Override reason</span>
-                        <Textarea
-                          value={form.overrideReason}
-                          onChange={(event) =>
-                            setForm((current) => ({
-                              ...current,
-                              overrideReason: event.target.value,
-                            }))
-                          }
-                          placeholder="Why is the contracted buy price being overridden?"
-                          disabled={isReadOnly}
-                        />
-                      </label>
-                    ) : null}
-                  </div>
-                ) : null}
-
-                <div className="grid gap-3">
-                  <label className="grid gap-2 text-sm">
-                    <span className="font-medium">Markup mode</span>
-                    <Select
-                      value={form.markupMode}
-                      onValueChange={(markupMode) =>
-                        setForm((current) => ({
-                          ...current,
-                          markupMode: markupMode as PreTourItemAllocationFormState["markupMode"],
-                        }))
-                      }
-                      disabled={isReadOnly}
-                    >
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="NONE">None</SelectItem>
-                        <SelectItem value="PERCENT">Percent</SelectItem>
-                        <SelectItem value="FIXED">Fixed amount</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </label>
-                  <label className="grid gap-2 text-sm">
-                    <span className="font-medium">Markup value</span>
-                    <Input
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      value={form.markupValue}
-                      onChange={(event) =>
-                        setForm((current) => ({ ...current, markupValue: event.target.value }))
-                      }
-                      disabled={isReadOnly || form.markupMode === "NONE"}
-                    />
-                  </label>
-                </div>
-              </CardContent>
-            </Card>
-
-            <PreTourItemPricingSummary
+            <AllocationRateSummary
               currencyCode={form.currencyCode}
               buyBaseAmount={buyBaseAmount}
               buyTaxAmount={buyTaxAmount}
@@ -904,36 +822,6 @@ export function PreTourItemAllocationDialog({
               sourceRate={sourceRate}
               overrideApplied={form.overrideSourceRate}
             />
-
-            <Card className="border-border/70">
-              <CardHeader className="pb-3">
-                <CardTitle className="text-base">Snapshot Preview</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <pre className="max-h-72 overflow-auto rounded-md bg-muted p-3 text-xs">
-                  {JSON.stringify(
-                    buildPreTourPricingSnapshot({
-                      sourceRate,
-                      currencyCode: form.currencyCode,
-                      buyBaseAmount,
-                      buyTaxAmount,
-                      buyTotalAmount,
-                      markupMode: form.markupMode,
-                      markupValue: toMoney(form.markupValue),
-                      sellBaseAmount: commercialPricing.sellBaseAmount,
-                      sellTaxAmount: commercialPricing.sellTaxAmount,
-                      sellTotalAmount: commercialPricing.sellTotalAmount,
-                      priceMode: form.priceMode,
-                      overrideApplied: form.overrideSourceRate,
-                      overrideReason: form.overrideReason,
-                      dimensions: buildDimensions(form, selectedAccommodationRate),
-                    }),
-                    null,
-                    2
-                  )}
-                </pre>
-              </CardContent>
-            </Card>
           </div>
         </div>
 

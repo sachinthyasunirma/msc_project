@@ -10,6 +10,7 @@ import { notify } from "@/lib/notify";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { TableLoadingRow } from "@/components/ui/table-loading-row";
 import { RecordAuditMeta } from "@/components/ui/record-audit-meta";
 import { TablePagination } from "@/components/ui/table-pagination";
 import {
@@ -592,7 +593,11 @@ export function GuidesManagementSection({
           </TableHeader>
           <TableBody>
             {loading ? (
-              <TableRow><TableCell colSpan={COLUMNS[resource].length + 1} className="text-center text-muted-foreground">Loading...</TableCell></TableRow>
+              <TableLoadingRow
+                colSpan={COLUMNS[resource].length + 1}
+                title="Aligning guide operations"
+                description="Loading guide profiles, coverage, and commercial records."
+              />
             ) : records.length === 0 ? (
               <TableRow><TableCell colSpan={COLUMNS[resource].length + 1} className="text-center text-muted-foreground">No records found.</TableCell></TableRow>
             ) : (

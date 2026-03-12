@@ -3,6 +3,7 @@
 import { Edit3, Plus, Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { TableLoadingRow } from "@/components/ui/table-loading-row";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import type { RoomType } from "@/modules/accommodation/lib/accommodation-api";
 
@@ -44,7 +45,11 @@ export function RoomTypesTab({
         </TableHeader>
         <TableBody>
           {loadingDetails ? (
-            <TableRow><TableCell colSpan={6} className="text-center">Loading...</TableCell></TableRow>
+            <TableLoadingRow
+              colSpan={6}
+              title="Preparing room types"
+              description="Loading occupancy, bed, and availability structure."
+            />
           ) : roomTypes.length === 0 ? (
             <TableRow><TableCell colSpan={6} className="text-center text-muted-foreground">No room types.</TableCell></TableRow>
           ) : (

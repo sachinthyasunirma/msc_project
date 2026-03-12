@@ -1,3 +1,5 @@
+import { LoadingState } from "@/components/ui/loading-state";
+
 function LoadingSkeletonCard() {
   return (
     <div className="rounded-xl border bg-card p-4 shadow-sm">
@@ -14,6 +16,10 @@ function LoadingSkeletonCard() {
 export default function DashboardLoading() {
   return (
     <div className="space-y-6 p-4 md:p-6">
+      <LoadingState
+        title="Charting your next route"
+        description="Loading dashboards, masters, and tour operations."
+      />
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="space-y-2">
           <div className="h-7 w-52 animate-pulse rounded bg-muted" />

@@ -8,6 +8,8 @@ const dev = process.env.NODE_ENV !== "production";
 const hostname = process.env.HOSTNAME || "0.0.0.0";
 const port = Number(process.env.PORT || 3000);
 const redisUrl = process.env.REDIS_URL?.trim();
+const enableRealtime = !dev || process.env.ENABLE_DEV_REALTIME === "true";
+const logMemoryUsage = process.env.LOG_MEMORY_USAGE === "1";
 
 const app = next({ dev, hostname, port });
 const handle = app.getRequestHandler();
@@ -46,53 +48,71 @@ async function resolveSession(req) {
 await app.prepare();
 
 const server = http.createServer((req, res) => handle(req, res));
-const io = new SocketIOServer(server, {
-  path: "/socket.io",
-  cors: {
-    origin: true,
-    credentials: true,
-  },
-  transports: ["websocket", "polling"],
-  serveClient: false,
-});
-
-if (redisUrl) {
-  const pubClient = new Redis(redisUrl, {
-    lazyConnect: true,
-    maxRetriesPerRequest: 1,
+if (enableRealtime) {
+  const io = new SocketIOServer(server, {
+    path: "/socket.io",
+    cors: {
+      origin: true,
+      credentials: true,
+    },
+    transports: ["websocket", "polling"],
+    serveClient: false,
   });
-  const subClient = pubClient.duplicate();
 
-  await Promise.all([pubClient.connect(), subClient.connect()]);
-  io.adapter(createAdapter(pubClient, subClient));
+  if (redisUrl) {
+    const pubClient = new Redis(redisUrl, {
+      lazyConnect: true,
+      maxRetriesPerRequest: 1,
+    });
+    const subClient = pubClient.duplicate();
 
-  const shutdownRedis = async () => {
-    await Promise.allSettled([pubClient.quit(), subClient.quit()]);
-  };
-  process.on("SIGTERM", shutdownRedis);
-  process.on("SIGINT", shutdownRedis);
+    await Promise.all([pubClient.connect(), subClient.connect()]);
+    io.adapter(createAdapter(pubClient, subClient));
+
+    const shutdownRedis = async () => {
+      await Promise.allSettled([pubClient.quit(), subClient.quit()]);
+    };
+    process.on("SIGTERM", shutdownRedis);
+    process.on("SIGINT", shutdownRedis);
+  }
+
+  io.use(async (socket, nextMiddleware) => {
+    const session = await resolveSession(socket.request);
+    if (!session) {
+      nextMiddleware(new Error("UNAUTHORIZED"));
+      return;
+    }
+    socket.data.userId = session.userId;
+    socket.data.companyId = session.companyId;
+    nextMiddleware();
+  });
+
+  io.on("connection", (socket) => {
+    const userId = socket.data.userId;
+    const companyId = socket.data.companyId;
+
+    socket.join(`user:${userId}`);
+    socket.join(`company:${companyId}`);
+  });
 }
 
-io.use(async (socket, nextMiddleware) => {
-  const session = await resolveSession(socket.request);
-  if (!session) {
-    nextMiddleware(new Error("UNAUTHORIZED"));
-    return;
-  }
-  socket.data.userId = session.userId;
-  socket.data.companyId = session.companyId;
-  nextMiddleware();
-});
-
-io.on("connection", (socket) => {
-  const userId = socket.data.userId;
-  const companyId = socket.data.companyId;
-
-  socket.join(`user:${userId}`);
-  socket.join(`company:${companyId}`);
-});
+if (logMemoryUsage) {
+  const interval = setInterval(() => {
+    const usage = process.memoryUsage();
+    const formatMb = (value) => `${Math.round((value / 1024 / 1024) * 10) / 10} MB`;
+    // eslint-disable-next-line no-console
+    console.log(
+      `[memory] rss=${formatMb(usage.rss)} heapUsed=${formatMb(usage.heapUsed)} heapTotal=${formatMb(usage.heapTotal)} external=${formatMb(usage.external)}`
+    );
+  }, 60_000);
+  interval.unref();
+}
 
 server.listen(port, hostname, () => {
   // eslint-disable-next-line no-console
   console.log(`> Ready on http://${hostname}:${port}`);
+  if (dev && !enableRealtime) {
+    // eslint-disable-next-line no-console
+    console.log("> Realtime server disabled in development. Set ENABLE_DEV_REALTIME=true to opt in.");
+  }
 });

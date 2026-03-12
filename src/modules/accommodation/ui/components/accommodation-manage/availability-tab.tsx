@@ -2,6 +2,7 @@
 
 import { Edit3, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { TableLoadingRow } from "@/components/ui/table-loading-row";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import type { Availability } from "@/modules/accommodation/lib/accommodation-api";
 
@@ -45,7 +46,11 @@ export function AvailabilityTab({
         </TableHeader>
         <TableBody>
           {loadingDetails ? (
-            <TableRow><TableCell colSpan={6} className="text-center">Loading...</TableCell></TableRow>
+            <TableLoadingRow
+              colSpan={6}
+              title="Checking room availability"
+              description="Loading hotel inventory and date-based availability."
+            />
           ) : availability.length === 0 ? (
             <TableRow><TableCell colSpan={6} className="text-center text-muted-foreground">No availability records.</TableCell></TableRow>
           ) : (

@@ -8,6 +8,7 @@ import { CurrencyManagementSection } from "@/modules/currency/ui/components/curr
 export function CurrencyManagementView({
   initialResource = "currencies",
   managedCurrencyId = "",
+  initialData = null,
 }: {
   initialResource?: CurrencyResourceKey;
   managedCurrencyId?: string;

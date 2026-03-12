@@ -1,6 +1,7 @@
 import type {
   ResolveAccommodationRateResponse,
 } from "@/modules/pre-tour/shared/pre-tour-item-allocation-types";
+import type { PreTourDayInitializationResult } from "@/modules/pre-tour/shared/pre-tour-day-initialization-types";
 
 type ApiError = { message?: string };
 
@@ -54,6 +55,15 @@ export async function createPreTourVersion(sourcePlanId: string) {
     body: JSON.stringify({ sourcePlanId }),
   });
   return parseResponse<Record<string, unknown>>(response);
+}
+
+export async function initializePreTourDays(planId: string) {
+  const response = await fetch("/api/pre-tours/initialize-days", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ planId }),
+  });
+  return parseResponse<PreTourDayInitializationResult>(response);
 }
 
 export async function updatePreTourRecord(

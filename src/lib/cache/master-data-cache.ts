@@ -7,11 +7,14 @@ type CacheEntry = {
 
 const DEFAULT_TTL_SECONDS = 60;
 const KEY_PREFIX = "md:v1";
+const LOCAL_CACHE_MAX_ENTRIES = Number(process.env.MASTER_DATA_LOCAL_CACHE_MAX_ENTRIES || 500);
+const LOCAL_CACHE_SWEEP_INTERVAL_MS = 30_000;
 const localCache = new Map<string, CacheEntry>();
 const inflight = new Map<string, Promise<unknown>>();
 
 let redisClient: Redis | null = null;
 let redisDisabled = false;
+let lastLocalCacheSweepAt = 0;
 
 function nowMs() {
   return Date.now();
@@ -62,6 +65,11 @@ function getLocal<T>(key: string): T | null {
     localCache.delete(key);
     return null;
   }
+
+  // Refresh insertion order so the oldest, least-used entries are evicted first.
+  localCache.delete(key);
+  localCache.set(key, entry);
+
   try {
     return JSON.parse(entry.value) as T;
   } catch {
@@ -71,16 +79,46 @@ function getLocal<T>(key: string): T | null {
 }
 
 function setLocal<T>(key: string, value: T, ttlSeconds: number) {
+  maybeSweepLocalCache(true);
   localCache.set(key, {
     value: JSON.stringify(value),
     expiresAt: nowMs() + ttlSeconds * 1000,
   });
+  trimLocalCacheToMaxEntries();
 }
 
 function deleteLocalByPrefix(prefix: string) {
   for (const key of localCache.keys()) {
     if (key.startsWith(prefix)) {
       localCache.delete(key);
+    }
+  }
+}
+
+function maybeSweepLocalCache(force = false) {
+  const currentTime = nowMs();
+  if (!force && currentTime - lastLocalCacheSweepAt < LOCAL_CACHE_SWEEP_INTERVAL_MS) {
+    return;
+  }
+
+  lastLocalCacheSweepAt = currentTime;
+  for (const [key, entry] of localCache.entries()) {
+    if (entry.expiresAt <= currentTime) {
+      localCache.delete(key);
+    }
+  }
+}
+
+function trimLocalCacheToMaxEntries() {
+  if (localCache.size <= LOCAL_CACHE_MAX_ENTRIES) return;
+
+  const overflow = localCache.size - LOCAL_CACHE_MAX_ENTRIES;
+  let removed = 0;
+  for (const key of localCache.keys()) {
+    localCache.delete(key);
+    removed += 1;
+    if (removed >= overflow) {
+      break;
     }
   }
 }
@@ -103,6 +141,7 @@ export async function getOrSetMasterDataCache<T>(
   loader: () => Promise<T>,
   ttlSeconds = DEFAULT_TTL_SECONDS
 ) {
+  maybeSweepLocalCache();
   const pending = inflight.get(key);
   if (pending) {
     return pending as Promise<T>;

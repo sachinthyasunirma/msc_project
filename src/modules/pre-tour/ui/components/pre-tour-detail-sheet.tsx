@@ -5,6 +5,7 @@ import Link from "next/link";
 import { Building2, CalendarDays, CopyPlus, Globe2, Settings2, Trash2, Users, Wallet } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { LoadingState } from "@/components/ui/loading-state";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { PreTourRouteMap } from "@/modules/pre-tour/ui/components/pre-tour-route-map";
 import type { DetailSheetState, Row } from "@/modules/pre-tour/shared/pre-tour-management-types";
@@ -342,7 +343,14 @@ export function PreTourDetailSheet({
           drawerShowMap &&
           (detailPreTourRouteLoading || detailRouteLocationSequenceIds.length > 0) ? (
             <div className="space-y-2 rounded-md border bg-muted/20 p-3">
-              {detailPreTourRouteLoading ? <p className="text-xs text-muted-foreground">Loading route details...</p> : null}
+              {detailPreTourRouteLoading ? (
+                <LoadingState
+                  compact
+                  size="sm"
+                  title="Tracing route details"
+                  description="Loading mapped stops and route metrics."
+                />
+              ) : null}
               {selectedPlan || detailSheet.kind === "pre-tour" ? (
                 <div className="grid gap-1 text-xs text-muted-foreground sm:grid-cols-2">
                   <p>

@@ -1,7 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   activityImportConfig,
   activityRateImportConfig,
@@ -17,6 +17,7 @@ import type {
 } from "@/modules/activity/shared/activity-management-types";
 import { ActivityRecordTableCard } from "@/modules/activity/ui/components/activity-record-table-card";
 import { ActivityAvailabilityTab } from "@/modules/activity/ui/components/activity-manage/activity-availability-tab";
+import { ActivityImagesTab } from "@/modules/activity/ui/components/activity-manage/activity-images-tab";
 import { ActivityRatesTab } from "@/modules/activity/ui/components/activity-manage/activity-rates-tab";
 import { ActivitySupplementsTab } from "@/modules/activity/ui/components/activity-manage/activity-supplements-tab";
 
@@ -36,12 +37,22 @@ const ActivityRecordDialog = dynamic(
   { ssr: false }
 );
 
+const MediaAssetManagerView = dynamic(
+  () =>
+    import("@/modules/media/ui/views/media-asset-manager-view").then(
+      (module) => module.MediaAssetManagerView
+    ),
+  { ssr: false }
+);
+
 type ActivityManagementSectionProps = {
   activityId?: string;
   showActivityList?: boolean;
   initialData?: ActivityManagementInitialData | null;
   isReadOnly: boolean;
 };
+
+type ActivityManageTabKey = ActivityResourceKey | "activity-images";
 
 export function ActivityManagementSection({
   activityId,
@@ -50,6 +61,15 @@ export function ActivityManagementSection({
   isReadOnly,
 }: ActivityManagementSectionProps) {
   const state = useActivityManagement({ activityId, showActivityList, initialData, isReadOnly });
+  const [mediaTarget, setMediaTarget] = useState<{ id: string; label: string } | null>(null);
+  const [manageTab, setManageTab] = useState<ActivityManageTabKey>(state.resource);
+
+  useEffect(() => {
+    if (showActivityList) {
+      return;
+    }
+    setManageTab((current) => (current === "activity-images" ? current : state.resource));
+  }, [showActivityList, state.resource]);
 
   const activityRateBatchConfig = useMemo(() => {
     const activityCodeOptions = state.activities.map((item) => ({
@@ -137,7 +157,16 @@ export function ActivityManagementSection({
                 <CardDescription>{state.selectedActivityLabel || state.activityMeta.description}</CardDescription>
               </div>
             </div>
-            <Tabs value={state.resource} onValueChange={(value) => state.setResource(value as ActivityResourceKey)}>
+            <Tabs
+              value={manageTab}
+              onValueChange={(value) => {
+                const nextTab = value as ActivityManageTabKey;
+                setManageTab(nextTab);
+                if (nextTab !== "activity-images") {
+                  state.setResource(nextTab);
+                }
+              }}
+            >
               <div className="master-tabs-scroll">
                 <TabsList className="master-tabs-list">
                   {state.resourceTabs.map((key) => (
@@ -145,6 +174,9 @@ export function ActivityManagementSection({
                       {ACTIVITY_TAB_LABELS[key]}
                     </TabsTrigger>
                   ))}
+                  <TabsTrigger value="activity-images" className="master-tab-trigger">
+                    Images
+                  </TabsTrigger>
                 </TabsList>
               </div>
               <CardContent className="px-0 pb-0 pt-4">
@@ -208,6 +240,15 @@ export function ActivityManagementSection({
                     onPageSizeChange={state.setPageSize}
                   />
                 </TabsContent>
+                <TabsContent value="activity-images" className="mt-0">
+                  {state.selectedActivity?.id ? (
+                    <ActivityImagesTab
+                      activityId={String(state.selectedActivity.id)}
+                      isReadOnly={isReadOnly}
+                      enabled={manageTab === "activity-images"}
+                    />
+                  ) : null}
+                </TabsContent>
               </CardContent>
             </Tabs>
           </CardHeader>
@@ -263,6 +304,21 @@ export function ActivityManagementSection({
           await state.refreshAll();
         }}
       />
+
+      {mediaTarget ? (
+        <MediaAssetManagerView
+          open={Boolean(mediaTarget)}
+          onOpenChange={(open) => {
+            if (!open) {
+              setMediaTarget(null);
+            }
+          }}
+          entityType="ACTIVITY"
+          entityId={mediaTarget.id}
+          entityLabel={mediaTarget.label}
+          isReadOnly={isReadOnly}
+        />
+      ) : null}
     </>
   );
 }

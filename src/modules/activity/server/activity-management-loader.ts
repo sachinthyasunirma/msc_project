@@ -29,17 +29,9 @@ export async function loadActivityManagementInitialData(options?: {
 
   try {
     const requestHeaders = await headers();
-    const [activities, locations, images] = await Promise.all([
+    const [activities, locations] = await Promise.all([
       listActivityRecords("activities", new URLSearchParams({ limit: "500" }), requestHeaders),
       listTransportRecords("locations", new URLSearchParams({ limit: "500" }), requestHeaders),
-      listActivityRecords(
-        "activity-images",
-        new URLSearchParams({
-          limit: "500",
-          ...(options?.activityId ? { activityId: options.activityId } : {}),
-        }),
-        requestHeaders
-      ),
     ]);
 
     const rowParams = new URLSearchParams({ limit: "500" });
@@ -49,29 +41,12 @@ export async function loadActivityManagementInitialData(options?: {
     }
 
     const rows = await listActivityRecords(resource, rowParams, requestHeaders);
-    const plainImages = toPlainRecords(images);
-    const coverImageMap = new Map<string, Record<string, unknown>>();
-    plainImages.forEach((item) => {
-      if (item.activityId && item.isCover) {
-        coverImageMap.set(String(item.activityId), item);
-      }
-    });
-
-    const plainRecords = toPlainRecords(rows).map((row) =>
-      resource === "activities"
-        ? {
-            ...row,
-            coverImageUrl: coverImageMap.get(String(row.id))?.url ?? null,
-          }
-        : row
-    );
 
     return {
       resource,
-      records: plainRecords,
+      records: toPlainRecords(rows),
       activities: toPlainRecords(activities),
       locations: toPlainRecords(locations),
-      images: plainImages,
     };
   } catch {
     return null;

@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { RecordAuditMeta } from "@/components/ui/record-audit-meta";
+import { buildAutoCode, getAutoCodeFieldKey, getAutoCodeHint } from "@/modules/pre-tour/lib/pre-tour-code-generator";
 import { META } from "@/modules/pre-tour/shared/pre-tour-management-constants";
 import type { Field, PreTourResourceKey, Row } from "@/modules/pre-tour/shared/pre-tour-management-types";
 import { EMPTY_DAY_TRANSPORT_FORM, type DayTransportForm } from "@/modules/pre-tour/ui/lib/pre-tour-form-config";
@@ -54,12 +55,34 @@ export function PreTourRecordDialog({
   const [dayTransportForm, setDayTransportForm] = useState<DayTransportForm>(
     initialDayTransportForm ?? EMPTY_DAY_TRANSPORT_FORM
   );
+  const autoCodeFieldKey = useMemo(() => getAutoCodeFieldKey(resource), [resource]);
+  const [autoCodeEnabled, setAutoCodeEnabled] = useState(
+    mode === "create" && Boolean(autoCodeFieldKey)
+  );
 
   useEffect(() => {
     if (!open) return;
     setForm(initialForm);
     setDayTransportForm(initialDayTransportForm ?? EMPTY_DAY_TRANSPORT_FORM);
-  }, [initialDayTransportForm, initialForm, open]);
+    const initialCodeValue =
+      autoCodeFieldKey && mode === "create"
+        ? String(initialForm[autoCodeFieldKey] ?? "").trim()
+        : "";
+    setAutoCodeEnabled(mode === "create" && Boolean(autoCodeFieldKey) && initialCodeValue.length === 0);
+  }, [autoCodeFieldKey, initialDayTransportForm, initialForm, mode, open]);
+
+  const generatedCode = useMemo(() => {
+    if (!autoCodeFieldKey || mode !== "create") return "";
+    return buildAutoCode(resource, form);
+  }, [autoCodeFieldKey, form, mode, resource]);
+
+  useEffect(() => {
+    if (!open || mode !== "create" || !autoCodeFieldKey || !autoCodeEnabled || !generatedCode) return;
+    setForm((current) => {
+      if (String(current[autoCodeFieldKey] ?? "") === generatedCode) return current;
+      return { ...current, [autoCodeFieldKey]: generatedCode };
+    });
+  }, [autoCodeEnabled, autoCodeFieldKey, generatedCode, mode, open]);
 
   const resolvedSelectedDialogMarketOrgId =
     resource === "pre-tours"
@@ -97,6 +120,11 @@ export function PreTourRecordDialog({
             dayTransportForm={dayTransportForm}
             setDayTransportForm={setDayTransportForm}
             transportVehicleOptions={transportVehicleOptions}
+            autoCodeFieldKey={mode === "create" ? autoCodeFieldKey : null}
+            autoCodeEnabled={autoCodeEnabled}
+            onAutoCodeEnabledChange={setAutoCodeEnabled}
+            autoCodeHint={getAutoCodeHint(resource)}
+            generatedCode={generatedCode}
           />
         </div>
 

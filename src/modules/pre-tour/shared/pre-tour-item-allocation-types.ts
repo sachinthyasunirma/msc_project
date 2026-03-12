@@ -118,18 +118,27 @@ export type PreTourAccommodationAllocationState = {
 
 export type PreTourActivityAllocationState = {
   activityId: string;
+  scheduledAt: string;
+  endAt: string;
   unitBasis: string;
   paxSlab: string;
   ageBand: string;
   quantity: string;
+  slotNotes: string;
 };
 
 export type PreTourTransportAllocationState = {
   vehicleTypeId: string;
+  tripMode: "TRANSFER" | "ROUNDTRIP" | "CHARTER" | "DISPOSAL";
+  fromLocationId: string;
+  toLocationId: string;
+  startAt: string;
+  endAt: string;
   unitBasis: string;
   routeLabel: string;
   quantity: string;
   pax: string;
+  routeNotes: string;
 };
 
 export type PreTourGuideAllocationState = {
@@ -142,8 +151,10 @@ export type PreTourGuideAllocationState = {
 
 export type PreTourSupplementAllocationState = {
   serviceLabel: string;
+  chargeCategory: "SUPPLEMENT" | "MISC";
   unitBasis: string;
   quantity: string;
+  remarks: string;
 };
 
 export type PreTourItemAllocationFormState = {

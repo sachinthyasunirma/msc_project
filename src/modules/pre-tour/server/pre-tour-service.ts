@@ -24,6 +24,7 @@ import {
   updatePreTourTechnicalVisitSchema,
   updatePreTourTotalSchema,
 } from "@/modules/pre-tour/shared/pre-tour-schemas";
+import type { PreTourDayInitializationResult } from "@/modules/pre-tour/shared/pre-tour-day-initialization-types";
 
 class PreTourError extends Error {
   constructor(
@@ -955,6 +956,117 @@ async function cleanupExpiredPreTourBins(companyId: string) {
   });
 
   return expired.length;
+}
+
+const initializePreTourDaysSchema = z.object({
+  planId: z.string().trim().min(1),
+});
+
+export async function initializePreTourDays(
+  payload: unknown,
+  headers: Headers
+): Promise<PreTourDayInitializationResult> {
+  const parsed = initializePreTourDaysSchema.safeParse(payload);
+  if (!parsed.success) {
+    throw new PreTourError(400, "VALIDATION_ERROR", normalizeZodError(parsed.error));
+  }
+
+  const access = await ensureWritable(headers, "pre-tour-days");
+  const companyId = access.companyId;
+
+  const [plan] = await db
+    .select({
+      id: schema.preTourPlan.id,
+      startDate: schema.preTourPlan.startDate,
+      endDate: schema.preTourPlan.endDate,
+      planCode: schema.preTourPlan.planCode,
+      code: schema.preTourPlan.code,
+    })
+    .from(schema.preTourPlan)
+    .where(
+      and(
+        eq(schema.preTourPlan.id, parsed.data.planId),
+        eq(schema.preTourPlan.companyId, companyId)
+      )
+    )
+    .limit(1);
+
+  if (!plan) {
+    throw new PreTourError(404, "NOT_FOUND", "Pre-tour plan not found.");
+  }
+
+  const expectedDayCount = toDayCount(
+    plan.startDate instanceof Date ? plan.startDate.toISOString() : String(plan.startDate ?? ""),
+    plan.endDate instanceof Date ? plan.endDate.toISOString() : String(plan.endDate ?? "")
+  );
+  if (expectedDayCount <= 0) {
+    throw new PreTourError(400, "VALIDATION_ERROR", "Invalid plan date range. Update pre-tour header dates first.");
+  }
+
+  const existingDays = await db
+    .select()
+    .from(schema.preTourPlanDay)
+    .where(
+      and(
+        eq(schema.preTourPlanDay.companyId, companyId),
+        eq(schema.preTourPlanDay.planId, parsed.data.planId)
+      )
+    );
+
+  const existingDayNumbers = new Set(
+    existingDays
+      .map((day) => Number(day.dayNumber))
+      .filter((value) => Number.isFinite(value))
+  );
+  const createdDayNumbers: number[] = [];
+  const baseCode = String(plan.planCode || plan.code || "PRE_TOUR")
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, "_")
+    .replace(/_+/g, "_")
+    .replace(/^_|_$/g, "");
+  const planStartDate = plan.startDate instanceof Date ? plan.startDate : new Date(String(plan.startDate));
+
+  await db.transaction(async (tx) => {
+    for (let dayNumber = 1; dayNumber <= expectedDayCount; dayNumber += 1) {
+      if (existingDayNumbers.has(dayNumber)) continue;
+      createdDayNumbers.push(dayNumber);
+      await tx
+        .insert(schema.preTourPlanDay)
+        .values({
+          companyId,
+          planId: parsed.data.planId,
+          code: `${baseCode}_DAY_${String(dayNumber).padStart(2, "0")}`.slice(0, 80),
+          dayNumber,
+          date: addDays(planStartDate.toISOString(), dayNumber - 1),
+          title: `Day ${dayNumber}`,
+          isActive: true,
+        } as any)
+        .onConflictDoNothing({
+          target: [schema.preTourPlanDay.planId, schema.preTourPlanDay.dayNumber],
+        });
+    }
+  });
+
+  const days = await db
+    .select()
+    .from(schema.preTourPlanDay)
+    .where(
+      and(
+        eq(schema.preTourPlanDay.companyId, companyId),
+        eq(schema.preTourPlanDay.planId, parsed.data.planId)
+      )
+    )
+    .orderBy(schema.preTourPlanDay.dayNumber);
+
+  return {
+    planId: parsed.data.planId,
+    expectedDayCount,
+    existingDayCount: existingDays.length,
+    createdCount: createdDayNumbers.length,
+    createdDayNumbers,
+    days,
+  };
 }
 
 export async function runPreTourBinCleanupForAllCompanies() {

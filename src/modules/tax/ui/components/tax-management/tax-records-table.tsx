@@ -4,6 +4,7 @@ import Link from "next/link";
 import { Edit3, Settings2, Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { TableLoadingRow } from "@/components/ui/table-loading-row";
 import {
   Table,
   TableBody,
@@ -46,11 +47,11 @@ export function TaxRecordsTable({
       </TableHeader>
       <TableBody>
         {loading ? (
-          <TableRow>
-            <TableCell colSpan={TAX_COLUMNS[resource].length + 1} className="text-center text-muted-foreground">
-              Loading...
-            </TableCell>
-          </TableRow>
+          <TableLoadingRow
+            colSpan={TAX_COLUMNS[resource].length + 1}
+            title="Calculating tax master data"
+            description="Loading tax records and configuration lines."
+          />
         ) : records.length === 0 ? (
           <TableRow>
             <TableCell colSpan={TAX_COLUMNS[resource].length + 1} className="text-center text-muted-foreground">
@@ -108,4 +109,3 @@ export function TaxRecordsTable({
     </Table>
   );
 }
-
