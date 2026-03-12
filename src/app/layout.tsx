@@ -1,5 +1,8 @@
 import type { Metadata } from "next";
+import { AppConfirmProvider } from "@/components/app-confirm-provider";
+import { ClientLogBootstrap } from "@/components/logging/client-log-bootstrap";
 import { Geist, Geist_Mono } from "next/font/google";
+import { AppToaster } from "@/components/app-toaster";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -23,12 +26,16 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
       <body
         suppressHydrationWarning
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
-        {children}
+        <AppConfirmProvider>
+          <ClientLogBootstrap />
+          {children}
+          <AppToaster />
+        </AppConfirmProvider>
       </body>
     </html>
   );

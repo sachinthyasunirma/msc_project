@@ -2,7 +2,13 @@ import { and, desc, eq, ilike, or } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
 import * as schema from "@/db/schema";
-import { auth } from "@/lib/auth";
+import {
+  getOrSetMasterDataCache,
+  invalidateMasterDataCacheByPrefixes,
+  masterDataCachePrefix,
+  masterDataListCacheKey,
+} from "@/lib/cache/master-data-cache";
+import { AccessControlError, resolveAccess } from "@/lib/security/access-control";
 import {
   createTransportBaggageRateSchema,
   createTransportLocationExpenseSchema,
@@ -33,6 +39,7 @@ class TransportError extends Error {
 }
 
 type TransportResource = z.infer<typeof transportResourceSchema>;
+type TransportRateBasis = "VEHICLE_CATEGORY" | "VEHICLE_TYPE";
 
 function normalizeZodError(error: z.ZodError) {
   return error.issues[0]?.message || "Validation failed.";
@@ -50,21 +57,16 @@ function toDate(value: string | null | undefined) {
 }
 
 async function getAccess(headers: Headers) {
-  const session = await auth.api.getSession({ headers });
-  if (!session?.user) {
-    throw new TransportError(401, "UNAUTHORIZED", "You are not authenticated.");
+  try {
+    return await resolveAccess(headers, {
+      requiredPrivilege: "SCREEN_MASTER_TRANSPORTS",
+    });
+  } catch (error) {
+    if (error instanceof AccessControlError) {
+      throw new TransportError(error.status, error.code, error.message);
+    }
+    throw error;
   }
-  const user = session.user as {
-    companyId?: string | null;
-    readOnly?: boolean;
-  };
-  if (!user.companyId) {
-    throw new TransportError(403, "COMPANY_REQUIRED", "User is not linked to a company.");
-  }
-  return {
-    companyId: user.companyId,
-    readOnly: Boolean(user.readOnly),
-  };
 }
 
 async function ensureWritable(headers: Headers) {
@@ -74,6 +76,14 @@ async function ensureWritable(headers: Headers) {
       403,
       "READ_ONLY_MODE",
       "You are in read-only mode. Contact a manager for edit access."
+    );
+  }
+  const elevated = access.role === "ADMIN" || access.role === "MANAGER";
+  if (!elevated && !access.canWriteMasterData) {
+    throw new TransportError(
+      403,
+      "PERMISSION_DENIED",
+      "You do not have write access for Master Data."
     );
   }
   return access;
@@ -132,6 +142,64 @@ async function ensureVehicleTypeInCompany(companyId: string, id: string) {
   }
 }
 
+async function getTransportRateBasis(companyId: string): Promise<TransportRateBasis> {
+  const [record] = await db
+    .select({ transportRateBasis: schema.company.transportRateBasis })
+    .from(schema.company)
+    .where(eq(schema.company.id, companyId))
+    .limit(1);
+  return record?.transportRateBasis === "VEHICLE_CATEGORY"
+    ? "VEHICLE_CATEGORY"
+    : "VEHICLE_TYPE";
+}
+
+async function enforceVehicleBasis(
+  companyId: string,
+  values: {
+    vehicleCategoryId?: string | null;
+    vehicleTypeId?: string | null;
+  }
+) {
+  const basis = await getTransportRateBasis(companyId);
+  const categoryId = values.vehicleCategoryId ?? null;
+  const typeId = values.vehicleTypeId ?? null;
+
+  if (basis === "VEHICLE_CATEGORY") {
+    if (!categoryId) {
+      throw new TransportError(
+        400,
+        "VALIDATION_ERROR",
+        "Vehicle Category is required by current company transport rate basis."
+      );
+    }
+    if (typeId) {
+      throw new TransportError(
+        400,
+        "VALIDATION_ERROR",
+        "Vehicle Type is not allowed when company transport rate basis is Vehicle Category."
+      );
+    }
+    await ensureVehicleCategoryInCompany(companyId, categoryId);
+    return;
+  }
+
+  if (!typeId) {
+    throw new TransportError(
+      400,
+      "VALIDATION_ERROR",
+      "Vehicle Type is required by current company transport rate basis."
+    );
+  }
+  if (categoryId) {
+    throw new TransportError(
+      400,
+      "VALIDATION_ERROR",
+      "Vehicle Category is not allowed when company transport rate basis is Vehicle Type."
+    );
+  }
+  await ensureVehicleTypeInCompany(companyId, typeId);
+}
+
 function parseResource(input: string): TransportResource {
   const parsed = transportResourceSchema.safeParse(input);
   if (!parsed.success) {
@@ -153,137 +221,142 @@ export async function listTransportRecords(
   const { companyId } = await getAccess(headers);
   const query = parsed.data;
   const term = query.q ? `%${query.q}%` : null;
-
-  switch (resource) {
-    case "locations":
-      return db
-        .select()
-        .from(schema.transportLocation)
-        .where(
-          and(
-            eq(schema.transportLocation.companyId, companyId),
-            term
-              ? or(
-                  ilike(schema.transportLocation.code, term),
-                  ilike(schema.transportLocation.name, term),
-                  ilike(schema.transportLocation.country, term),
-                  ilike(schema.transportLocation.region, term)
-                )
-              : undefined
+  const cacheKey = masterDataListCacheKey("transport", companyId, resource, query);
+  return getOrSetMasterDataCache(cacheKey, async () => {
+    switch (resource) {
+      case "locations":
+        return db
+          .select()
+          .from(schema.transportLocation)
+          .where(
+            and(
+              eq(schema.transportLocation.companyId, companyId),
+              term
+                ? or(
+                    ilike(schema.transportLocation.code, term),
+                    ilike(schema.transportLocation.name, term),
+                    ilike(schema.transportLocation.country, term),
+                    ilike(schema.transportLocation.region, term)
+                  )
+                : undefined
+            )
           )
-        )
-        .orderBy(desc(schema.transportLocation.createdAt))
-        .limit(query.limit);
-    case "vehicle-categories":
-      return db
-        .select()
-        .from(schema.transportVehicleCategory)
-        .where(
-          and(
-            eq(schema.transportVehicleCategory.companyId, companyId),
-            term
-              ? or(
-                  ilike(schema.transportVehicleCategory.code, term),
-                  ilike(schema.transportVehicleCategory.name, term)
-                )
-              : undefined
+          .orderBy(desc(schema.transportLocation.createdAt))
+          .limit(query.limit);
+      case "vehicle-categories":
+        return db
+          .select()
+          .from(schema.transportVehicleCategory)
+          .where(
+            and(
+              eq(schema.transportVehicleCategory.companyId, companyId),
+              term
+                ? or(
+                    ilike(schema.transportVehicleCategory.code, term),
+                    ilike(schema.transportVehicleCategory.name, term)
+                  )
+                : undefined
+            )
           )
-        )
-        .orderBy(desc(schema.transportVehicleCategory.sortOrder), desc(schema.transportVehicleCategory.createdAt))
-        .limit(query.limit);
-    case "vehicle-types":
-      return db
-        .select()
-        .from(schema.transportVehicleType)
-        .where(
-          and(
-            eq(schema.transportVehicleType.companyId, companyId),
-            term
-              ? or(
-                  ilike(schema.transportVehicleType.code, term),
-                  ilike(schema.transportVehicleType.name, term)
-                )
-              : undefined
+          .orderBy(
+            desc(schema.transportVehicleCategory.sortOrder),
+            desc(schema.transportVehicleCategory.createdAt)
           )
-        )
-        .orderBy(desc(schema.transportVehicleType.createdAt))
-        .limit(query.limit);
-    case "location-rates":
-      return db
-        .select()
-        .from(schema.transportLocationRate)
-        .where(
-          and(
-            eq(schema.transportLocationRate.companyId, companyId),
-            term
-              ? or(
-                  ilike(schema.transportLocationRate.code, term),
-                  ilike(schema.transportLocationRate.currency, term),
-                  ilike(schema.transportLocationRate.pricingModel, term)
-                )
-              : undefined
+          .limit(query.limit);
+      case "vehicle-types":
+        return db
+          .select()
+          .from(schema.transportVehicleType)
+          .where(
+            and(
+              eq(schema.transportVehicleType.companyId, companyId),
+              term
+                ? or(
+                    ilike(schema.transportVehicleType.code, term),
+                    ilike(schema.transportVehicleType.name, term)
+                  )
+                : undefined
+            )
           )
-        )
-        .orderBy(desc(schema.transportLocationRate.createdAt))
-        .limit(query.limit);
-    case "location-expenses":
-      return db
-        .select()
-        .from(schema.transportLocationExpense)
-        .where(
-          and(
-            eq(schema.transportLocationExpense.companyId, companyId),
-            term
-              ? or(
-                  ilike(schema.transportLocationExpense.code, term),
-                  ilike(schema.transportLocationExpense.name, term),
-                  ilike(schema.transportLocationExpense.expenseType, term)
-                )
-              : undefined
+          .orderBy(desc(schema.transportVehicleType.createdAt))
+          .limit(query.limit);
+      case "location-rates":
+        return db
+          .select()
+          .from(schema.transportLocationRate)
+          .where(
+            and(
+              eq(schema.transportLocationRate.companyId, companyId),
+              term
+                ? or(
+                    ilike(schema.transportLocationRate.code, term),
+                    ilike(schema.transportLocationRate.currency, term),
+                    ilike(schema.transportLocationRate.pricingModel, term)
+                  )
+                : undefined
+            )
           )
-        )
-        .orderBy(desc(schema.transportLocationExpense.createdAt))
-        .limit(query.limit);
-    case "pax-vehicle-rates":
-      return db
-        .select()
-        .from(schema.transportPaxVehicleRate)
-        .where(
-          and(
-            eq(schema.transportPaxVehicleRate.companyId, companyId),
-            term
-              ? or(
-                  ilike(schema.transportPaxVehicleRate.code, term),
-                  ilike(schema.transportPaxVehicleRate.currency, term),
-                  ilike(schema.transportPaxVehicleRate.pricingModel, term)
-                )
-              : undefined
+          .orderBy(desc(schema.transportLocationRate.createdAt))
+          .limit(query.limit);
+      case "location-expenses":
+        return db
+          .select()
+          .from(schema.transportLocationExpense)
+          .where(
+            and(
+              eq(schema.transportLocationExpense.companyId, companyId),
+              term
+                ? or(
+                    ilike(schema.transportLocationExpense.code, term),
+                    ilike(schema.transportLocationExpense.name, term),
+                    ilike(schema.transportLocationExpense.expenseType, term)
+                  )
+                : undefined
+            )
           )
-        )
-        .orderBy(desc(schema.transportPaxVehicleRate.createdAt))
-        .limit(query.limit);
-    case "baggage-rates":
-      return db
-        .select()
-        .from(schema.transportBaggageRate)
-        .where(
-          and(
-            eq(schema.transportBaggageRate.companyId, companyId),
-            term
-              ? or(
-                  ilike(schema.transportBaggageRate.code, term),
-                  ilike(schema.transportBaggageRate.currency, term),
-                  ilike(schema.transportBaggageRate.pricingModel, term),
-                  ilike(schema.transportBaggageRate.unit, term)
-                )
-              : undefined
+          .orderBy(desc(schema.transportLocationExpense.createdAt))
+          .limit(query.limit);
+      case "pax-vehicle-rates":
+        return db
+          .select()
+          .from(schema.transportPaxVehicleRate)
+          .where(
+            and(
+              eq(schema.transportPaxVehicleRate.companyId, companyId),
+              term
+                ? or(
+                    ilike(schema.transportPaxVehicleRate.code, term),
+                    ilike(schema.transportPaxVehicleRate.currency, term),
+                    ilike(schema.transportPaxVehicleRate.pricingModel, term)
+                  )
+                : undefined
+            )
           )
-        )
-        .orderBy(desc(schema.transportBaggageRate.createdAt))
-        .limit(query.limit);
-    default:
-      throw new TransportError(404, "RESOURCE_NOT_FOUND", "Transport resource not found.");
-  }
+          .orderBy(desc(schema.transportPaxVehicleRate.createdAt))
+          .limit(query.limit);
+      case "baggage-rates":
+        return db
+          .select()
+          .from(schema.transportBaggageRate)
+          .where(
+            and(
+              eq(schema.transportBaggageRate.companyId, companyId),
+              term
+                ? or(
+                    ilike(schema.transportBaggageRate.code, term),
+                    ilike(schema.transportBaggageRate.currency, term),
+                    ilike(schema.transportBaggageRate.pricingModel, term),
+                    ilike(schema.transportBaggageRate.unit, term)
+                  )
+                : undefined
+            )
+          )
+          .orderBy(desc(schema.transportBaggageRate.createdAt))
+          .limit(query.limit);
+      default:
+        throw new TransportError(404, "RESOURCE_NOT_FOUND", "Transport resource not found.");
+    }
+  });
 }
 
 export async function createTransportRecord(
@@ -293,8 +366,8 @@ export async function createTransportRecord(
 ) {
   const resource = parseResource(resourceInput);
   const { companyId } = await ensureWritable(headers);
-
-  switch (resource) {
+  try {
+    switch (resource) {
     case "locations": {
       const parsed = createTransportLocationSchema.safeParse(payload);
       if (!parsed.success) {
@@ -336,12 +409,10 @@ export async function createTransportRecord(
       }
       await ensureLocationInCompany(companyId, parsed.data.fromLocationId);
       await ensureLocationInCompany(companyId, parsed.data.toLocationId);
-      if (parsed.data.vehicleCategoryId) {
-        await ensureVehicleCategoryInCompany(companyId, parsed.data.vehicleCategoryId);
-      }
-      if (parsed.data.vehicleTypeId) {
-        await ensureVehicleTypeInCompany(companyId, parsed.data.vehicleTypeId);
-      }
+      await enforceVehicleBasis(companyId, {
+        vehicleCategoryId: parsed.data.vehicleCategoryId ?? null,
+        vehicleTypeId: parsed.data.vehicleTypeId ?? null,
+      });
       const [created] = await db
         .insert(schema.transportLocationRate)
         .values({
@@ -364,12 +435,10 @@ export async function createTransportRecord(
         throw new TransportError(400, "VALIDATION_ERROR", normalizeZodError(parsed.error));
       }
       await ensureLocationInCompany(companyId, parsed.data.locationId);
-      if (parsed.data.vehicleCategoryId) {
-        await ensureVehicleCategoryInCompany(companyId, parsed.data.vehicleCategoryId);
-      }
-      if (parsed.data.vehicleTypeId) {
-        await ensureVehicleTypeInCompany(companyId, parsed.data.vehicleTypeId);
-      }
+      await enforceVehicleBasis(companyId, {
+        vehicleCategoryId: parsed.data.vehicleCategoryId ?? null,
+        vehicleTypeId: parsed.data.vehicleTypeId ?? null,
+      });
       const [created] = await db
         .insert(schema.transportLocationExpense)
         .values({
@@ -389,12 +458,10 @@ export async function createTransportRecord(
       }
       await ensureLocationInCompany(companyId, parsed.data.fromLocationId);
       await ensureLocationInCompany(companyId, parsed.data.toLocationId);
-      if (parsed.data.vehicleCategoryId) {
-        await ensureVehicleCategoryInCompany(companyId, parsed.data.vehicleCategoryId);
-      }
-      if (parsed.data.vehicleTypeId) {
-        await ensureVehicleTypeInCompany(companyId, parsed.data.vehicleTypeId);
-      }
+      await enforceVehicleBasis(companyId, {
+        vehicleCategoryId: parsed.data.vehicleCategoryId ?? null,
+        vehicleTypeId: parsed.data.vehicleTypeId ?? null,
+      });
       const [created] = await db
         .insert(schema.transportPaxVehicleRate)
         .values({
@@ -415,12 +482,10 @@ export async function createTransportRecord(
       }
       await ensureLocationInCompany(companyId, parsed.data.fromLocationId);
       await ensureLocationInCompany(companyId, parsed.data.toLocationId);
-      if (parsed.data.vehicleCategoryId) {
-        await ensureVehicleCategoryInCompany(companyId, parsed.data.vehicleCategoryId);
-      }
-      if (parsed.data.vehicleTypeId) {
-        await ensureVehicleTypeInCompany(companyId, parsed.data.vehicleTypeId);
-      }
+      await enforceVehicleBasis(companyId, {
+        vehicleCategoryId: parsed.data.vehicleCategoryId ?? null,
+        vehicleTypeId: parsed.data.vehicleTypeId ?? null,
+      });
       const [created] = await db
         .insert(schema.transportBaggageRate)
         .values({
@@ -435,8 +500,11 @@ export async function createTransportRecord(
         .returning();
       return created;
     }
-    default:
-      throw new TransportError(404, "RESOURCE_NOT_FOUND", "Transport resource not found.");
+      default:
+        throw new TransportError(404, "RESOURCE_NOT_FOUND", "Transport resource not found.");
+    }
+  } finally {
+    await invalidateMasterDataCacheByPrefixes([masterDataCachePrefix("transport", companyId)]);
   }
 }
 
@@ -448,8 +516,8 @@ export async function updateTransportRecord(
 ) {
   const resource = parseResource(resourceInput);
   const { companyId } = await ensureWritable(headers);
-
-  switch (resource) {
+  try {
+    switch (resource) {
     case "locations": {
       const parsed = updateTransportLocationSchema.safeParse(payload);
       if (!parsed.success) {
@@ -506,18 +574,34 @@ export async function updateTransportRecord(
       if (!parsed.success) {
         throw new TransportError(400, "VALIDATION_ERROR", normalizeZodError(parsed.error));
       }
+      const [current] = await db
+        .select({
+          vehicleCategoryId: schema.transportLocationRate.vehicleCategoryId,
+          vehicleTypeId: schema.transportLocationRate.vehicleTypeId,
+        })
+        .from(schema.transportLocationRate)
+        .where(
+          and(eq(schema.transportLocationRate.id, id), eq(schema.transportLocationRate.companyId, companyId))
+        )
+        .limit(1);
+      if (!current) throw new TransportError(404, "RECORD_NOT_FOUND", "Location rate not found.");
+
       if (parsed.data.fromLocationId) {
         await ensureLocationInCompany(companyId, parsed.data.fromLocationId);
       }
       if (parsed.data.toLocationId) {
         await ensureLocationInCompany(companyId, parsed.data.toLocationId);
       }
-      if (parsed.data.vehicleCategoryId) {
-        await ensureVehicleCategoryInCompany(companyId, parsed.data.vehicleCategoryId);
-      }
-      if (parsed.data.vehicleTypeId) {
-        await ensureVehicleTypeInCompany(companyId, parsed.data.vehicleTypeId);
-      }
+      await enforceVehicleBasis(companyId, {
+        vehicleCategoryId:
+          parsed.data.vehicleCategoryId !== undefined
+            ? (parsed.data.vehicleCategoryId ?? null)
+            : (current.vehicleCategoryId ?? null),
+        vehicleTypeId:
+          parsed.data.vehicleTypeId !== undefined
+            ? (parsed.data.vehicleTypeId ?? null)
+            : (current.vehicleTypeId ?? null),
+      });
       const [updated] = await db
         .update(schema.transportLocationRate)
         .set({
@@ -551,15 +635,36 @@ export async function updateTransportRecord(
       if (!parsed.success) {
         throw new TransportError(400, "VALIDATION_ERROR", normalizeZodError(parsed.error));
       }
+      const [current] = await db
+        .select({
+          vehicleCategoryId: schema.transportLocationExpense.vehicleCategoryId,
+          vehicleTypeId: schema.transportLocationExpense.vehicleTypeId,
+        })
+        .from(schema.transportLocationExpense)
+        .where(
+          and(
+            eq(schema.transportLocationExpense.id, id),
+            eq(schema.transportLocationExpense.companyId, companyId)
+          )
+        )
+        .limit(1);
+      if (!current) {
+        throw new TransportError(404, "RECORD_NOT_FOUND", "Location expense not found.");
+      }
+
       if (parsed.data.locationId) {
         await ensureLocationInCompany(companyId, parsed.data.locationId);
       }
-      if (parsed.data.vehicleCategoryId) {
-        await ensureVehicleCategoryInCompany(companyId, parsed.data.vehicleCategoryId);
-      }
-      if (parsed.data.vehicleTypeId) {
-        await ensureVehicleTypeInCompany(companyId, parsed.data.vehicleTypeId);
-      }
+      await enforceVehicleBasis(companyId, {
+        vehicleCategoryId:
+          parsed.data.vehicleCategoryId !== undefined
+            ? (parsed.data.vehicleCategoryId ?? null)
+            : (current.vehicleCategoryId ?? null),
+        vehicleTypeId:
+          parsed.data.vehicleTypeId !== undefined
+            ? (parsed.data.vehicleTypeId ?? null)
+            : (current.vehicleTypeId ?? null),
+      });
       const [updated] = await db
         .update(schema.transportLocationExpense)
         .set({
@@ -589,18 +694,39 @@ export async function updateTransportRecord(
       if (!parsed.success) {
         throw new TransportError(400, "VALIDATION_ERROR", normalizeZodError(parsed.error));
       }
+      const [current] = await db
+        .select({
+          vehicleCategoryId: schema.transportPaxVehicleRate.vehicleCategoryId,
+          vehicleTypeId: schema.transportPaxVehicleRate.vehicleTypeId,
+        })
+        .from(schema.transportPaxVehicleRate)
+        .where(
+          and(
+            eq(schema.transportPaxVehicleRate.id, id),
+            eq(schema.transportPaxVehicleRate.companyId, companyId)
+          )
+        )
+        .limit(1);
+      if (!current) {
+        throw new TransportError(404, "RECORD_NOT_FOUND", "Pax vehicle rate not found.");
+      }
+
       if (parsed.data.fromLocationId) {
         await ensureLocationInCompany(companyId, parsed.data.fromLocationId);
       }
       if (parsed.data.toLocationId) {
         await ensureLocationInCompany(companyId, parsed.data.toLocationId);
       }
-      if (parsed.data.vehicleCategoryId) {
-        await ensureVehicleCategoryInCompany(companyId, parsed.data.vehicleCategoryId);
-      }
-      if (parsed.data.vehicleTypeId) {
-        await ensureVehicleTypeInCompany(companyId, parsed.data.vehicleTypeId);
-      }
+      await enforceVehicleBasis(companyId, {
+        vehicleCategoryId:
+          parsed.data.vehicleCategoryId !== undefined
+            ? (parsed.data.vehicleCategoryId ?? null)
+            : (current.vehicleCategoryId ?? null),
+        vehicleTypeId:
+          parsed.data.vehicleTypeId !== undefined
+            ? (parsed.data.vehicleTypeId ?? null)
+            : (current.vehicleTypeId ?? null),
+      });
       const [updated] = await db
         .update(schema.transportPaxVehicleRate)
         .set({
@@ -634,18 +760,37 @@ export async function updateTransportRecord(
       if (!parsed.success) {
         throw new TransportError(400, "VALIDATION_ERROR", normalizeZodError(parsed.error));
       }
+      const [current] = await db
+        .select({
+          vehicleCategoryId: schema.transportBaggageRate.vehicleCategoryId,
+          vehicleTypeId: schema.transportBaggageRate.vehicleTypeId,
+        })
+        .from(schema.transportBaggageRate)
+        .where(
+          and(
+            eq(schema.transportBaggageRate.id, id),
+            eq(schema.transportBaggageRate.companyId, companyId)
+          )
+        )
+        .limit(1);
+      if (!current) throw new TransportError(404, "RECORD_NOT_FOUND", "Baggage rate not found.");
+
       if (parsed.data.fromLocationId) {
         await ensureLocationInCompany(companyId, parsed.data.fromLocationId);
       }
       if (parsed.data.toLocationId) {
         await ensureLocationInCompany(companyId, parsed.data.toLocationId);
       }
-      if (parsed.data.vehicleCategoryId) {
-        await ensureVehicleCategoryInCompany(companyId, parsed.data.vehicleCategoryId);
-      }
-      if (parsed.data.vehicleTypeId) {
-        await ensureVehicleTypeInCompany(companyId, parsed.data.vehicleTypeId);
-      }
+      await enforceVehicleBasis(companyId, {
+        vehicleCategoryId:
+          parsed.data.vehicleCategoryId !== undefined
+            ? (parsed.data.vehicleCategoryId ?? null)
+            : (current.vehicleCategoryId ?? null),
+        vehicleTypeId:
+          parsed.data.vehicleTypeId !== undefined
+            ? (parsed.data.vehicleTypeId ?? null)
+            : (current.vehicleTypeId ?? null),
+      });
       const [updated] = await db
         .update(schema.transportBaggageRate)
         .set({
@@ -674,16 +819,19 @@ export async function updateTransportRecord(
       if (!updated) throw new TransportError(404, "RECORD_NOT_FOUND", "Baggage rate not found.");
       return updated;
     }
-    default:
-      throw new TransportError(404, "RESOURCE_NOT_FOUND", "Transport resource not found.");
+      default:
+        throw new TransportError(404, "RESOURCE_NOT_FOUND", "Transport resource not found.");
+    }
+  } finally {
+    await invalidateMasterDataCacheByPrefixes([masterDataCachePrefix("transport", companyId)]);
   }
 }
 
 export async function deleteTransportRecord(resourceInput: string, id: string, headers: Headers) {
   const resource = parseResource(resourceInput);
   const { companyId } = await ensureWritable(headers);
-
-  switch (resource) {
+  try {
+    switch (resource) {
     case "locations": {
       const [deleted] = await db
         .delete(schema.transportLocation)
@@ -770,8 +918,11 @@ export async function deleteTransportRecord(resourceInput: string, id: string, h
       if (!deleted) throw new TransportError(404, "RECORD_NOT_FOUND", "Baggage rate not found.");
       return;
     }
-    default:
-      throw new TransportError(404, "RESOURCE_NOT_FOUND", "Transport resource not found.");
+      default:
+        throw new TransportError(404, "RESOURCE_NOT_FOUND", "Transport resource not found.");
+    }
+  } finally {
+    await invalidateMasterDataCacheByPrefixes([masterDataCachePrefix("transport", companyId)]);
   }
 }
 
@@ -782,8 +933,45 @@ export function toTransportErrorResponse(error: unknown) {
       body: { code: error.code, message: error.message },
     };
   }
+  if (error && typeof error === "object") {
+    const dbError = error as {
+      code?: string;
+      message?: string;
+      cause?: { code?: string; message?: string };
+      sourceError?: { code?: string; message?: string };
+    };
+    const lowered = (dbError.message ?? "").toLowerCase();
+    const causeCode = (dbError.cause?.code ?? "").toUpperCase();
+    const sourceCode = (dbError.sourceError?.code ?? "").toUpperCase();
+    if (
+      dbError.code === "ENOTFOUND" ||
+      dbError.code === "UND_ERR_SOCKET" ||
+      causeCode === "ENOTFOUND" ||
+      causeCode === "UND_ERR_SOCKET" ||
+      sourceCode === "ENOTFOUND" ||
+      sourceCode === "UND_ERR_SOCKET" ||
+      lowered.includes("fetch failed")
+    ) {
+      return {
+        status: 503,
+        body: {
+          code: "DATABASE_UNAVAILABLE",
+          message: "Database connection is unavailable. Check DATABASE_URL/network and try again.",
+        },
+      };
+    }
+  }
   if (error instanceof Error) {
     const message = error.message.toLowerCase();
+    if (message.includes("fetch failed") || message.includes("enotfound")) {
+      return {
+        status: 503,
+        body: {
+          code: "DATABASE_UNAVAILABLE",
+          message: "Database connection is unavailable. Check DATABASE_URL/network and try again.",
+        },
+      };
+    }
     if (
       (message.includes("relation") && message.includes("does not exist")) ||
       (message.includes("column") && message.includes("does not exist"))

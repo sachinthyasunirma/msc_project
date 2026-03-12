@@ -2,15 +2,12 @@
 
 import { Eye } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import { authClient } from "@/lib/auth-client";
+import { useDashboardAccessState } from "@/modules/dashboard/ui/components/dashboard-shell-provider";
 
 export function ViewOnlyModeBadge() {
-  const { data: session } = authClient.useSession();
-  const isReadOnly = Boolean(
-    (session?.user as { readOnly?: boolean } | undefined)?.readOnly
-  );
+  const { isReadOnly, viewer } = useDashboardAccessState();
 
-  if (!session?.user || !isReadOnly) {
+  if (!viewer || !isReadOnly) {
     return null;
   }
 
@@ -23,4 +20,3 @@ export function ViewOnlyModeBadge() {
     </div>
   );
 }
-

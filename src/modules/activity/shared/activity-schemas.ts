@@ -10,7 +10,7 @@ export const activityResourceSchema = z.enum([
 
 export const activityListQuerySchema = z.object({
   q: z.string().trim().max(120).optional(),
-  limit: z.coerce.number().int().min(1).max(200).default(100),
+  limit: z.coerce.number().int().min(1).max(500).default(100),
   activityId: z.string().trim().min(1).optional(),
   parentActivityId: z.string().trim().min(1).optional(),
 });

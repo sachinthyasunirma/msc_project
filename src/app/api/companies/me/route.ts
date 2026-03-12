@@ -1,9 +1,18 @@
-import { eq } from "drizzle-orm";
+import { count, eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { db } from "@/db";
 import { company, user } from "@/db/schema";
 import { auth } from "@/lib/auth";
+import {
+  AccessControlError,
+  assignSystemRoleToUser,
+  ensureCompanyDefaultRoles,
+  resolveAccess,
+} from "@/lib/security/access-control";
+import { APP_PLANS, getPlanUserLimit } from "@/lib/security/privileges";
+
+const SUBSCRIPTION_DURATIONS = ["QUARTERLY", "YEARLY"] as const;
 
 const updateCompanySchema = z
   .object({
@@ -20,6 +29,11 @@ const updateCompanySchema = z
     code: z.string().trim().toUpperCase().min(1).max(40).optional(),
     name: z.string().trim().min(2).max(160).optional(),
     email: z.string().trim().email().optional(),
+    baseCurrencyCode: z.string().trim().toUpperCase().min(3).max(10).optional(),
+    transportRateBasis: z.enum(["VEHICLE_CATEGORY", "VEHICLE_TYPE"]).optional(),
+    helpEnabled: z.boolean().optional(),
+    subscriptionPlan: z.enum(APP_PLANS).optional(),
+    subscriptionDuration: z.enum(SUBSCRIPTION_DURATIONS).optional(),
     country: z.string().trim().max(120).optional().nullable(),
     image: z.string().trim().min(1).optional().nullable(),
   })
@@ -63,6 +77,12 @@ function generateSecret(prefix: string) {
   return `${prefix}-${random}`;
 }
 
+function addDays(date: Date, days: number) {
+  const copy = new Date(date);
+  copy.setDate(copy.getDate() + days);
+  return copy;
+}
+
 export async function GET(request: Request) {
   try {
     const session = await auth.api.getSession({ headers: request.headers });
@@ -86,6 +106,13 @@ export async function GET(request: Request) {
         managerPrivilegeCode: company.managerPrivilegeCode,
         name: company.name,
         email: company.email,
+        baseCurrencyCode: company.baseCurrencyCode,
+        transportRateBasis: company.transportRateBasis,
+        helpEnabled: company.helpEnabled,
+        subscriptionPlan: company.subscriptionPlan,
+        subscriptionStatus: company.subscriptionStatus,
+        subscriptionStartsAt: company.subscriptionStartsAt,
+        subscriptionEndsAt: company.subscriptionEndsAt,
         country: company.country,
         image: company.image,
       })
@@ -132,9 +159,13 @@ export async function PATCH(request: Request) {
     }
 
     const currentCompanyId = (session.user as { companyId?: string | null }).companyId;
-    const currentRole = (session.user as { role?: string | null }).role;
-    const canManageCompany = currentRole === "ADMIN" || currentRole === "MANAGER";
     if (currentCompanyId) {
+      const requiredPrivilege = parsed.data.subscriptionPlan
+        ? "SUBSCRIPTION_MANAGE"
+        : "COMPANY_SETTINGS_MANAGE";
+      const access = await resolveAccess(request.headers, {
+        requiredPrivilege,
+      });
       if (!parsed.data.code || !parsed.data.name || !parsed.data.email) {
         return NextResponse.json(
           {
@@ -144,15 +175,19 @@ export async function PATCH(request: Request) {
           { status: 400 }
         );
       }
-      if (!canManageCompany) {
+      if (parsed.data.subscriptionPlan && access.role !== "ADMIN") {
         return NextResponse.json(
-          {
-            code: "FORBIDDEN",
-            message: "Only managers can update company secrets or company profile.",
-          },
+          { code: "FORBIDDEN", message: "Only admin users can change subscription plan." },
           { status: 403 }
         );
       }
+
+      const selectedDuration = parsed.data.subscriptionDuration ?? "YEARLY";
+      const durationDays = selectedDuration === "QUARTERLY" ? 90 : 365;
+      const nextSubscriptionStart = parsed.data.subscriptionPlan ? new Date() : undefined;
+      const nextSubscriptionEnd = parsed.data.subscriptionPlan
+        ? addDays(nextSubscriptionStart!, durationDays)
+        : undefined;
 
       const [updated] = await db
         .update(company)
@@ -162,6 +197,13 @@ export async function PATCH(request: Request) {
           managerPrivilegeCode: parsed.data.privilegeCode ?? null,
           name: parsed.data.name!,
           email: parsed.data.email!,
+          baseCurrencyCode: parsed.data.baseCurrencyCode ?? "USD",
+          transportRateBasis: parsed.data.transportRateBasis ?? undefined,
+          helpEnabled: parsed.data.helpEnabled ?? true,
+          subscriptionPlan: parsed.data.subscriptionPlan ?? undefined,
+          subscriptionStatus: parsed.data.subscriptionPlan ? "ACTIVE" : undefined,
+          subscriptionStartsAt: nextSubscriptionStart,
+          subscriptionEndsAt: nextSubscriptionEnd,
           country: parsed.data.country ?? null,
           image: parsed.data.image ?? null,
           updatedAt: new Date(),
@@ -184,6 +226,9 @@ export async function PATCH(request: Request) {
         .select({
           id: company.id,
           managerPrivilegeCode: company.managerPrivilegeCode,
+          subscriptionPlan: company.subscriptionPlan,
+          subscriptionStatus: company.subscriptionStatus,
+          subscriptionEndsAt: company.subscriptionEndsAt,
         })
         .from(company)
         .where(eq(company.joinSecretCode, parsed.data.secretCode))
@@ -193,6 +238,22 @@ export async function PATCH(request: Request) {
         return NextResponse.json(
           { code: "COMPANY_NOT_FOUND", message: "Secret code not found." },
           { status: 404 }
+        );
+      }
+
+      const [companyUserCount] = await db
+        .select({ count: count() })
+        .from(user)
+        .where(eq(user.companyId, existingCompany.id));
+      const nextUserCount = Number(companyUserCount?.count ?? 0) + 1;
+      const userLimit = getPlanUserLimit(existingCompany.subscriptionPlan);
+      if (nextUserCount > userLimit) {
+        return NextResponse.json(
+          {
+            code: "USER_LIMIT_REACHED",
+            message: `This company has reached its subscription user limit (${userLimit}). Please upgrade the plan or remove a user.`,
+          },
+          { status: 409 }
         );
       }
 
@@ -207,9 +268,12 @@ export async function PATCH(request: Request) {
           companyId: existingCompany.id,
           role: canBeManager ? "MANAGER" : "USER",
           readOnly: canBeManager ? false : true,
+          canWriteMasterData: canBeManager ? true : false,
+          canWritePreTour: canBeManager ? true : false,
           updatedAt: new Date(),
         })
         .where(eq(user.id, session.user.id));
+      await assignSystemRoleToUser(existingCompany.id, session.user.id, canBeManager ? "MANAGER" : "USER");
 
       return NextResponse.json({
         success: true,
@@ -218,8 +282,7 @@ export async function PATCH(request: Request) {
       });
     }
 
-    const managerPrivilegeCode =
-      parsed.data.privilegeCode || generateSecret("MGR");
+    const managerPrivilegeCode = parsed.data.privilegeCode || generateSecret("MGR");
     const [created] = await db
       .insert(company)
       .values({
@@ -228,8 +291,15 @@ export async function PATCH(request: Request) {
         managerPrivilegeCode,
         name: parsed.data.name!,
         email: parsed.data.email!,
+        baseCurrencyCode: parsed.data.baseCurrencyCode ?? "USD",
+        transportRateBasis: parsed.data.transportRateBasis ?? "VEHICLE_TYPE",
+        helpEnabled: parsed.data.helpEnabled ?? true,
         country: parsed.data.country ?? null,
         image: parsed.data.image ?? null,
+        subscriptionPlan: null,
+        subscriptionStatus: "PENDING",
+        subscriptionStartsAt: null,
+        subscriptionEndsAt: null,
       })
       .returning({ id: company.id });
 
@@ -239,12 +309,22 @@ export async function PATCH(request: Request) {
         companyId: created.id,
         role: "ADMIN",
         readOnly: false,
+        canWriteMasterData: true,
+        canWritePreTour: true,
         updatedAt: new Date(),
       })
       .where(eq(user.id, session.user.id));
+    await ensureCompanyDefaultRoles(created.id);
+    await assignSystemRoleToUser(created.id, session.user.id, "ADMIN");
 
     return NextResponse.json({ success: true });
   } catch (error) {
+    if (error instanceof AccessControlError) {
+      return NextResponse.json(
+        { code: error.code, message: error.message },
+        { status: error.status }
+      );
+    }
     if (error instanceof Error && error.message.toLowerCase().includes("duplicate key")) {
       return NextResponse.json(
         { code: "DUPLICATE_RECORD", message: "Company code or email already exists." },

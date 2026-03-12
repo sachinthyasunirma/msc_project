@@ -8,9 +8,20 @@ type TransportErrorShape = {
 };
 
 async function parseResponse<T>(response: Response): Promise<T> {
-  const payload = (await response.json()) as T & TransportErrorShape;
+  let payload: (T & TransportErrorShape) | null = null;
+  try {
+    payload = (await response.json()) as T & TransportErrorShape;
+  } catch {
+    payload = null;
+  }
+
   if (!response.ok) {
-    throw new Error(payload.message || "Transport request failed.");
+    const code = payload?.code ? ` [${payload.code}]` : "";
+    const message = payload?.message || response.statusText || "Transport request failed.";
+    throw new Error(`${message}${code}`);
+  }
+  if (payload === null) {
+    throw new Error("Transport API returned an empty or invalid response.");
   }
   return payload;
 }
@@ -67,4 +78,3 @@ export async function deleteTransportRecord(resource: string, id: string) {
   });
   return parseResponse<{ success: boolean }>(response);
 }
-

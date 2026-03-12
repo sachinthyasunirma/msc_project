@@ -1,7 +1,14 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ChevronsUpDown, Building2, LogOut, ShieldCheck } from "lucide-react";
+import {
+  ChevronsUpDown,
+  Building2,
+  LogOut,
+  Settings2,
+  CircleDollarSign,
+  LifeBuoy,
+} from "lucide-react";
 import { useRouter } from "next/navigation";
 import { GeneratedAvatar } from "@/components/generated-avatar";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -23,6 +30,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import {
   SidebarMenu,
   SidebarMenuButton,
@@ -30,82 +38,50 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar";
 import { authClient } from "@/lib/auth-client";
+import {
+  useDashboardAccessState,
+  useDashboardShell,
+} from "@/modules/dashboard/ui/components/dashboard-shell-provider";
+import type { DashboardCompany } from "@/modules/dashboard/shared/dashboard-shell-types";
 
-type CompanyProfile = {
-  id: string;
-  code: string;
-  joinSecretCode: string | null;
-  managerPrivilegeCode: string | null;
-  name: string;
-  email: string;
-  country: string | null;
-  image: string | null;
-};
+function toCompanyForm(company: DashboardCompany | null) {
+  return {
+    code: company?.code ?? "",
+    baseCurrencyCode: company?.baseCurrencyCode ?? "USD",
+    helpEnabled: company?.helpEnabled ?? true,
+    secretCode: company?.joinSecretCode ?? "",
+    privilegeCode: company?.managerPrivilegeCode ?? "",
+    name: company?.name ?? "",
+    email: company?.email ?? "",
+    country: company?.country ?? "",
+    image: company?.image ?? "",
+    subscriptionPlan: company?.subscriptionPlan ?? "STARTER",
+  };
+}
 
 export function NavUser() {
   const { isMobile } = useSidebar();
   const router = useRouter();
-  const { data, isPending } = authClient.useSession();
-  const [company, setCompany] = useState<CompanyProfile | null>(null);
+  const { company, updateShellData, viewer } = useDashboardShell();
+  const { isAdmin } = useDashboardAccessState();
   const [companyOpen, setCompanyOpen] = useState(false);
   const [companySaving, setCompanySaving] = useState(false);
   const [companyError, setCompanyError] = useState<string | null>(null);
-  const [companyForm, setCompanyForm] = useState({
-    code: "",
-    secretCode: "",
-    privilegeCode: "",
-    name: "",
-    email: "",
-    country: "",
-    image: "",
-  });
+  const [companyForm, setCompanyForm] = useState(() => toCompanyForm(company));
+
+  useEffect(() => {
+    setCompanyForm(toCompanyForm(company));
+  }, [company]);
 
   const onLogout = async () => {
     await authClient.signOut({
       fetchOptions: {
         onSuccess: () => {
           router.push("/sign-in");
-          router.refresh();
         },
       },
     });
   };
-
-  const loadCompany = async () => {
-    if (!data?.user) return;
-    try {
-      const response = await fetch("/api/companies/me", { cache: "no-store" });
-      const body = (await response.json()) as {
-        company?: CompanyProfile | null;
-        message?: string;
-      };
-      if (!response.ok) {
-        throw new Error(body.message || "Failed to load company details.");
-      }
-      const details = body.company ?? null;
-      setCompany(details);
-      if (details) {
-        setCompanyForm({
-          code: details.code || "",
-          secretCode: details.joinSecretCode || "",
-          privilegeCode: details.managerPrivilegeCode || "",
-          name: details.name || "",
-          email: details.email || "",
-          country: details.country || "",
-          image: details.image || "",
-        });
-      }
-    } catch (error) {
-      setCompanyError(
-        error instanceof Error ? error.message : "Failed to load company details."
-      );
-    }
-  };
-
-  useEffect(() => {
-    void loadCompany();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data?.user?.id]);
 
   const onPickLogo = async (file: File | null) => {
     if (!file) return;
@@ -132,19 +108,38 @@ export function NavUser() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           code: companyForm.code.toUpperCase().trim(),
+          baseCurrencyCode: companyForm.baseCurrencyCode.toUpperCase().trim() || "USD",
+          helpEnabled: Boolean(companyForm.helpEnabled),
           secretCode: companyForm.secretCode.toUpperCase().trim(),
           privilegeCode: companyForm.privilegeCode.toUpperCase().trim() || null,
           name: companyForm.name.trim(),
           email: companyForm.email.trim(),
           country: companyForm.country.trim() || null,
           image: companyForm.image.trim() || null,
+          subscriptionPlan: companyForm.subscriptionPlan,
         }),
       });
       const body = (await response.json()) as { message?: string };
       if (!response.ok) {
         throw new Error(body.message || "Failed to save company details.");
       }
-      await loadCompany();
+      updateShellData({
+        company: company
+          ? {
+              ...company,
+              code: companyForm.code.toUpperCase().trim(),
+              baseCurrencyCode: companyForm.baseCurrencyCode.toUpperCase().trim() || "USD",
+              helpEnabled: Boolean(companyForm.helpEnabled),
+              joinSecretCode: companyForm.secretCode.toUpperCase().trim(),
+              managerPrivilegeCode: companyForm.privilegeCode.toUpperCase().trim() || null,
+              name: companyForm.name.trim(),
+              email: companyForm.email.trim(),
+              country: companyForm.country.trim() || null,
+              image: companyForm.image.trim() || null,
+              subscriptionPlan: companyForm.subscriptionPlan,
+            }
+          : company,
+      });
       setCompanyOpen(false);
     } catch (error) {
       setCompanyError(
@@ -155,24 +150,7 @@ export function NavUser() {
     }
   };
 
-  if (isPending) {
-    return (
-      <SidebarMenu>
-        <SidebarMenuItem>
-          <SidebarMenuButton size="lg" disabled>
-            <Avatar className="h-8 w-8 rounded-lg">
-              <AvatarFallback className="rounded-lg">...</AvatarFallback>
-            </Avatar>
-            <div className="grid flex-1 text-left text-sm leading-tight">
-              <span className="truncate font-medium">Loading user...</span>
-            </div>
-          </SidebarMenuButton>
-        </SidebarMenuItem>
-      </SidebarMenu>
-    );
-  }
-
-  if (!data?.user) {
+  if (!viewer) {
     return (
       <SidebarMenu>
         <SidebarMenuItem>
@@ -189,10 +167,8 @@ export function NavUser() {
     );
   }
 
-  const user = data.user;
-  const accessUser = user as typeof user & { role?: string | null };
-  const displayName = user.name || user.email?.split("@")[0] || "User";
-  const isManager = accessUser.role === "ADMIN" || accessUser.role === "MANAGER";
+  const displayName = viewer.name || viewer.email.split("@")[0] || "User";
+  const isManager = viewer.role === "ADMIN" || viewer.role === "MANAGER";
 
   return (
     <SidebarMenu>
@@ -203,9 +179,9 @@ export function NavUser() {
               size="lg"
               className="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
             >
-              {user.image ? (
+              {viewer.image ? (
                 <Avatar className="h-8 w-8 rounded-lg">
-                  <AvatarImage src={user.image} alt={displayName} />
+                  <AvatarImage src={viewer.image} alt={displayName} />
                   <AvatarFallback className="rounded-lg">U</AvatarFallback>
                 </Avatar>
               ) : (
@@ -217,7 +193,7 @@ export function NavUser() {
               )}
               <div className="grid flex-1 text-left text-sm leading-tight">
                 <span className="truncate font-medium">{displayName}</span>
-                <span className="truncate text-xs">{company?.name || user.email}</span>
+                <span className="truncate text-xs">{company?.name || viewer.email}</span>
               </div>
               <ChevronsUpDown className="ml-auto size-4" />
             </SidebarMenuButton>
@@ -230,9 +206,9 @@ export function NavUser() {
           >
             <DropdownMenuLabel className="p-0 font-normal">
               <div className="flex items-center gap-2 px-1 py-1.5 text-left text-sm">
-                {user.image ? (
+                {viewer.image ? (
                   <Avatar className="h-8 w-8 rounded-lg">
-                    <AvatarImage src={user.image} alt={displayName} />
+                    <AvatarImage src={viewer.image} alt={displayName} />
                     <AvatarFallback className="rounded-lg">U</AvatarFallback>
                   </Avatar>
                 ) : (
@@ -244,7 +220,7 @@ export function NavUser() {
                 )}
                 <div className="grid flex-1 text-left text-sm leading-tight">
                   <span className="truncate font-medium">{displayName}</span>
-                  <span className="truncate text-xs">{user.email}</span>
+                  <span className="truncate text-xs">{viewer.email}</span>
                   <span className="truncate text-xs text-muted-foreground">
                     {company ? `${company.code} - ${company.name}` : "No company configured"}
                   </span>
@@ -257,8 +233,18 @@ export function NavUser() {
               {isManager ? "Edit Company" : "View Company"}
             </DropdownMenuItem>
             <DropdownMenuItem onClick={() => router.push("/configuration/company")}>
-              <ShieldCheck />
+              <Settings2 />
               Company Configuration
+            </DropdownMenuItem>
+            {isAdmin ? (
+              <DropdownMenuItem onClick={() => router.push("/billing/plans")}>
+                <CircleDollarSign />
+                Plans & Billing
+              </DropdownMenuItem>
+            ) : null}
+            <DropdownMenuItem onClick={() => router.push("/support/contact-us")}>
+              <LifeBuoy />
+              Contact Us
             </DropdownMenuItem>
             <DropdownMenuItem onClick={() => void onLogout()}>
               <LogOut />
@@ -282,6 +268,34 @@ export function NavUser() {
                   setCompanyForm((prev) => ({ ...prev, code: e.target.value.toUpperCase() }))
                 }
               />
+            </div>
+            <div className="space-y-2">
+              <Label>Base Currency Code</Label>
+              <Input
+                value={companyForm.baseCurrencyCode}
+                disabled={!isManager}
+                onChange={(e) =>
+                  setCompanyForm((prev) => ({
+                    ...prev,
+                    baseCurrencyCode: e.target.value.toUpperCase(),
+                  }))
+                }
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Help Documentation</Label>
+              <div className="flex h-10 items-center justify-between rounded-md border px-3">
+                <span className="text-sm text-muted-foreground">
+                  {companyForm.helpEnabled ? "Enabled" : "Disabled"}
+                </span>
+                <Switch
+                  checked={companyForm.helpEnabled}
+                  disabled={!isManager}
+                  onCheckedChange={(checked) =>
+                    setCompanyForm((prev) => ({ ...prev, helpEnabled: checked }))
+                  }
+                />
+              </div>
             </div>
             <div className="space-y-2">
               <Label>Secret Code</Label>

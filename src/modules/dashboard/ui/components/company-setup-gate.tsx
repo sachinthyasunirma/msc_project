@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { authClient } from "@/lib/auth-client";
+import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -14,89 +14,41 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import { useDashboardShell } from "@/modules/dashboard/ui/components/dashboard-shell-provider";
+import type {
+  DashboardAccess,
+  DashboardCompany,
+} from "@/modules/dashboard/shared/dashboard-shell-types";
 
-type CompanyPayload = {
-  id: string;
-  code: string;
-  joinSecretCode: string | null;
-  managerPrivilegeCode: string | null;
-  name: string;
-  email: string;
-  country: string | null;
-  image: string | null;
-};
+function toFormState(company: DashboardCompany | null, email: string) {
+  return {
+    joinExisting: false,
+    companyCode: company?.code ?? "",
+    secretCode: company?.joinSecretCode ?? "",
+    privilegeCode: company?.managerPrivilegeCode ?? "",
+    name: company?.name ?? "",
+    email: company?.email ?? email,
+    baseCurrencyCode: company?.baseCurrencyCode ?? "USD",
+    helpEnabled: company?.helpEnabled ?? true,
+    country: company?.country ?? "",
+    image: company?.image ?? "",
+  };
+}
 
 export function CompanySetupGate() {
-  const { data: session, isPending } = authClient.useSession();
-  const [loading, setLoading] = useState(true);
+  const router = useRouter();
+  const { company, needsSetup, updateShellData, viewer } = useDashboardShell();
   const [saving, setSaving] = useState(false);
-  const [needsSetup, setNeedsSetup] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [form, setForm] = useState({
-    joinExisting: false,
-    companyCode: "",
-    secretCode: "",
-    privilegeCode: "",
-    name: "",
-    email: "",
-    country: "",
-    image: "",
-  });
+  const [form, setForm] = useState(() => toFormState(company, viewer?.email ?? ""));
 
   useEffect(() => {
-    if (isPending || !session?.user) return;
-    let active = true;
-
-    (async () => {
-      setLoading(true);
-      setError(null);
-      try {
-        const response = await fetch("/api/companies/me", { cache: "no-store" });
-        const body = (await response.json()) as {
-          company?: CompanyPayload | null;
-          needsSetup?: boolean;
-          message?: string;
-        };
-        if (!response.ok) {
-          throw new Error(body.message || "Failed to load company setup.");
-        }
-        if (!active) return;
-        setNeedsSetup(Boolean(body.needsSetup));
-        if (body.company) {
-          setForm({
-            joinExisting: false,
-            companyCode: body.company.code ?? "",
-            secretCode: body.company.joinSecretCode ?? "",
-            privilegeCode: body.company.managerPrivilegeCode ?? "",
-            name: body.company.name ?? "",
-            email: body.company.email ?? "",
-            country: body.company.country ?? "",
-            image: body.company.image ?? "",
-          });
-        } else {
-          setForm((prev) => ({
-            ...prev,
-            joinExisting: false,
-            email: session.user.email || prev.email,
-          }));
-        }
-      } catch (e) {
-        if (!active) return;
-        setError(e instanceof Error ? e.message : "Failed to load company setup.");
-        setNeedsSetup(true);
-      } finally {
-        if (active) setLoading(false);
-      }
-    })();
-
-    return () => {
-      active = false;
-    };
-  }, [isPending, session?.user]);
+    setForm(toFormState(company, viewer?.email ?? ""));
+  }, [company, viewer?.email]);
 
   const isOpen = useMemo(
-    () => Boolean(session?.user) && !isPending && !loading && needsSetup,
-    [session?.user, isPending, loading, needsSetup]
+    () => Boolean(viewer) && needsSetup,
+    [needsSetup, viewer]
   );
 
   const onPickLogo = async (file: File | null) => {
@@ -108,6 +60,19 @@ export function CompanySetupGate() {
       reader.readAsDataURL(file);
     });
     setForm((prev) => ({ ...prev, image: dataUrl }));
+  };
+
+  const syncAccessState = async () => {
+    const accessResponse = await fetch("/api/companies/access-control", { cache: "no-store" });
+    const accessBody = (await accessResponse.json()) as
+      | DashboardAccess
+      | { message?: string };
+    if (!accessResponse.ok) {
+      throw new Error(
+        ("message" in accessBody && accessBody.message) || "Failed to refresh access state."
+      );
+    }
+    return accessBody as DashboardAccess;
   };
 
   const onSave = async () => {
@@ -132,6 +97,8 @@ export function CompanySetupGate() {
             secretCode: form.secretCode.toUpperCase().trim(),
             privilegeCode: form.privilegeCode.toUpperCase().trim() || null,
             country: form.country.trim() || null,
+            helpEnabled: form.helpEnabled,
+            baseCurrencyCode: form.baseCurrencyCode.trim().toUpperCase() || "USD",
             image: form.image.trim() || null,
           }
         : {
@@ -141,6 +108,8 @@ export function CompanySetupGate() {
             privilegeCode: form.privilegeCode.toUpperCase().trim() || null,
             name: form.name.trim(),
             email: form.email.trim(),
+            baseCurrencyCode: form.baseCurrencyCode.trim().toUpperCase() || "USD",
+            helpEnabled: form.helpEnabled,
             country: form.country.trim() || null,
             image: form.image.trim() || null,
           };
@@ -154,7 +123,42 @@ export function CompanySetupGate() {
       if (!response.ok) {
         throw new Error(body.message || "Failed to save company settings.");
       }
-      setNeedsSetup(false);
+
+      const nextAccess = await syncAccessState();
+      const nextCompany = form.joinExisting
+        ? company
+        : {
+            id: nextAccess.companyId,
+            code: form.companyCode.toUpperCase().trim(),
+            joinSecretCode: form.secretCode.toUpperCase().trim(),
+            managerPrivilegeCode: form.privilegeCode.toUpperCase().trim() || null,
+            name: form.name.trim(),
+            email: form.email.trim(),
+            baseCurrencyCode: form.baseCurrencyCode.trim().toUpperCase() || "USD",
+            transportRateBasis: "VEHICLE_TYPE" as const,
+            helpEnabled: form.helpEnabled,
+            subscriptionPlan: null,
+            subscriptionStatus: "PENDING" as const,
+            subscriptionStartsAt: null,
+            subscriptionEndsAt: null,
+            country: form.country.trim() || null,
+            image: form.image.trim() || null,
+          };
+
+      updateShellData({
+        company: nextCompany,
+        access: nextAccess,
+        needsSetup: false,
+        accessErrorCode: null,
+        accessErrorMessage: null,
+      });
+
+      if (form.joinExisting) {
+        router.refresh();
+      }
+      if (!form.joinExisting) {
+        router.replace("/billing/plans");
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to save company settings.");
     } finally {
@@ -231,6 +235,33 @@ export function CompanySetupGate() {
                   value={form.country}
                   onChange={(e) => setForm((prev) => ({ ...prev, country: e.target.value }))}
                 />
+              </div>
+              <div className="space-y-2">
+                <Label>Base Currency Code</Label>
+                <Input
+                  value={form.baseCurrencyCode}
+                  onChange={(e) =>
+                    setForm((prev) => ({
+                      ...prev,
+                      baseCurrencyCode: e.target.value.toUpperCase(),
+                    }))
+                  }
+                  placeholder="USD"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Help Documentation</Label>
+                <div className="flex h-10 items-center justify-between rounded-md border px-3">
+                  <span className="text-sm text-muted-foreground">
+                    {form.helpEnabled ? "Enabled" : "Disabled"}
+                  </span>
+                  <Switch
+                    checked={form.helpEnabled}
+                    onCheckedChange={(checked) =>
+                      setForm((prev) => ({ ...prev, helpEnabled: checked }))
+                    }
+                  />
+                </div>
               </div>
               <div className="space-y-2 md:col-span-2">
                 <Label>Company Logo</Label>

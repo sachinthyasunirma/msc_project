@@ -1,25 +1,49 @@
 import { SidebarProvider } from "@/components/ui/sidebar";
 import { SidebarInset } from "@/components/ui/sidebar";
+import { headers } from "next/headers";
+import { redirect } from "next/navigation";
+import { DashboardShellProvider } from "@/modules/dashboard/ui/components/dashboard-shell-provider";
 import { DashboardNavbar } from "@/modules/dashboard/ui/components/dashboard-navbar";
 import { CompanySetupGate } from "@/modules/dashboard/ui/components/company-setup-gate";
+import { DashboardScreenHelp } from "@/modules/dashboard/ui/components/dashboard-screen-help";
 import { DashboardSidebar } from "@/modules/dashboard/ui/components/dashboard-sidebar";
+import { SubscriptionGate } from "@/modules/dashboard/ui/components/subscription-gate";
 import { ViewOnlyModeBadge } from "@/modules/dashboard/ui/components/view-only-mode-badge";
+import { auth } from "@/lib/auth";
+import { loadDashboardShellData } from "@/modules/dashboard/server/dashboard-shell-service";
+import { ScreenAccessGate } from "@/modules/dashboard/ui/components/screen-access-gate";
 
 interface Props {
   children: React.ReactNode;
 }
 
-const layout = ({ children }: Props) => {
+const layout = async ({ children }: Props) => {
+  const requestHeaders = await headers();
+  const session = await auth.api.getSession({
+    headers: requestHeaders,
+  });
+
+  if (!session?.user) {
+    redirect("/sign-in");
+  }
+
+  const initialShellData = await loadDashboardShellData(requestHeaders);
+
   return (
-    <SidebarProvider>
-      <DashboardSidebar />
-      <SidebarInset className="min-h-svh bg-background">
-        <DashboardNavbar />
-        <CompanySetupGate />
-        <ViewOnlyModeBadge />
-        <div className="flex-1 bg-muted/35">{children}</div>
-      </SidebarInset>
-    </SidebarProvider>
+    <DashboardShellProvider initialData={initialShellData}>
+      <SidebarProvider>
+        <DashboardSidebar />
+        <SidebarInset className="min-h-svh bg-background">
+          <DashboardNavbar />
+          <CompanySetupGate />
+          <SubscriptionGate />
+          <ScreenAccessGate />
+          <DashboardScreenHelp />
+          <ViewOnlyModeBadge />
+          <div className="flex-1 bg-muted/35">{children}</div>
+        </SidebarInset>
+      </SidebarProvider>
+    </DashboardShellProvider>
   );
 };
 

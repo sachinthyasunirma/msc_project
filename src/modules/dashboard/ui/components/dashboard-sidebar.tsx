@@ -3,12 +3,14 @@
 import * as React from "react";
 import Link from "next/link";
 import {
+  CalendarRange,
   Command,
   LifeBuoy,
   Send,
   Settings2,
   ShieldCheck,
   SquareTerminal,
+  Trash2,
 } from "lucide-react";
 import {
   Sidebar,
@@ -20,6 +22,7 @@ import {
   SidebarMenuItem,
 } from "@/components/ui/sidebar";
 import { NavUser } from "@/modules/dashboard/ui/components/nav-user";
+import { useDashboardAccessState } from "@/modules/dashboard/ui/components/dashboard-shell-provider";
 import { DashboardSidebarSecondary } from "@/modules/dashboard/ui/components/dashboard-sidebar-secondary";
 import { DashboardSidebarMain } from "./dashboard-sidebar-main";
 
@@ -58,6 +61,41 @@ const data = {
           title: "Transport",
           url: "/master-data/transports",
         },
+        {
+          title: "Guides",
+          url: "/master-data/guides",
+        },
+        {
+          title: "Currency",
+          url: "/master-data/currencies",
+        },
+        {
+          title: "Taxes",
+          url: "/master-data/taxes",
+        },
+        {
+          title: "Tour Categories",
+          url: "/master-data/tour-categories",
+        },
+        {
+          title: "Operator & Market",
+          url: "/master-data/business-network",
+        },
+      ],
+    },
+    {
+      title: "Tours",
+      url: "/master-data/pre-tours",
+      icon: CalendarRange,
+      items: [
+        {
+          title: "Pre-Tours",
+          url: "/master-data/pre-tours",
+        },
+        {
+          title: "Field Visits",
+          url: "/master-data/technical-visits",
+        },
       ],
     },
     {
@@ -69,13 +107,22 @@ const data = {
           title: "Company & Users",
           url: "/configuration/company",
         },
+        {
+          title: "Plans & Billing",
+          url: "/billing/plans",
+        },
       ],
     },
   ],
   navSecondary: [
     {
+      title: "Bin",
+      url: "/bin",
+      icon: Trash2,
+    },
+    {
       title: "Support",
-      url: "#",
+      url: "/support/contact-us",
       icon: LifeBuoy,
     },
     {
@@ -89,6 +136,48 @@ const data = {
 export function DashboardSidebar({
   ...props
 }: React.ComponentProps<typeof Sidebar>) {
+  const { privileges } = useDashboardAccessState();
+
+  const has = (code: string) => privileges.includes(code);
+
+  const navMain = data.navMain
+    .filter((item) => {
+      if (item.title === "Master Data") return has("NAV_MASTER_DATA");
+      if (item.title === "Tours") return has("NAV_TOURS");
+      if (item.title === "Configuration") return has("NAV_CONFIGURATION");
+      return has("NAV_DASHBOARD");
+    })
+    .map((item) => {
+      if (!item.items) return item;
+      const filteredSubItems = item.items.filter((subItem) => {
+        const byUrl: Record<string, string> = {
+          "/master-data/accommodations": "SCREEN_MASTER_ACCOMMODATIONS",
+          "/master-data/seasons": "SCREEN_MASTER_SEASONS",
+          "/master-data/activities": "SCREEN_MASTER_ACTIVITIES",
+          "/master-data/transports": "SCREEN_MASTER_TRANSPORTS",
+          "/master-data/guides": "SCREEN_MASTER_GUIDES",
+          "/master-data/currencies": "SCREEN_MASTER_CURRENCIES",
+          "/master-data/taxes": "SCREEN_MASTER_TAXES",
+          "/master-data/tour-categories": "SCREEN_MASTER_TOUR_CATEGORIES",
+          "/master-data/business-network": "SCREEN_MASTER_BUSINESS_NETWORK",
+          "/master-data/pre-tours": "SCREEN_PRE_TOURS",
+          "/master-data/technical-visits": "SCREEN_TECHNICAL_VISITS",
+          "/configuration/company": "SCREEN_CONFIGURATION_COMPANY",
+          "/billing/plans": "SUBSCRIPTION_MANAGE",
+        };
+        return has(byUrl[subItem.url] ?? "NAV_DASHBOARD");
+      });
+      return {
+        ...item,
+        items: filteredSubItems,
+      };
+    })
+    .filter((item) => !item.items || item.items.length > 0);
+
+  const navSecondary = data.navSecondary.filter((item) =>
+    item.url === "/bin" ? has("SCREEN_BIN") || has("NAV_BIN") : true
+  );
+
   return (
     <Sidebar variant="inset" {...props}>
       <SidebarHeader>
@@ -109,8 +198,8 @@ export function DashboardSidebar({
         </SidebarMenu>
       </SidebarHeader>
       <SidebarContent>
-        <DashboardSidebarMain items={data.navMain} />
-        <DashboardSidebarSecondary items={data.navSecondary} className="mt-auto" />
+        <DashboardSidebarMain items={navMain} />
+        <DashboardSidebarSecondary items={navSecondary} className="mt-auto" />
       </SidebarContent>
       <SidebarFooter>
         <NavUser />

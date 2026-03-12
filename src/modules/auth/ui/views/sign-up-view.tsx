@@ -216,7 +216,8 @@ export const SignUpView = () => {
       </Card>
       <div className="text-muted-foreground *:[a]:hover:text-primary text-center text-xs text-balance *:[a]:underline *:[a]:underline-offset-4">
         By clicking continue, you are agree to our{" "}
-        <a href="#">Terms and Conditions</a> and <a href="#">Privacy Policy</a>
+        <Link href="/terms-and-conditions">Terms and Conditions</Link> and{" "}
+        <Link href="/privacy-policy">Privacy Policy</Link>
       </div>
     </div>
   );
