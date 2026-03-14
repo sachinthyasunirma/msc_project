@@ -11,7 +11,6 @@ import { AvailabilityTab } from "@/modules/accommodation/ui/components/accommoda
 import { ContractingTab } from "@/modules/accommodation/ui/components/accommodation-manage/contracting-tab";
 import { ImagesTab } from "@/modules/accommodation/ui/components/accommodation-manage/images-tab";
 import { RoomTypesTab } from "@/modules/accommodation/ui/components/accommodation-manage/room-types-tab";
-import type { AccommodationRoomRatesInitialData } from "@/modules/accommodation/shared/accommodation-room-rates.types";
 import type { HotelContractingBundle } from "@/modules/accommodation/shared/accommodation-contracting-types";
 import { AccommodationRoomRatesTab } from "@/modules/accommodation/ui/components/manage-tabs/accommodation-room-rates-tab";
 
@@ -23,7 +22,6 @@ type AccommodationHotelDetailCardProps = {
   availability: Availability[];
   contracting: HotelContractingBundle | null;
   isReadOnly: boolean;
-  initialRoomRatesData?: AccommodationRoomRatesInitialData | null;
   onAddRoomType: () => void;
   onEditRoomType: (row: RoomType) => void;
   onDeleteRoomType: (row: RoomType) => void;
@@ -40,7 +38,6 @@ function AccommodationHotelDetailCardComponent({
   availability,
   contracting,
   isReadOnly,
-  initialRoomRatesData = null,
   onAddRoomType,
   onEditRoomType,
   onDeleteRoomType,
@@ -89,11 +86,10 @@ function AccommodationHotelDetailCardComponent({
 
             <TabsContent value="room-rates">
               <AccommodationRoomRatesTab
-                hotelId={selectedHotel.id}
-                isReadOnly={isReadOnly}
+                loadingDetails={loadingDetails}
+                contracting={contracting}
                 roomTypes={roomTypes}
-                roomTypesLoading={loadingDetails && roomTypes.length === 0}
-                initialData={initialRoomRatesData}
+                isReadOnly={isReadOnly}
               />
             </TabsContent>
 

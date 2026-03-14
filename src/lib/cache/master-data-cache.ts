@@ -15,6 +15,7 @@ const inflight = new Map<string, Promise<unknown>>();
 let redisClient: Redis | null = null;
 let redisDisabled = false;
 let lastLocalCacheSweepAt = 0;
+let redisErrorHandled = false;
 
 function nowMs() {
   return Date.now();
@@ -42,6 +43,21 @@ async function getRedisClient() {
     lazyConnect: true,
     maxRetriesPerRequest: 1,
     enableReadyCheck: true,
+  });
+  client.on("error", () => {
+    if (redisDisabled) return;
+    redisDisabled = true;
+    if (redisClient === client) {
+      redisClient = null;
+    }
+    if (!redisErrorHandled) {
+      redisErrorHandled = true;
+    }
+    try {
+      client.disconnect();
+    } catch {
+      // no-op
+    }
   });
   try {
     await client.connect();

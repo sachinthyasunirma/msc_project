@@ -139,25 +139,22 @@ export function ContractingTab({
 
       <Accordion type="multiple" className="rounded-lg border border-border/70 bg-card px-4">
         <AccordionItem value="contracts">
-          <AccordionTrigger>
-            <div className="flex w-full items-center justify-between gap-3 pr-2">
+          <div className="flex items-center gap-3">
+            <AccordionTrigger className="min-w-0 flex-1">
               <span>Hotel Contracts</span>
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                onClick={(event) => {
-                  event.preventDefault();
-                  event.stopPropagation();
-                  contractingState.openContractDialog("create");
-                }}
-                disabled={isReadOnly || contractingState.saving}
-              >
-                <Plus className="mr-2 size-4" />
-                Add Contract
-              </Button>
-            </div>
-          </AccordionTrigger>
+            </AccordionTrigger>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => contractingState.openContractDialog("create")}
+              disabled={isReadOnly || contractingState.saving}
+              className="shrink-0"
+            >
+              <Plus className="mr-2 size-4" />
+              Add Contract
+            </Button>
+          </div>
           <AccordionContent>
             <Table>
               <TableHeader>
@@ -232,8 +229,8 @@ export function ContractingTab({
         </AccordionItem>
 
         <AccordionItem value="rate-plans">
-          <AccordionTrigger>
-            <div className="flex w-full items-center justify-between gap-3 pr-2">
+          <div className="flex items-center gap-3">
+            <AccordionTrigger className="min-w-0 flex-1">
               <div>
                 <div>Rate Plans & Occupancy Buying</div>
                 <div className="text-xs font-normal text-muted-foreground">
@@ -242,22 +239,19 @@ export function ContractingTab({
                     : "Select a contract to manage its plans"}
                 </div>
               </div>
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                onClick={(event) => {
-                  event.preventDefault();
-                  event.stopPropagation();
-                  contractingState.openRatePlanDialog("create");
-                }}
-                disabled={isReadOnly || contractingState.saving || !contractingState.selectedContractId}
-              >
-                <Plus className="mr-2 size-4" />
-                Add Rate Plan
-              </Button>
-            </div>
-          </AccordionTrigger>
+            </AccordionTrigger>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => contractingState.openRatePlanDialog("create")}
+              disabled={isReadOnly || contractingState.saving || !contractingState.selectedContractId}
+              className="shrink-0"
+            >
+              <Plus className="mr-2 size-4" />
+              Add Rate Plan
+            </Button>
+          </div>
           <AccordionContent className="space-y-4">
             <Table>
               <TableHeader>
@@ -716,25 +710,22 @@ export function ContractingTab({
         </AccordionItem>
 
         <AccordionItem value="inventory">
-          <AccordionTrigger>
-            <div className="flex w-full items-center justify-between gap-3 pr-2">
+          <div className="flex items-center gap-3">
+            <AccordionTrigger className="min-w-0 flex-1">
               <span>Inventory Snapshot</span>
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                onClick={(event) => {
-                  event.preventDefault();
-                  event.stopPropagation();
-                  contractingState.openInventoryDayDialog("create");
-                }}
-                disabled={isReadOnly || contractingState.saving}
-              >
-                <Plus className="mr-2 size-4" />
-                Add Inventory Day
-              </Button>
-            </div>
-          </AccordionTrigger>
+            </AccordionTrigger>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => contractingState.openInventoryDayDialog("create")}
+              disabled={isReadOnly || contractingState.saving}
+              className="shrink-0"
+            >
+              <Plus className="mr-2 size-4" />
+              Add Inventory Day
+            </Button>
+          </div>
           <AccordionContent>
             <Table>
               <TableHeader>

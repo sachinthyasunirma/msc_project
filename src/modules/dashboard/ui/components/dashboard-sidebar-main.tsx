@@ -1,6 +1,5 @@
 "use client"
 
-import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { ChevronRight, type LucideIcon } from "lucide-react"
 
@@ -20,6 +19,8 @@ import {
   SidebarMenuSubButton,
   SidebarMenuSubItem,
 } from "@/components/ui/sidebar"
+import { useDashboardNavigationState } from "@/modules/dashboard/ui/components/dashboard-navigation-provider"
+import { DashboardSidebarNavLink } from "@/modules/dashboard/ui/components/dashboard-sidebar-nav-link"
 
 export function DashboardSidebarMain({
   items,
@@ -36,6 +37,7 @@ export function DashboardSidebarMain({
   }[]
 }) {
   const pathname = usePathname()
+  const { isPendingHref } = useDashboardNavigationState()
 
   return (
     <SidebarGroup>
@@ -57,13 +59,15 @@ export function DashboardSidebarMain({
                 tooltip={item.title}
                 isActive={
                   pathname === item.url ||
-                  Boolean(item.items?.some((subItem) => pathname === subItem.url))
+                  Boolean(item.items?.some((subItem) => pathname === subItem.url)) ||
+                  isPendingHref(item.url)
                 }
+                className={isPendingHref(item.url) ? "ring-1 ring-sidebar-ring/70" : undefined}
               >
-                <Link href={item.url}>
+                <DashboardSidebarNavLink href={item.url} label={item.title}>
                   <item.icon />
                   <span>{item.title}</span>
-                </Link>
+                </DashboardSidebarNavLink>
               </SidebarMenuButton>
               {item.items?.length ? (
                 <>
@@ -77,10 +81,14 @@ export function DashboardSidebarMain({
                     <SidebarMenuSub>
                       {item.items?.map((subItem) => (
                         <SidebarMenuSubItem key={subItem.title}>
-                          <SidebarMenuSubButton asChild isActive={pathname === subItem.url}>
-                            <Link href={subItem.url}>
+                          <SidebarMenuSubButton
+                            asChild
+                            isActive={pathname === subItem.url || isPendingHref(subItem.url)}
+                            className={isPendingHref(subItem.url) ? "ring-1 ring-sidebar-ring/60" : undefined}
+                          >
+                            <DashboardSidebarNavLink href={subItem.url} label={subItem.title}>
                               <span>{subItem.title}</span>
-                            </Link>
+                            </DashboardSidebarNavLink>
                           </SidebarMenuSubButton>
                         </SidebarMenuSubItem>
                       ))}

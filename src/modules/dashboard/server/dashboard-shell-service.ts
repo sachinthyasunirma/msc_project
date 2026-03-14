@@ -1,14 +1,18 @@
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { company } from "@/db/schema";
-import { auth } from "@/lib/auth";
-import { AccessControlError, resolveAccess } from "@/lib/security/access-control";
+import {
+  AccessControlError,
+  getCachedSession,
+  resolveAccess,
+} from "@/lib/security/access-control";
 import type {
   DashboardAccess,
   DashboardCompany,
   DashboardShellData,
   DashboardViewer,
 } from "@/modules/dashboard/shared/dashboard-shell-types";
+import type { TransportRateBasis } from "@/modules/dashboard/shared/company-configuration-types";
 
 function isCompanyConfigured(record: {
   code: string | null;
@@ -42,7 +46,7 @@ function createViewer(
 export async function loadDashboardShellData(
   requestHeaders: Headers
 ): Promise<DashboardShellData> {
-  const session = await auth.api.getSession({ headers: requestHeaders });
+  const session = await getCachedSession(requestHeaders);
   const sessionUser = session?.user as
     | {
         id?: string;
@@ -63,6 +67,13 @@ export async function loadDashboardShellData(
       accessErrorMessage: null,
     };
   }
+
+  const viewerUser = {
+    id: String(sessionUser.id),
+    name: sessionUser.name,
+    email: sessionUser.email,
+    image: sessionUser.image,
+  };
 
   let companyData: DashboardCompany | null = null;
   let accessData: DashboardAccess | null = null;
@@ -102,7 +113,8 @@ export async function loadDashboardShellData(
         name: record.name ?? "",
         email: record.email ?? "",
         baseCurrencyCode: record.baseCurrencyCode ?? "USD",
-        transportRateBasis: record.transportRateBasis ?? "VEHICLE_TYPE",
+        transportRateBasis:
+          (record.transportRateBasis as TransportRateBasis | null) ?? "VEHICLE_TYPE",
         helpEnabled: record.helpEnabled ?? true,
         subscriptionPlan: record.subscriptionPlan ?? null,
         subscriptionStatus: record.subscriptionStatus,
@@ -148,7 +160,7 @@ export async function loadDashboardShellData(
     });
 
   return {
-    viewer: createViewer(sessionUser, accessData),
+    viewer: createViewer(viewerUser, accessData),
     company: companyData,
     access: accessData,
     needsSetup,

@@ -1,5 +1,6 @@
 "use client";
 
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useConfirm } from "@/components/app-confirm-provider";
 import { notify } from "@/lib/notify";
@@ -30,6 +31,7 @@ import {
   updateAccommodationRatePlan,
   updateAccommodationRateRestriction,
 } from "@/modules/accommodation/lib/accommodation-contracting-api";
+import { accommodationKeys } from "@/modules/accommodation/lib/accommodation-query";
 import { listBusinessNetworkRecords } from "@/modules/business-network/lib/business-network-api";
 import { useAccommodationFormDialog } from "@/modules/accommodation/lib/use-accommodation-form-dialog";
 import type {
@@ -235,15 +237,13 @@ export function useAccommodationContractingTab({
   isReadOnly,
 }: UseAccommodationContractingTabOptions) {
   const confirm = useConfirm();
-  const [contracting, setContracting] = useState<HotelContractingBundle | null>(initialContracting);
-  const [loading, setLoading] = useState(false);
+  const queryClient = useQueryClient();
   const [saving, setSaving] = useState(false);
   const [selectedContractId, setSelectedContractId] = useState(initialContracting?.contracts[0]?.id ?? "");
   const [selectedRatePlanId, setSelectedRatePlanId] = useState(initialContracting?.ratePlans[0]?.id ?? "");
   const [selectedCancellationPolicyId, setSelectedCancellationPolicyId] = useState(
     initialContracting?.cancellationPolicies[0]?.id ?? ""
   );
-  const [supplierOptions, setSupplierOptions] = useState<Array<{ value: string; label: string }>>([]);
 
   const contractDialog = useAccommodationFormDialog<AccommodationContractFormState, HotelContractRecord>(
     createContractForm
@@ -276,56 +276,63 @@ export function useAccommodationContractingTab({
     HotelInventoryDayRecord
   >(createInventoryDayForm);
 
-  const refresh = useCallback(async () => {
-    setLoading(true);
-    try {
+  const {
+    data: contracting = null,
+    isFetching: contractingLoading,
+    error: contractingError,
+    refetch: refetchContracting,
+  } = useQuery({
+    queryKey: accommodationKeys.hotelContracting(hotelId),
+    queryFn: async () => {
       const payload = await getAccommodationContractingBundle(hotelId);
-      setContracting(payload.contracting);
-      setSelectedContractId((current) => {
-        if (current && payload.contracting.contracts.some((row) => row.id === current)) {
-          return current;
-        }
-        return payload.contracting.contracts[0]?.id ?? "";
+      return payload.contracting;
+    },
+    initialData: initialContracting ?? undefined,
+  });
+
+  const {
+    data: supplierOptions = [],
+    isFetching: supplierOptionsLoading,
+    error: supplierOptionsError,
+  } = useQuery({
+    queryKey: accommodationKeys.supplierOrganizations(),
+    queryFn: async () => {
+      const rows = await listBusinessNetworkRecords("organizations", { limit: 300 });
+      return rows.map((row) => ({
+        value: String(row.id),
+        label: `${String(row.code ?? row.id)} - ${String(row.name ?? "Organization")}`,
+      }));
+    },
+  });
+
+  const refresh = useCallback(async () => {
+    try {
+      await queryClient.invalidateQueries({
+        queryKey: accommodationKeys.hotelContracting(hotelId),
       });
-      setSelectedRatePlanId((current) => {
-        if (current && payload.contracting.ratePlans.some((row) => row.id === current)) {
-          return current;
-        }
-        return payload.contracting.ratePlans[0]?.id ?? "";
-      });
-      setSelectedCancellationPolicyId((current) => {
-        if (current && payload.contracting.cancellationPolicies.some((row) => row.id === current)) {
-          return current;
-        }
-        return payload.contracting.cancellationPolicies[0]?.id ?? "";
-      });
+      await refetchContracting();
     } catch (error) {
       notify.error(error instanceof Error ? error.message : "Failed to refresh accommodation contracting.");
-    } finally {
-      setLoading(false);
     }
-  }, [hotelId]);
+  }, [hotelId, queryClient, refetchContracting]);
 
   useEffect(() => {
-    let active = true;
-    listBusinessNetworkRecords("organizations", { limit: 300 })
-      .then((rows) => {
-        if (!active) return;
-        const options = rows.map((row) => ({
-          value: String(row.id),
-          label: `${String(row.code ?? row.id)} - ${String(row.name ?? "Organization")}`,
-        }));
-        setSupplierOptions(options);
-      })
-      .catch(() => {
-        if (active) {
-          setSupplierOptions([]);
-        }
-      });
-    return () => {
-      active = false;
-    };
-  }, []);
+    if (!contractingError) return;
+    notify.error(
+      contractingError instanceof Error
+        ? contractingError.message
+        : "Failed to load accommodation contracting."
+    );
+  }, [contractingError]);
+
+  useEffect(() => {
+    if (!supplierOptionsError) return;
+    notify.error(
+      supplierOptionsError instanceof Error
+        ? supplierOptionsError.message
+        : "Failed to load supplier organizations."
+    );
+  }, [supplierOptionsError]);
 
   const selectedContract = useMemo(
     () => contracting?.contracts.find((row) => row.id === selectedContractId) ?? null,
@@ -386,6 +393,8 @@ export function useAccommodationContractingTab({
       return contracting?.cancellationPolicies[0]?.id ?? "";
     });
   }, [contracting]);
+
+  const loading = contractingLoading || supplierOptionsLoading;
 
   const guardReadOnly = useCallback(() => {
     if (!isReadOnly) return false;
@@ -501,17 +510,9 @@ export function useAccommodationContractingTab({
         contractDialog.dialog.mode === "create"
           ? await createAccommodationHotelContract(hotelId, payload)
           : await updateAccommodationHotelContract(String(contractDialog.dialog.row?.id), payload);
-
-      setContracting((current) => {
-        if (!current) return current;
-        const contracts =
-          contractDialog.dialog.mode === "create"
-            ? [...current.contracts, next]
-            : current.contracts.map((row) => (row.id === next.id ? next : row));
-        return { ...current, contracts };
-      });
       setSelectedContractId(next.id);
       contractDialog.closeDialog();
+      await refresh();
       notify.success(
         contractDialog.dialog.mode === "create"
           ? "Hotel contract created."
@@ -522,7 +523,7 @@ export function useAccommodationContractingTab({
     } finally {
       setSaving(false);
     }
-  }, [contractDialog, hotelId]);
+  }, [contractDialog, hotelId, refresh]);
 
   const deleteContract = useCallback(
     async (row: HotelContractRecord) => {
@@ -569,17 +570,9 @@ export function useAccommodationContractingTab({
         ratePlanDialog.dialog.mode === "create"
           ? await createAccommodationRatePlan(selectedContractId, payload)
           : await updateAccommodationRatePlan(String(ratePlanDialog.dialog.row?.id), payload);
-
-      setContracting((current) => {
-        if (!current) return current;
-        const ratePlans =
-          ratePlanDialog.dialog.mode === "create"
-            ? [...current.ratePlans, next]
-            : current.ratePlans.map((row) => (row.id === next.id ? next : row));
-        return { ...current, ratePlans };
-      });
       setSelectedRatePlanId(next.id);
       ratePlanDialog.closeDialog();
+      await refresh();
       notify.success(
         ratePlanDialog.dialog.mode === "create" ? "Rate plan created." : "Rate plan updated."
       );
@@ -588,7 +581,7 @@ export function useAccommodationContractingTab({
     } finally {
       setSaving(false);
     }
-  }, [ratePlanDialog, selectedContractId]);
+  }, [ratePlanDialog, refresh, selectedContractId]);
 
   const deleteRatePlan = useCallback(
     async (row: HotelRatePlanRecord) => {
@@ -604,17 +597,10 @@ export function useAccommodationContractingTab({
       try {
         setSaving(true);
         await deleteAccommodationRatePlan(row.id);
-        setContracting((current) => {
-          if (!current) return current;
-          return {
-            ...current,
-            ratePlans: current.ratePlans.filter((plan) => plan.id !== row.id),
-            roomRates: current.roomRates.filter((rate) => rate.ratePlanId !== row.id),
-            restrictions: current.restrictions.filter((restriction) => restriction.ratePlanId !== row.id),
-            feeRules: current.feeRules.filter((feeRule) => feeRule.ratePlanId !== row.id),
-          };
-        });
-        setSelectedRatePlanId((current) => (current === row.id ? "" : current));
+        if (selectedRatePlanId === row.id) {
+          setSelectedRatePlanId("");
+        }
+        await refresh();
         notify.success("Rate plan deleted.");
       } catch (error) {
         notify.error(error instanceof Error ? error.message : "Failed to delete rate plan.");
@@ -622,7 +608,7 @@ export function useAccommodationContractingTab({
         setSaving(false);
       }
     },
-    [confirm, guardReadOnly]
+    [confirm, guardReadOnly, refresh, selectedRatePlanId]
   );
 
   const submitRoomRate = useCallback(async () => {
@@ -649,20 +635,13 @@ export function useAccommodationContractingTab({
           ? Number(roomRateDialog.form.singleSupplementRate)
           : null,
       };
-      const next =
-        roomRateDialog.dialog.mode === "create"
-          ? await createAccommodationRoomRate(selectedRatePlanId, payload)
-          : await updateAccommodationRoomRate(String(roomRateDialog.dialog.row?.id), payload);
-
-      setContracting((current) => {
-        if (!current) return current;
-        const roomRates =
-          roomRateDialog.dialog.mode === "create"
-            ? [...current.roomRates, next]
-            : current.roomRates.map((row) => (row.id === next.id ? next : row));
-        return { ...current, roomRates };
-      });
+      if (roomRateDialog.dialog.mode === "create") {
+        await createAccommodationRoomRate(selectedRatePlanId, payload);
+      } else {
+        await updateAccommodationRoomRate(String(roomRateDialog.dialog.row?.id), payload);
+      }
       roomRateDialog.closeDialog();
+      await refresh();
       notify.success(
         roomRateDialog.dialog.mode === "create" ? "Room rate created." : "Room rate updated."
       );
@@ -671,7 +650,7 @@ export function useAccommodationContractingTab({
     } finally {
       setSaving(false);
     }
-  }, [roomRateDialog, selectedRatePlanId]);
+  }, [refresh, roomRateDialog, selectedRatePlanId]);
 
   const deleteRoomRate = useCallback(
     async (row: HotelRoomRateRecord) => {
@@ -687,13 +666,7 @@ export function useAccommodationContractingTab({
       try {
         setSaving(true);
         await deleteAccommodationRoomRate(row.id);
-        setContracting((current) => {
-          if (!current) return current;
-          return {
-            ...current,
-            roomRates: current.roomRates.filter((rate) => rate.id !== row.id),
-          };
-        });
+        await refresh();
         notify.success("Room rate deleted.");
       } catch (error) {
         notify.error(error instanceof Error ? error.message : "Failed to delete room rate.");
@@ -701,7 +674,7 @@ export function useAccommodationContractingTab({
         setSaving(false);
       }
     },
-    [confirm, guardReadOnly]
+    [confirm, guardReadOnly, refresh]
   );
 
   const submitRestriction = useCallback(async () => {
@@ -721,20 +694,16 @@ export function useAccommodationContractingTab({
         releaseDays: restrictionDialog.form.releaseDays ? Number(restrictionDialog.form.releaseDays) : null,
         notes: restrictionDialog.form.notes || null,
       };
-      const next =
-        restrictionDialog.dialog.mode === "create"
-          ? await createAccommodationRateRestriction(selectedRatePlanId, payload)
-          : await updateAccommodationRateRestriction(String(restrictionDialog.dialog.row?.id), payload);
-
-      setContracting((current) => {
-        if (!current) return current;
-        const restrictions =
-          restrictionDialog.dialog.mode === "create"
-            ? [...current.restrictions, next]
-            : current.restrictions.map((row) => (row.id === next.id ? next : row));
-        return { ...current, restrictions };
-      });
+      if (restrictionDialog.dialog.mode === "create") {
+        await createAccommodationRateRestriction(selectedRatePlanId, payload);
+      } else {
+        await updateAccommodationRateRestriction(
+          String(restrictionDialog.dialog.row?.id),
+          payload
+        );
+      }
       restrictionDialog.closeDialog();
+      await refresh();
       notify.success(
         restrictionDialog.dialog.mode === "create"
           ? "Restriction created."
@@ -745,7 +714,7 @@ export function useAccommodationContractingTab({
     } finally {
       setSaving(false);
     }
-  }, [restrictionDialog, selectedRatePlanId]);
+  }, [refresh, restrictionDialog, selectedRatePlanId]);
 
   const deleteRestriction = useCallback(
     async (row: HotelRateRestrictionRecord) => {
@@ -761,13 +730,7 @@ export function useAccommodationContractingTab({
       try {
         setSaving(true);
         await deleteAccommodationRateRestriction(row.id);
-        setContracting((current) => {
-          if (!current) return current;
-          return {
-            ...current,
-            restrictions: current.restrictions.filter((restriction) => restriction.id !== row.id),
-          };
-        });
+        await refresh();
         notify.success("Restriction deleted.");
       } catch (error) {
         notify.error(error instanceof Error ? error.message : "Failed to delete restriction.");
@@ -775,7 +738,7 @@ export function useAccommodationContractingTab({
         setSaving(false);
       }
     },
-    [confirm, guardReadOnly]
+    [confirm, guardReadOnly, refresh]
   );
 
   const submitFeeRule = useCallback(async () => {
@@ -793,20 +756,13 @@ export function useAccommodationContractingTab({
         validTo: feeRuleDialog.form.validTo || null,
         remarks: feeRuleDialog.form.remarks || null,
       };
-      const next =
-        feeRuleDialog.dialog.mode === "create"
-          ? await createAccommodationFeeRule(selectedRatePlanId, payload)
-          : await updateAccommodationFeeRule(String(feeRuleDialog.dialog.row?.id), payload);
-
-      setContracting((current) => {
-        if (!current) return current;
-        const feeRules =
-          feeRuleDialog.dialog.mode === "create"
-            ? [...current.feeRules, next]
-            : current.feeRules.map((row) => (row.id === next.id ? next : row));
-        return { ...current, feeRules };
-      });
+      if (feeRuleDialog.dialog.mode === "create") {
+        await createAccommodationFeeRule(selectedRatePlanId, payload);
+      } else {
+        await updateAccommodationFeeRule(String(feeRuleDialog.dialog.row?.id), payload);
+      }
       feeRuleDialog.closeDialog();
+      await refresh();
       notify.success(
         feeRuleDialog.dialog.mode === "create"
           ? "Fee rule created."
@@ -817,7 +773,7 @@ export function useAccommodationContractingTab({
     } finally {
       setSaving(false);
     }
-  }, [feeRuleDialog, selectedRatePlanId]);
+  }, [feeRuleDialog, refresh, selectedRatePlanId]);
 
   const deleteFeeRule = useCallback(
     async (row: HotelFeeRuleRecord) => {
@@ -833,13 +789,7 @@ export function useAccommodationContractingTab({
       try {
         setSaving(true);
         await deleteAccommodationFeeRule(row.id);
-        setContracting((current) => {
-          if (!current) return current;
-          return {
-            ...current,
-            feeRules: current.feeRules.filter((feeRule) => feeRule.id !== row.id),
-          };
-        });
+        await refresh();
         notify.success("Fee rule deleted.");
       } catch (error) {
         notify.error(error instanceof Error ? error.message : "Failed to delete fee rule.");
@@ -847,7 +797,7 @@ export function useAccommodationContractingTab({
         setSaving(false);
       }
     },
-    [confirm, guardReadOnly]
+    [confirm, guardReadOnly, refresh]
   );
 
   const submitCancellationPolicy = useCallback(async () => {
@@ -866,19 +816,9 @@ export function useAccommodationContractingTab({
               String(cancellationPolicyDialog.dialog.row?.id),
               payload
             );
-
-      setContracting((current) => {
-        if (!current) return current;
-        const cancellationPolicies =
-          cancellationPolicyDialog.dialog.mode === "create"
-            ? [...current.cancellationPolicies, next]
-            : current.cancellationPolicies.map((row) => (row.id === next.id ? next : row)).map((row) =>
-                next.isDefault && row.id !== next.id ? { ...row, isDefault: false } : row
-              );
-        return { ...current, cancellationPolicies };
-      });
       setSelectedCancellationPolicyId(next.id);
       cancellationPolicyDialog.closeDialog();
+      await refresh();
       notify.success(
         cancellationPolicyDialog.dialog.mode === "create"
           ? "Cancellation policy created."
@@ -889,7 +829,7 @@ export function useAccommodationContractingTab({
     } finally {
       setSaving(false);
     }
-  }, [cancellationPolicyDialog, hotelId]);
+  }, [cancellationPolicyDialog, hotelId, refresh]);
 
   const deleteCancellationPolicy = useCallback(
     async (row: HotelCancellationPolicyRecord) => {
@@ -905,18 +845,10 @@ export function useAccommodationContractingTab({
       try {
         setSaving(true);
         await deleteAccommodationCancellationPolicy(row.id);
-        setContracting((current) => {
-          if (!current) return current;
-          return {
-            ...current,
-            cancellationPolicies: current.cancellationPolicies.filter((policy) => policy.id !== row.id),
-            cancellationPolicyRules: current.cancellationPolicyRules.filter((rule) => rule.policyId !== row.id),
-            ratePlans: current.ratePlans.map((plan) =>
-              plan.cancellationPolicyId === row.id ? { ...plan, cancellationPolicyId: null } : plan
-            ),
-          };
-        });
-        setSelectedCancellationPolicyId((current) => (current === row.id ? "" : current));
+        if (selectedCancellationPolicyId === row.id) {
+          setSelectedCancellationPolicyId("");
+        }
+        await refresh();
         notify.success("Cancellation policy deleted.");
       } catch (error) {
         notify.error(error instanceof Error ? error.message : "Failed to delete cancellation policy.");
@@ -924,7 +856,7 @@ export function useAccommodationContractingTab({
         setSaving(false);
       }
     },
-    [confirm, guardReadOnly]
+    [confirm, guardReadOnly, refresh, selectedCancellationPolicyId]
   );
 
   const submitCancellationPolicyRule = useCallback(async () => {
@@ -945,23 +877,16 @@ export function useAccommodationContractingTab({
         penaltyValue: Number(cancellationPolicyRuleDialog.form.penaltyValue),
         basis: cancellationPolicyRuleDialog.form.basis || null,
       };
-      const next =
-        cancellationPolicyRuleDialog.dialog.mode === "create"
-          ? await createAccommodationCancellationPolicyRule(selectedCancellationPolicyId, payload)
-          : await updateAccommodationCancellationPolicyRule(
-              String(cancellationPolicyRuleDialog.dialog.row?.id),
-              payload
-            );
-
-      setContracting((current) => {
-        if (!current) return current;
-        const cancellationPolicyRules =
-          cancellationPolicyRuleDialog.dialog.mode === "create"
-            ? [...current.cancellationPolicyRules, next]
-            : current.cancellationPolicyRules.map((row) => (row.id === next.id ? next : row));
-        return { ...current, cancellationPolicyRules };
-      });
+      if (cancellationPolicyRuleDialog.dialog.mode === "create") {
+        await createAccommodationCancellationPolicyRule(selectedCancellationPolicyId, payload);
+      } else {
+        await updateAccommodationCancellationPolicyRule(
+          String(cancellationPolicyRuleDialog.dialog.row?.id),
+          payload
+        );
+      }
       cancellationPolicyRuleDialog.closeDialog();
+      await refresh();
       notify.success(
         cancellationPolicyRuleDialog.dialog.mode === "create"
           ? "Cancellation rule created."
@@ -972,7 +897,7 @@ export function useAccommodationContractingTab({
     } finally {
       setSaving(false);
     }
-  }, [cancellationPolicyRuleDialog, selectedCancellationPolicyId]);
+  }, [cancellationPolicyRuleDialog, refresh, selectedCancellationPolicyId]);
 
   const deleteCancellationPolicyRule = useCallback(
     async (row: HotelCancellationPolicyRuleRecord) => {
@@ -988,13 +913,7 @@ export function useAccommodationContractingTab({
       try {
         setSaving(true);
         await deleteAccommodationCancellationPolicyRule(row.id);
-        setContracting((current) => {
-          if (!current) return current;
-          return {
-            ...current,
-            cancellationPolicyRules: current.cancellationPolicyRules.filter((rule) => rule.id !== row.id),
-          };
-        });
+        await refresh();
         notify.success("Cancellation rule deleted.");
       } catch (error) {
         notify.error(error instanceof Error ? error.message : "Failed to delete cancellation rule.");
@@ -1002,7 +921,7 @@ export function useAccommodationContractingTab({
         setSaving(false);
       }
     },
-    [confirm, guardReadOnly]
+    [confirm, guardReadOnly, refresh]
   );
 
   const submitInventoryDay = useCallback(async () => {
@@ -1021,20 +940,16 @@ export function useAccommodationContractingTab({
           : null,
         notes: inventoryDayDialog.form.notes || null,
       };
-      const next =
-        inventoryDayDialog.dialog.mode === "create"
-          ? await createAccommodationInventoryDay(hotelId, payload)
-          : await updateAccommodationInventoryDay(String(inventoryDayDialog.dialog.row?.id), payload);
-
-      setContracting((current) => {
-        if (!current) return current;
-        const inventoryDays =
-          inventoryDayDialog.dialog.mode === "create"
-            ? [...current.inventoryDays, next]
-            : current.inventoryDays.map((row) => (row.id === next.id ? next : row));
-        return { ...current, inventoryDays };
-      });
+      if (inventoryDayDialog.dialog.mode === "create") {
+        await createAccommodationInventoryDay(hotelId, payload);
+      } else {
+        await updateAccommodationInventoryDay(
+          String(inventoryDayDialog.dialog.row?.id),
+          payload
+        );
+      }
       inventoryDayDialog.closeDialog();
+      await refresh();
       notify.success(
         inventoryDayDialog.dialog.mode === "create"
           ? "Inventory day created."
@@ -1045,7 +960,7 @@ export function useAccommodationContractingTab({
     } finally {
       setSaving(false);
     }
-  }, [hotelId, inventoryDayDialog]);
+  }, [hotelId, inventoryDayDialog, refresh]);
 
   const deleteInventoryDay = useCallback(
     async (row: HotelInventoryDayRecord) => {
@@ -1061,13 +976,7 @@ export function useAccommodationContractingTab({
       try {
         setSaving(true);
         await deleteAccommodationInventoryDay(row.id);
-        setContracting((current) => {
-          if (!current) return current;
-          return {
-            ...current,
-            inventoryDays: current.inventoryDays.filter((inventoryDay) => inventoryDay.id !== row.id),
-          };
-        });
+        await refresh();
         notify.success("Inventory day deleted.");
       } catch (error) {
         notify.error(error instanceof Error ? error.message : "Failed to delete inventory day.");
@@ -1075,7 +984,7 @@ export function useAccommodationContractingTab({
         setSaving(false);
       }
     },
-    [confirm, guardReadOnly]
+    [confirm, guardReadOnly, refresh]
   );
 
   return {

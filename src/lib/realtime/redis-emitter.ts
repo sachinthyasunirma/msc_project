@@ -17,6 +17,13 @@ function createEmitter(): NotificationRealtimeEmitter | null {
     lazyConnect: true,
     maxRetriesPerRequest: 1,
   });
+  redis.on("error", () => {
+    try {
+      redis.disconnect();
+    } catch {
+      // no-op
+    }
+  });
   const emitter = new Emitter(redis);
 
   return {

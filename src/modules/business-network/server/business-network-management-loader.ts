@@ -1,7 +1,7 @@
 import { headers } from "next/headers";
 import { listBusinessNetworkRecords } from "@/modules/business-network/server/business-network-service";
+import type { BusinessNetworkResourceKey } from "@/modules/business-network/shared/business-network-management-config";
 import type { BusinessNetworkManagementInitialData } from "@/modules/business-network/shared/business-network-management-types";
-import type { BusinessNetworkResourceKey } from "@/modules/business-network/ui/views/business-network-management-view-impl";
 import { listCurrencyRecords } from "@/modules/currency/server/currency-service";
 import { listCompanyUsersLookup } from "@/modules/dashboard/server/company-users-lookup-service";
 

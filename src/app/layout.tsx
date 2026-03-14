@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { AppConfirmProvider } from "@/components/app-confirm-provider";
+import { AppQueryProvider } from "@/components/app-query-provider";
 import { ClientLogBootstrap } from "@/components/logging/client-log-bootstrap";
 import { Geist, Geist_Mono } from "next/font/google";
 import { AppToaster } from "@/components/app-toaster";
@@ -31,11 +32,13 @@ export default function RootLayout({
         suppressHydrationWarning
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
-        <AppConfirmProvider>
-          <ClientLogBootstrap />
-          {children}
-          <AppToaster />
-        </AppConfirmProvider>
+        <AppQueryProvider>
+          <AppConfirmProvider>
+            <ClientLogBootstrap />
+            {children}
+            <AppToaster />
+          </AppConfirmProvider>
+        </AppQueryProvider>
       </body>
     </html>
   );

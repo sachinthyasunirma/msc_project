@@ -1,10 +1,8 @@
 "use client";
 
-import { memo, useCallback, useMemo } from "react";
+import { memo, useCallback } from "react";
 import { useAccommodationHotelDetail } from "@/modules/accommodation/lib/use-accommodation-hotel-detail";
 import type { AccommodationHotelDetailData } from "@/modules/accommodation/shared/accommodation-detail-types";
-import type { AccommodationRoomRatesInitialData } from "@/modules/accommodation/shared/accommodation-room-rates.types";
-import type { HotelContractingBundle } from "@/modules/accommodation/shared/accommodation-contracting-types";
 import { AccommodationHotelDetailCard } from "@/modules/accommodation/ui/components/accommodation-hotel-detail-card";
 import { AccommodationAvailabilityDialog } from "@/modules/accommodation/ui/components/dialogs/accommodation-availability-dialog";
 import { AccommodationRoomTypeDialog } from "@/modules/accommodation/ui/components/dialogs/accommodation-room-type-dialog";
@@ -30,21 +28,6 @@ function AccommodationHotelDetailSectionComponent({
     deleteRoomTypeRecord,
     deleteAvailabilityRecord,
   } = detail;
-  const initialRoomRatesData = useMemo<AccommodationRoomRatesInitialData | null>(
-    () =>
-      initialData
-        ? {
-            roomRateHeaders: (initialData.roomRateHeaders as AccommodationRoomRatesInitialData["roomRateHeaders"]) ?? [],
-            roomRates: (initialData.roomRates as AccommodationRoomRatesInitialData["roomRates"]) ?? [],
-            seasons: (initialData.seasons as AccommodationRoomRatesInitialData["seasons"]) ?? [],
-          }
-        : null,
-    [initialData]
-  );
-  const initialContractingData = useMemo<HotelContractingBundle | null>(
-    () => (initialData?.contracting as HotelContractingBundle | null) ?? null,
-    [initialData]
-  );
   const handleAddRoomType = useCallback(() => openRoomTypeDialog("create"), [openRoomTypeDialog]);
   const handleEditRoomType = useCallback(
     (row: Parameters<typeof deleteRoomTypeRecord>[0]) => openRoomTypeDialog("edit", row),
@@ -76,9 +59,8 @@ function AccommodationHotelDetailSectionComponent({
         loadingDetails={detail.loadingDetails}
         roomTypes={detail.roomTypes}
         availability={detail.availability}
-        contracting={initialContractingData}
+        contracting={detail.contracting}
         isReadOnly={isReadOnly}
-        initialRoomRatesData={initialRoomRatesData}
         onAddRoomType={handleAddRoomType}
         onEditRoomType={handleEditRoomType}
         onDeleteRoomType={handleDeleteRoomType}

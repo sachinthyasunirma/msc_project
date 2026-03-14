@@ -1,6 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useMutation,
+  useQuery,
+  useQueryClient,
+  keepPreviousData,
+} from "@tanstack/react-query";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useConfirm } from "@/components/app-confirm-provider";
 import { notify } from "@/lib/notify";
 import {
@@ -11,14 +17,28 @@ import {
   type Hotel,
 } from "@/modules/accommodation/lib/accommodation-api";
 import {
+  accommodationKeys,
+  buildHotelListParams,
+} from "@/modules/accommodation/lib/accommodation-query";
+import {
   getInitialHotelForm,
   type HotelFormState,
 } from "@/modules/accommodation/lib/accommodation-view-helpers";
 import { useAccommodationFormDialog } from "@/modules/accommodation/lib/use-accommodation-form-dialog";
 import { createHotelSchema } from "@/modules/accommodation/shared/accommodation-schemas";
 
-type HotelFilters = { isActive: string; city: string; country: string };
-const DEFAULT_HOTEL_FILTERS: HotelFilters = { isActive: "all", city: "", country: "" };
+type HotelFilters = {
+  isActive: string;
+  city: string;
+  country: string;
+};
+
+const DEFAULT_HOTEL_FILTERS: HotelFilters = {
+  isActive: "all",
+  city: "",
+  country: "",
+};
+const EMPTY_HOTELS: Hotel[] = [];
 
 export type AccommodationHotelListData = {
   items: Hotel[];
@@ -37,16 +57,11 @@ export function useAccommodationHotelList({
   initialData = null,
 }: UseAccommodationHotelListOptions) {
   const confirm = useConfirm();
-  const skipInitialLoadRef = useRef(Boolean(initialData));
-  const [loadingHotels, setLoadingHotels] = useState(!initialData);
-  const [saving, setSaving] = useState(false);
+  const queryClient = useQueryClient();
   const [batchOpen, setBatchOpen] = useState(false);
   const [hotelSearch, setHotelSearch] = useState("");
   const [debouncedHotelSearch, setDebouncedHotelSearch] = useState("");
   const [hotelFilters, setHotelFilters] = useState<HotelFilters>(DEFAULT_HOTEL_FILTERS);
-  const [hotels, setHotels] = useState<Hotel[]>(initialData?.items ?? []);
-  const [hasNext, setHasNext] = useState(initialData?.hasNext ?? false);
-  const [nextCursor, setNextCursor] = useState<string | null>(initialData?.nextCursor ?? null);
   const [cursorHistory, setCursorHistory] = useState<Array<string | null>>([null]);
   const [pageIndex, setPageIndex] = useState(0);
   const [selectedHotelId, setSelectedHotelId] = useState<string | null>(
@@ -56,41 +71,6 @@ export function useAccommodationHotelList({
   const hotelDialog = useAccommodationFormDialog<HotelFormState, Hotel>((row) =>
     getInitialHotelForm(row ?? null)
   );
-
-  const hotelExistingCodes = useMemo(
-    () =>
-      new Set(
-        hotels
-          .map((hotel) => String(hotel.code ?? "").trim().toUpperCase())
-          .filter((value) => value.length > 0)
-      ),
-    [hotels]
-  );
-
-  const loadHotels = useCallback(async () => {
-    setLoadingHotels(true);
-    try {
-      const params = new URLSearchParams();
-      params.set("limit", "15");
-      if (debouncedHotelSearch) params.set("q", debouncedHotelSearch);
-      if (hotelFilters.isActive !== "all") params.set("isActive", hotelFilters.isActive);
-      if (hotelFilters.city) params.set("city", hotelFilters.city);
-      if (hotelFilters.country) params.set("country", hotelFilters.country);
-
-      const activeCursor = cursorHistory[pageIndex];
-      if (activeCursor) params.set("cursor", activeCursor);
-
-      const result = await listHotels(params);
-      setHotels(result.items);
-      setHasNext(result.hasNext);
-      setNextCursor(result.nextCursor);
-      setSelectedHotelId((prev) => prev ?? result.items[0]?.id ?? null);
-    } catch (error) {
-      notify.error(error instanceof Error ? error.message : "Failed to load hotels.");
-    } finally {
-      setLoadingHotels(false);
-    }
-  }, [cursorHistory, debouncedHotelSearch, hotelFilters.city, hotelFilters.country, hotelFilters.isActive, pageIndex]);
 
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedHotelSearch(hotelSearch), 300);
@@ -102,6 +82,7 @@ export function useAccommodationHotelList({
     setPageIndex(0);
   }, [debouncedHotelSearch, hotelFilters.city, hotelFilters.country, hotelFilters.isActive]);
 
+  const activeCursor = cursorHistory[pageIndex] ?? null;
   const isDefaultQuery =
     debouncedHotelSearch.length === 0 &&
     hotelFilters.isActive === DEFAULT_HOTEL_FILTERS.isActive &&
@@ -110,22 +91,86 @@ export function useAccommodationHotelList({
     pageIndex === 0 &&
     cursorHistory[0] === null;
 
+  const hotelListInput = useMemo(
+    () => ({
+      q: debouncedHotelSearch || undefined,
+      isActive: hotelFilters.isActive,
+      city: hotelFilters.city || undefined,
+      country: hotelFilters.country || undefined,
+      cursor: activeCursor,
+      limit: 15,
+    }),
+    [activeCursor, debouncedHotelSearch, hotelFilters.city, hotelFilters.country, hotelFilters.isActive]
+  );
+
+  const {
+    data: hotelListData,
+    error: hotelListError,
+    isFetching: loadingHotels,
+    refetch: refetchHotels,
+  } = useQuery({
+    queryKey: accommodationKeys.hotelList(hotelListInput),
+    queryFn: () => listHotels(buildHotelListParams(hotelListInput)),
+    initialData: isDefaultQuery ? initialData ?? undefined : undefined,
+    placeholderData: keepPreviousData,
+  });
+
+  const createHotelMutation = useMutation({
+    mutationFn: createHotel,
+  });
+  const updateHotelMutation = useMutation({
+    mutationFn: ({ hotelId, payload }: { hotelId: string; payload: unknown }) =>
+      updateHotel(hotelId, payload),
+  });
+  const deleteHotelMutation = useMutation({
+    mutationFn: deleteHotel,
+  });
+
+  const hotels = hotelListData?.items ?? EMPTY_HOTELS;
+  const hasNext = hotelListData?.hasNext ?? false;
+  const nextCursor = hotelListData?.nextCursor ?? null;
+  const saving =
+    createHotelMutation.isPending ||
+    updateHotelMutation.isPending ||
+    deleteHotelMutation.isPending;
+
+  const hotelExistingCodes = useMemo(
+    () =>
+      new Set(
+        hotels
+          .map((hotel) => String(hotel.code ?? "").trim().toUpperCase())
+          .filter((value) => value.length > 0)
+      ),
+    [hotels]
+  );
+
   useEffect(() => {
-    if (skipInitialLoadRef.current && isDefaultQuery) {
-      skipInitialLoadRef.current = false;
+    if (!hotelListError) return;
+    notify.error(hotelListError instanceof Error ? hotelListError.message : "Failed to load hotels.");
+  }, [hotelListError]);
+
+  useEffect(() => {
+    if (hotels.length === 0) {
+      setSelectedHotelId(null);
       return;
     }
-    void loadHotels();
-  }, [isDefaultQuery, loadHotels]);
 
-  const withSave = useCallback(async (callback: () => Promise<void>) => {
-    try {
-      setSaving(true);
-      await callback();
-    } finally {
-      setSaving(false);
-    }
-  }, []);
+    setSelectedHotelId((current) =>
+      current && hotels.some((hotel) => hotel.id === current) ? current : (hotels[0]?.id ?? null)
+    );
+  }, [hotels]);
+
+  const refreshHotelQueries = useCallback(async () => {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: accommodationKeys.hotels() }),
+      queryClient.invalidateQueries({ queryKey: accommodationKeys.hotelCodes() }),
+    ]);
+    await refetchHotels();
+  }, [queryClient, refetchHotels]);
+
+  const loadHotels = useCallback(async () => {
+    await refetchHotels();
+  }, [refetchHotels]);
 
   const openHotelDialog = useCallback(
     (mode: "create" | "edit", row: Hotel | null = null) => {
@@ -150,21 +195,25 @@ export function useAccommodationHotelList({
       return;
     }
 
-    await withSave(async () => {
+    try {
       if (hotelDialog.dialog.mode === "create") {
-        const created = await createHotel(parsed.data);
+        const created = await createHotelMutation.mutateAsync(parsed.data);
         notify.success("Hotel created.");
         setSelectedHotelId(created.id);
-        setHotels((prev) => [created, ...prev]);
       } else if (hotelDialog.dialog.row) {
-        const updated = await updateHotel(hotelDialog.dialog.row.id, parsed.data);
+        await updateHotelMutation.mutateAsync({
+          hotelId: hotelDialog.dialog.row.id,
+          payload: parsed.data,
+        });
         notify.success("Hotel updated.");
-        setHotels((prev) => prev.map((hotel) => (hotel.id === updated.id ? updated : hotel)));
       }
+
       hotelDialog.closeDialog();
-      await loadHotels();
-    });
-  }, [hotelDialog, loadHotels, withSave]);
+      await refreshHotelQueries();
+    } catch (error) {
+      notify.error(error instanceof Error ? error.message : "Failed to save hotel.");
+    }
+  }, [createHotelMutation, hotelDialog, refreshHotelQueries, updateHotelMutation]);
 
   const deleteHotelRecord = useCallback(
     async (hotel: Hotel) => {
@@ -177,15 +226,16 @@ export function useAccommodationHotelList({
       });
       if (!confirmed) return;
 
-      await withSave(async () => {
-        await deleteHotel(hotel.id);
+      try {
+        await deleteHotelMutation.mutateAsync(hotel.id);
         notify.success("Hotel deleted.");
-        setHotels((prev) => prev.filter((item) => item.id !== hotel.id));
-        setSelectedHotelId((prev) => (prev === hotel.id ? null : prev));
-        await loadHotels();
-      });
+        setSelectedHotelId((current) => (current === hotel.id ? null : current));
+        await refreshHotelQueries();
+      } catch (error) {
+        notify.error(error instanceof Error ? error.message : "Failed to delete hotel.");
+      }
     },
-    [confirm, loadHotels, withSave]
+    [confirm, deleteHotelMutation, refreshHotelQueries]
   );
 
   const refreshHotelExistingCodes = useCallback(async () => {
@@ -195,14 +245,18 @@ export function useAccommodationHotelList({
     let pageSafety = 0;
 
     while (keepLoading && pageSafety < 100) {
-      const params = new URLSearchParams();
-      params.set("limit", "100");
-      if (cursor) params.set("cursor", cursor);
-      const response = await listHotels(params);
+      const response = await listHotels(
+        buildHotelListParams({
+          cursor,
+          limit: 100,
+        })
+      );
+
       response.items.forEach((hotel) => {
         const code = String(hotel.code ?? "").trim().toUpperCase();
         if (code) codes.add(code);
       });
+
       keepLoading = response.hasNext && Boolean(response.nextCursor);
       cursor = response.nextCursor;
       pageSafety += 1;
@@ -212,13 +266,13 @@ export function useAccommodationHotelList({
   }, []);
 
   const goPreviousPage = useCallback(() => {
-    setPageIndex((prev) => (prev > 0 ? prev - 1 : prev));
+    setPageIndex((current) => (current > 0 ? current - 1 : current));
   }, []);
 
   const goNextPage = useCallback(() => {
     if (!nextCursor) return;
-    setCursorHistory((prev) => [...prev.slice(0, pageIndex + 1), nextCursor]);
-    setPageIndex((prev) => prev + 1);
+    setCursorHistory((current) => [...current.slice(0, pageIndex + 1), nextCursor]);
+    setPageIndex((current) => current + 1);
   }, [nextCursor, pageIndex]);
 
   return {

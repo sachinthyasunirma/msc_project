@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { BUSINESS_NETWORK_RESOURCE_KEYS } from "@/modules/business-network/shared/business-network-management-config";
 
 const businessOrgMemberRoleSchema = z.enum([
   "PLATFORM_ADMIN",
@@ -18,13 +19,7 @@ const businessOrgMemberRoleSchema = z.enum([
   "SUPPLIER_FINANCE",
 ]);
 
-export const businessNetworkResourceSchema = z.enum([
-  "organizations",
-  "operator-profiles",
-  "market-profiles",
-  "org-members",
-  "operator-market-contracts",
-]);
+export const businessNetworkResourceSchema = z.enum(BUSINESS_NETWORK_RESOURCE_KEYS);
 
 export const businessNetworkListQuerySchema = z.object({
   q: z.string().trim().max(120).optional(),

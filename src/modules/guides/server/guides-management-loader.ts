@@ -1,9 +1,9 @@
 import { headers } from "next/headers";
 import { listCurrencyRecords } from "@/modules/currency/server/currency-service";
+import type { GuideResourceKey } from "@/modules/guides/shared/guides-management-config";
 import type { GuidesManagementInitialData } from "@/modules/guides/shared/guides-management-types";
 import { listGuideRecords } from "@/modules/guides/server/guides-service";
 import { listTransportRecords } from "@/modules/transport/server/transport-service";
-import type { GuideResourceKey } from "@/modules/guides/ui/components/guides-management-section";
 
 function toPlainRecord<T extends Record<string, unknown>>(record: T): T {
   const next = { ...record };
