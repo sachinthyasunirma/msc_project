@@ -20,6 +20,12 @@ import type {
   DashboardCompany,
 } from "@/modules/dashboard/shared/dashboard-shell-types";
 
+type AccessSyncState = {
+  access: DashboardAccess | null;
+  accessErrorCode: string | null;
+  accessErrorMessage: string | null;
+};
+
 function toFormState(company: DashboardCompany | null, email: string) {
   return {
     joinExisting: false,
@@ -62,17 +68,37 @@ export function CompanySetupGate() {
     setForm((prev) => ({ ...prev, image: dataUrl }));
   };
 
-  const syncAccessState = async () => {
-    const accessResponse = await fetch("/api/companies/access-control", { cache: "no-store" });
-    const accessBody = (await accessResponse.json()) as
-      | DashboardAccess
-      | { message?: string };
-    if (!accessResponse.ok) {
-      throw new Error(
-        ("message" in accessBody && accessBody.message) || "Failed to refresh access state."
-      );
+  const syncAccessState = async (): Promise<AccessSyncState> => {
+    try {
+      const accessResponse = await fetch("/api/companies/access-control", { cache: "no-store" });
+      const accessBody = (await accessResponse.json()) as
+        | DashboardAccess
+        | { code?: string; message?: string };
+
+      if (!accessResponse.ok) {
+        return {
+          access: null,
+          accessErrorCode:
+            ("code" in accessBody && accessBody.code) || "ACCESS_REFRESH_FAILED",
+          accessErrorMessage:
+            ("message" in accessBody && accessBody.message) ||
+            "Failed to refresh access state.",
+        };
+      }
+
+      return {
+        access: accessBody as DashboardAccess,
+        accessErrorCode: null,
+        accessErrorMessage: null,
+      };
+    } catch (error) {
+      return {
+        access: null,
+        accessErrorCode: "ACCESS_REFRESH_FAILED",
+        accessErrorMessage:
+          error instanceof Error ? error.message : "Failed to refresh access state.",
+      };
     }
-    return accessBody as DashboardAccess;
   };
 
   const onSave = async () => {
@@ -119,16 +145,19 @@ export function CompanySetupGate() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
-      const body = (await response.json()) as { message?: string };
+      const body = (await response.json()) as {
+        message?: string;
+        companyId?: string;
+      };
       if (!response.ok) {
         throw new Error(body.message || "Failed to save company settings.");
       }
 
-      const nextAccess = await syncAccessState();
+      const nextAccessState = await syncAccessState();
       const nextCompany = form.joinExisting
         ? company
         : {
-            id: nextAccess.companyId,
+            id: body.companyId ?? nextAccessState.access?.companyId ?? "",
             code: form.companyCode.toUpperCase().trim(),
             joinSecretCode: form.secretCode.toUpperCase().trim(),
             managerPrivilegeCode: form.privilegeCode.toUpperCase().trim() || null,
@@ -147,18 +176,18 @@ export function CompanySetupGate() {
 
       updateShellData({
         company: nextCompany,
-        access: nextAccess,
+        access: nextAccessState.access,
         needsSetup: false,
-        accessErrorCode: null,
-        accessErrorMessage: null,
+        accessErrorCode: nextAccessState.accessErrorCode,
+        accessErrorMessage: nextAccessState.accessErrorMessage,
       });
 
       if (form.joinExisting) {
         router.refresh();
+        return;
       }
-      if (!form.joinExisting) {
-        router.replace("/billing/plans");
-      }
+
+      router.replace("/billing/plans");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to save company settings.");
     } finally {

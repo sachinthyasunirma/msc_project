@@ -10,11 +10,17 @@ import {
 } from "@/components/ui/select";
 
 type Props = {
-  totalItems: number;
-  page: number;
-  pageSize: number;
-  onPageChange: (page: number) => void;
-  onPageSizeChange: (pageSize: number) => void;
+  totalItems?: number;
+  page?: number;
+  pageSize?: number;
+  onPageChange?: (page: number) => void;
+  onPageSizeChange?: (pageSize: number) => void;
+  summaryText?: string;
+  hidePageSize?: boolean;
+  canPrevious?: boolean;
+  canNext?: boolean;
+  onPrevious?: () => void;
+  onNext?: () => void;
   className?: string;
 };
 
@@ -26,8 +32,46 @@ export function TablePagination({
   pageSize,
   onPageChange,
   onPageSizeChange,
+  summaryText,
+  hidePageSize = false,
+  canPrevious,
+  canNext,
+  onPrevious,
+  onNext,
   className,
 }: Props) {
+  if (
+    summaryText !== undefined ||
+    canPrevious !== undefined ||
+    canNext !== undefined ||
+    onPrevious !== undefined ||
+    onNext !== undefined
+  ) {
+    return (
+      <div className={`flex flex-wrap items-center justify-between gap-2 ${className ?? ""}`.trim()}>
+        <p className="text-sm text-muted-foreground">{summaryText ?? "Page navigation"}</p>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" onClick={onPrevious} disabled={!canPrevious}>
+            Previous
+          </Button>
+          <Button variant="outline" size="sm" onClick={onNext} disabled={!canNext}>
+            Next
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  if (
+    totalItems === undefined ||
+    page === undefined ||
+    pageSize === undefined ||
+    onPageChange === undefined ||
+    onPageSizeChange === undefined
+  ) {
+    return null;
+  }
+
   const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
   const currentPage = Math.min(Math.max(page, 1), totalPages);
   const from = totalItems === 0 ? 0 : (currentPage - 1) * pageSize + 1;
@@ -39,24 +83,26 @@ export function TablePagination({
         Showing {from}-{to} of {totalItems} | Page {currentPage} of {totalPages}
       </p>
       <div className="flex items-center gap-2">
-        <Select
-          value={String(pageSize)}
-          onValueChange={(value) => {
-            onPageSizeChange(Number(value));
-            onPageChange(1);
-          }}
-        >
-          <SelectTrigger className="w-[90px]">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {PAGE_SIZE_OPTIONS.map((size) => (
-              <SelectItem key={size} value={String(size)}>
-                {size}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        {!hidePageSize ? (
+          <Select
+            value={String(pageSize)}
+            onValueChange={(value) => {
+              onPageSizeChange(Number(value));
+              onPageChange(1);
+            }}
+          >
+            <SelectTrigger className="w-[90px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {PAGE_SIZE_OPTIONS.map((size) => (
+                <SelectItem key={size} value={String(size)}>
+                  {size}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        ) : null}
         <Button
           variant="outline"
           size="sm"

@@ -14,16 +14,26 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import type { AccommodationDialogProps } from "@/modules/accommodation/ui/components/dialogs/accommodation-dialog-types";
+import {
+  HOTEL_CONTRACT_STATUSES,
+  HOTEL_CONTRACT_TYPES,
+  HOTEL_TRIP_MARKET_SCOPES,
+} from "@/modules/accommodation/shared/accommodation-contracting-types";
 
 export type AccommodationContractFormState = {
   code: string;
+  name: string;
   supplierOrgId: string;
   contractRef: string;
+  contractType: string;
   currencyCode: string;
   validFrom: string;
   validTo: string;
+  bookingFrom: string;
+  bookingTo: string;
   releaseDaysDefault: string;
   marketScope: string;
+  guestNationalityScope: string;
   remarks: string;
   status: string;
   isActive: boolean;
@@ -36,9 +46,6 @@ type AccommodationContractDialogProps = AccommodationDialogProps & {
   setForm: (value: AccommodationContractFormState | ((current: AccommodationContractFormState) => AccommodationContractFormState)) => void;
   supplierOptions: Option[];
 };
-
-const contractStatuses = ["DRAFT", "ACTIVE", "SUSPENDED", "EXPIRED", "ARCHIVED"];
-const marketScopes = ["ALL_MARKETS", "SPECIFIC_MARKET", "SPECIFIC_COUNTRY"];
 
 export function AccommodationContractDialog({
   open,
@@ -54,11 +61,11 @@ export function AccommodationContractDialog({
 }: AccommodationContractDialogProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-3xl">
+      <DialogContent className="w-[96vw] max-w-[96vw] max-h-[90vh] overflow-y-auto sm:max-w-3xl">
         <DialogHeader>
           <DialogTitle>{mode === "create" ? "Add Hotel Contract" : "Edit Hotel Contract"}</DialogTitle>
           <DialogDescription>
-            Maintain buy-side contract validity, supplier reference, release policy, and commercial scope.
+            Maintain contract identity, supplier link, booking window, commercial scope, and lifecycle.
           </DialogDescription>
         </DialogHeader>
 
@@ -70,6 +77,15 @@ export function AccommodationContractDialog({
               onChange={(event) => setForm((current) => ({ ...current, code: event.target.value.toUpperCase() }))}
               disabled={saving || isReadOnly}
               placeholder="HTL-CNTR-001"
+            />
+          </div>
+          <div className="grid gap-2">
+            <Label>Contract name</Label>
+            <Input
+              value={form.name}
+              onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))}
+              disabled={saving || isReadOnly}
+              placeholder="Summer FIT Contract 2026"
             />
           </div>
           <div className="grid gap-2">
@@ -94,7 +110,25 @@ export function AccommodationContractDialog({
               </SelectContent>
             </Select>
           </div>
-
+          <div className="grid gap-2">
+            <Label>Contract type</Label>
+            <Select
+              value={form.contractType}
+              onValueChange={(value) => setForm((current) => ({ ...current, contractType: value }))}
+              disabled={saving || isReadOnly}
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {HOTEL_CONTRACT_TYPES.map((type) => (
+                  <SelectItem key={type} value={type}>
+                    {type}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
           <div className="grid gap-2">
             <Label>Supplier contract reference</Label>
             <Input
@@ -116,7 +150,6 @@ export function AccommodationContractDialog({
               maxLength={3}
             />
           </div>
-
           <div className="grid gap-2">
             <Label>Valid from</Label>
             <Input
@@ -135,7 +168,24 @@ export function AccommodationContractDialog({
               disabled={saving || isReadOnly}
             />
           </div>
-
+          <div className="grid gap-2">
+            <Label>Booking from</Label>
+            <Input
+              type="date"
+              value={form.bookingFrom}
+              onChange={(event) => setForm((current) => ({ ...current, bookingFrom: event.target.value }))}
+              disabled={saving || isReadOnly}
+            />
+          </div>
+          <div className="grid gap-2">
+            <Label>Booking to</Label>
+            <Input
+              type="date"
+              value={form.bookingTo}
+              onChange={(event) => setForm((current) => ({ ...current, bookingTo: event.target.value }))}
+              disabled={saving || isReadOnly}
+            />
+          </div>
           <div className="grid gap-2">
             <Label>Default release days</Label>
             <Input
@@ -161,7 +211,7 @@ export function AccommodationContractDialog({
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="__none__">No restriction</SelectItem>
-                {marketScopes.map((scope) => (
+                {HOTEL_TRIP_MARKET_SCOPES.map((scope) => (
                   <SelectItem key={scope} value={scope}>
                     {scope}
                   </SelectItem>
@@ -169,7 +219,17 @@ export function AccommodationContractDialog({
               </SelectContent>
             </Select>
           </div>
-
+          <div className="grid gap-2">
+            <Label>Guest nationality scope</Label>
+            <Input
+              value={form.guestNationalityScope}
+              onChange={(event) =>
+                setForm((current) => ({ ...current, guestNationalityScope: event.target.value }))
+              }
+              disabled={saving || isReadOnly}
+              placeholder="ALL or LK,IN,GB"
+            />
+          </div>
           <div className="grid gap-2">
             <Label>Status</Label>
             <Select
@@ -181,7 +241,7 @@ export function AccommodationContractDialog({
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {contractStatuses.map((status) => (
+                {HOTEL_CONTRACT_STATUSES.map((status) => (
                   <SelectItem key={status} value={status}>
                     {status}
                   </SelectItem>
@@ -189,7 +249,6 @@ export function AccommodationContractDialog({
               </SelectContent>
             </Select>
           </div>
-
           <div className="flex items-center gap-3 pt-6">
             <Checkbox
               id="contract-is-active"
@@ -201,14 +260,13 @@ export function AccommodationContractDialog({
             />
             <Label htmlFor="contract-is-active">Contract is active</Label>
           </div>
-
           <div className="grid gap-2 md:col-span-2">
             <Label>Remarks</Label>
             <Textarea
               value={form.remarks}
               onChange={(event) => setForm((current) => ({ ...current, remarks: event.target.value }))}
               disabled={saving || isReadOnly}
-              placeholder="Operational notes, blackout clauses, payment terms, or contracting remarks."
+              placeholder="Operational notes, payment terms, blackout clauses, or contracting remarks."
             />
           </div>
         </div>
@@ -218,7 +276,7 @@ export function AccommodationContractDialog({
             Cancel
           </Button>
           <Button onClick={onSubmit} disabled={saving || isReadOnly}>
-            {saving ? "Saving..." : mode === "create" ? "Create Contract" : "Save Contract"}
+            {saving ? "Saving..." : mode === "create" ? "Create Contract" : "Save Changes"}
           </Button>
         </DialogFooter>
       </DialogContent>

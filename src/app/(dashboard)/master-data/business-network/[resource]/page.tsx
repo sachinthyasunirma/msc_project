@@ -1,17 +1,8 @@
 import { notFound } from "next/navigation";
 import { loadBusinessNetworkManagementInitialData } from "@/modules/business-network/server/business-network-management-loader";
-import {
-  BusinessNetworkManagementViewContent,
-  type BusinessNetworkResourceKey,
-} from "@/modules/business-network/ui/views/business-network-management-view";
-
-const allowedResources = [
-  "organizations",
-  "operator-profiles",
-  "market-profiles",
-  "org-members",
-  "operator-market-contracts",
-] as const;
+import { BUSINESS_NETWORK_RESOURCE_KEYS, type BusinessNetworkResourceKey } from "@/modules/business-network/shared/business-network-management-config";
+import { BusinessNetworkManagementViewContent } from "@/modules/business-network/ui/views/business-network-management-view";
+const allowedResources = BUSINESS_NETWORK_RESOURCE_KEYS;
 
 type PageProps = {
   params: Promise<{ resource: string }>;

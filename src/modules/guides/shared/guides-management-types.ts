@@ -1,4 +1,4 @@
-import type { GuideResourceKey } from "@/modules/guides/ui/components/guides-management-section";
+import type { GuideResourceKey } from "@/modules/guides/shared/guides-management-config";
 
 export type GuidesManagementInitialData = {
   resource: GuideResourceKey;

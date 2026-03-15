@@ -4,12 +4,17 @@ import type {
   AccommodationContractingViewData,
   HotelCancellationPolicyRecord,
   HotelCancellationPolicyRuleRecord,
+  HotelContractInventoryDayRecord,
   HotelContractRecord,
   HotelFeeRuleRecord,
   HotelInventoryDayRecord,
+  HotelRateAdjustmentRecord,
+  HotelRateBlackoutRecord,
+  HotelRateChildPolicyRecord,
   HotelRateRestrictionRecord,
   HotelRoomRateRecord,
   HotelRatePlanRecord,
+  HotelSellRateRuleRecord,
 } from "@/modules/accommodation/shared/accommodation-contracting-types";
 
 type ApiError = { message?: string };
@@ -140,6 +145,60 @@ export async function deleteAccommodationRateRestriction(restrictionId: string) 
   if (!response.ok) await readError(response, "Failed to delete restriction.");
 }
 
+export async function createAccommodationRateBlackout(ratePlanId: string, payload: unknown) {
+  const response = await fetch(`/api/accommodation/rate-plans/${ratePlanId}/blackouts`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) await readError(response, "Failed to create blackout.");
+  return response.json() as Promise<HotelRateBlackoutRecord>;
+}
+
+export async function updateAccommodationRateBlackout(blackoutId: string, payload: unknown) {
+  const response = await fetch(`/api/accommodation/blackouts/${blackoutId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) await readError(response, "Failed to update blackout.");
+  return response.json() as Promise<HotelRateBlackoutRecord>;
+}
+
+export async function deleteAccommodationRateBlackout(blackoutId: string) {
+  const response = await fetch(`/api/accommodation/blackouts/${blackoutId}`, {
+    method: "DELETE",
+  });
+  if (!response.ok) await readError(response, "Failed to delete blackout.");
+}
+
+export async function createAccommodationRateChildPolicy(roomRateId: string, payload: unknown) {
+  const response = await fetch(`/api/accommodation/room-rates/${roomRateId}/child-policies`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) await readError(response, "Failed to create child policy.");
+  return response.json() as Promise<HotelRateChildPolicyRecord>;
+}
+
+export async function updateAccommodationRateChildPolicy(childPolicyId: string, payload: unknown) {
+  const response = await fetch(`/api/accommodation/child-policies/${childPolicyId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) await readError(response, "Failed to update child policy.");
+  return response.json() as Promise<HotelRateChildPolicyRecord>;
+}
+
+export async function deleteAccommodationRateChildPolicy(childPolicyId: string) {
+  const response = await fetch(`/api/accommodation/child-policies/${childPolicyId}`, {
+    method: "DELETE",
+  });
+  if (!response.ok) await readError(response, "Failed to delete child policy.");
+}
+
 export async function createAccommodationFeeRule(ratePlanId: string, payload: unknown) {
   const response = await fetch(`/api/accommodation/rate-plans/${ratePlanId}/fee-rules`, {
     method: "POST",
@@ -165,6 +224,60 @@ export async function deleteAccommodationFeeRule(feeRuleId: string) {
     method: "DELETE",
   });
   if (!response.ok) await readError(response, "Failed to delete fee rule.");
+}
+
+export async function createAccommodationRateAdjustment(ratePlanId: string, payload: unknown) {
+  const response = await fetch(`/api/accommodation/rate-plans/${ratePlanId}/adjustments`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) await readError(response, "Failed to create adjustment.");
+  return response.json() as Promise<HotelRateAdjustmentRecord>;
+}
+
+export async function updateAccommodationRateAdjustment(adjustmentId: string, payload: unknown) {
+  const response = await fetch(`/api/accommodation/adjustments/${adjustmentId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) await readError(response, "Failed to update adjustment.");
+  return response.json() as Promise<HotelRateAdjustmentRecord>;
+}
+
+export async function deleteAccommodationRateAdjustment(adjustmentId: string) {
+  const response = await fetch(`/api/accommodation/adjustments/${adjustmentId}`, {
+    method: "DELETE",
+  });
+  if (!response.ok) await readError(response, "Failed to delete adjustment.");
+}
+
+export async function createAccommodationSellRateRule(ratePlanId: string, payload: unknown) {
+  const response = await fetch(`/api/accommodation/rate-plans/${ratePlanId}/sell-rate-rules`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) await readError(response, "Failed to create sell rate rule.");
+  return response.json() as Promise<HotelSellRateRuleRecord>;
+}
+
+export async function updateAccommodationSellRateRule(sellRateRuleId: string, payload: unknown) {
+  const response = await fetch(`/api/accommodation/sell-rate-rules/${sellRateRuleId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) await readError(response, "Failed to update sell rate rule.");
+  return response.json() as Promise<HotelSellRateRuleRecord>;
+}
+
+export async function deleteAccommodationSellRateRule(sellRateRuleId: string) {
+  const response = await fetch(`/api/accommodation/sell-rate-rules/${sellRateRuleId}`, {
+    method: "DELETE",
+  });
+  if (!response.ok) await readError(response, "Failed to delete sell rate rule.");
 }
 
 export async function createAccommodationCancellationPolicy(hotelId: string, payload: unknown) {
@@ -246,4 +359,34 @@ export async function deleteAccommodationInventoryDay(inventoryDayId: string) {
     method: "DELETE",
   });
   if (!response.ok) await readError(response, "Failed to delete inventory day.");
+}
+
+export async function createAccommodationContractInventoryDay(contractId: string, payload: unknown) {
+  const response = await fetch(`/api/accommodation/contracts/${contractId}/inventory-days`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) await readError(response, "Failed to create contract inventory day.");
+  return response.json() as Promise<HotelContractInventoryDayRecord>;
+}
+
+export async function updateAccommodationContractInventoryDay(
+  contractInventoryDayId: string,
+  payload: unknown
+) {
+  const response = await fetch(`/api/accommodation/contract-inventory-days/${contractInventoryDayId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) await readError(response, "Failed to update contract inventory day.");
+  return response.json() as Promise<HotelContractInventoryDayRecord>;
+}
+
+export async function deleteAccommodationContractInventoryDay(contractInventoryDayId: string) {
+  const response = await fetch(`/api/accommodation/contract-inventory-days/${contractInventoryDayId}`, {
+    method: "DELETE",
+  });
+  if (!response.ok) await readError(response, "Failed to delete contract inventory day.");
 }

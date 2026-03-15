@@ -4,6 +4,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import Link from "next/link";
 import { useState } from "react";
+import Image from "next/image";
 import { authClient } from "@/lib/auth-client";
 import { useRouter } from "next/navigation";
 import { OctagonAlertIcon } from "lucide-react";
@@ -67,7 +68,7 @@ export const SignUpView = () => {
       {
         onSuccess: () => {
           setPending(false);
-          router.push("/");
+          router.replace("/");
         },
         onError: ({ error }) => {
           setPending(false);
@@ -209,7 +210,7 @@ export const SignUpView = () => {
             </form>
           </Form>
           <div className="bg-radial from-sidebar-accent to-sidebar relative hidden md:flex flex-col gap-y-4 items-center justify-center">
-            <img src={"/logo.svg"} alt="logo" className="h-[92px] w-[92px]" />
+            <Image src="/logo.svg" alt="logo" width={92} height={92} />
             <p className="text-2xl font-semibold text-black">MSC Project</p>
           </div>
         </CardContent>

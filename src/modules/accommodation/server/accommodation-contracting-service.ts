@@ -26,33 +26,48 @@ import {
   createHotelCancellationPolicySchema,
   createHotelCancellationPolicyRuleSchema,
   createHotelContractSchema,
+  createHotelContractInventoryDaySchema,
   createHotelInventoryDaySchema,
+  createHotelRateAdjustmentSchema,
+  createHotelRateBlackoutSchema,
+  createHotelRateChildPolicySchema,
   createHotelRoomRateSchema,
   createHotelRatePlanSchema,
   createHotelRateRestrictionSchema,
   createHotelFeeRuleSchema,
+  createHotelSellRateRuleSchema,
   hotelRateResolutionQuerySchema,
   inventoryDayListQuerySchema,
   updateHotelCancellationPolicySchema,
   updateHotelCancellationPolicyRuleSchema,
   updateHotelContractSchema,
+  updateHotelContractInventoryDaySchema,
   updateHotelInventoryDaySchema,
+  updateHotelRateAdjustmentSchema,
+  updateHotelRateBlackoutSchema,
+  updateHotelRateChildPolicySchema,
   updateHotelRoomRateSchema,
   updateHotelRatePlanSchema,
   updateHotelRateRestrictionSchema,
   updateHotelFeeRuleSchema,
+  updateHotelSellRateRuleSchema,
 } from "@/modules/accommodation/shared/accommodation-contracting-schemas";
 import type {
   HotelCancellationPolicyRecord,
   HotelCancellationPolicyRuleRecord,
   HotelContractingBundle,
+  HotelContractInventoryDayRecord,
   HotelContractRecord,
   HotelFeeRuleRecord,
   HotelInventoryDayRecord,
+  HotelRateAdjustmentRecord,
+  HotelRateBlackoutRecord,
+  HotelRateChildPolicyRecord,
   HotelRatePlanRecord,
   HotelRateRestrictionRecord,
   HotelResolvedContractRateOption,
   HotelRoomRateRecord,
+  HotelSellRateRuleRecord,
 } from "@/modules/accommodation/shared/accommodation-contracting-types";
 
 class AccommodationContractingError extends Error {
@@ -73,6 +88,171 @@ function toPriceNumber(value: string | number | null | undefined) {
   if (value === null || value === undefined) return 0;
   const numeric = typeof value === "number" ? value : Number(value);
   return Number.isFinite(numeric) ? numeric : 0;
+}
+
+function getNestedErrorCandidates(error: unknown) {
+  const queue: unknown[] = [error];
+  const seen = new Set<unknown>();
+  const candidates: Array<{ code?: string; message?: string }> = [];
+
+  while (queue.length > 0) {
+    const current = queue.shift();
+    if (!current || typeof current !== "object" || seen.has(current)) {
+      continue;
+    }
+    seen.add(current);
+
+    const record = current as {
+      code?: unknown;
+      message?: unknown;
+      cause?: unknown;
+      sourceError?: unknown;
+      originalError?: unknown;
+      error?: unknown;
+    };
+
+    candidates.push({
+      code: typeof record.code === "string" ? record.code : undefined,
+      message: typeof record.message === "string" ? record.message : undefined,
+    });
+
+    queue.push(record.cause, record.sourceError, record.originalError, record.error);
+  }
+
+  return candidates;
+}
+
+function getDatabaseErrorDetails(error: unknown) {
+  return (
+    getNestedErrorCandidates(error).find(
+      (candidate) =>
+        typeof candidate.code === "string" ||
+        typeof candidate.message === "string"
+    ) ?? null
+  );
+}
+
+function isSchemaOutOfDateError(error: unknown) {
+  const details = getDatabaseErrorDetails(error);
+  if (!details) {
+    return false;
+  }
+
+  if (details.code === "42P01" || details.code === "42703") {
+    return true;
+  }
+
+  const normalizedMessage = details.message?.toLowerCase() ?? "";
+  return (
+    normalizedMessage.includes("does not exist") ||
+    normalizedMessage.includes("undefined table") ||
+    normalizedMessage.includes("undefined column")
+  );
+}
+
+function isMissingOptionalContractingSchemaError(error: unknown) {
+  const details = getDatabaseErrorDetails(error);
+  if (!details) {
+    return false;
+  }
+
+  if (details.code === "42P01" || details.code === "42703") {
+    return true;
+  }
+
+  const normalizedMessage = details.message?.toLowerCase() ?? "";
+  return (
+    normalizedMessage.includes("hotel_rate_blackout") ||
+    normalizedMessage.includes("hotel_rate_child_policy") ||
+    normalizedMessage.includes("hotel_rate_adjustment") ||
+    normalizedMessage.includes("hotel_sell_rate_rule") ||
+    normalizedMessage.includes("hotel_contract_inventory_day")
+  );
+}
+
+function isLegacyHotelContractSchemaError(error: unknown) {
+  const details = getDatabaseErrorDetails(error);
+  if (!details) {
+    return false;
+  }
+
+  const normalizedMessage = details.message?.toLowerCase() ?? "";
+  return (
+    normalizedMessage.includes("hotel_contract") &&
+    (normalizedMessage.includes("column \"name\"") ||
+      normalizedMessage.includes("column \"contract_type\"") ||
+      normalizedMessage.includes("column \"booking_from\"") ||
+      normalizedMessage.includes("column \"booking_to\"") ||
+      normalizedMessage.includes("column \"guest_nationality_scope\"") ||
+      normalizedMessage.includes("column \"revision_no\""))
+  );
+}
+
+function getLegacyHotelContractSelect() {
+  return {
+    id: schema.hotelContract.id,
+    companyId: schema.hotelContract.companyId,
+    hotelId: schema.hotelContract.hotelId,
+    code: schema.hotelContract.code,
+    name: sql<string | null>`null`.as("name"),
+    supplierOrgId: schema.hotelContract.supplierOrgId,
+    contractRef: schema.hotelContract.contractRef,
+    contractType: sql<string>`'FIT'`.as("contract_type"),
+    currencyCode: schema.hotelContract.currencyCode,
+    validFrom: schema.hotelContract.validFrom,
+    validTo: schema.hotelContract.validTo,
+    bookingFrom: sql<string | null>`null`.as("booking_from"),
+    bookingTo: sql<string | null>`null`.as("booking_to"),
+    releaseDaysDefault: schema.hotelContract.releaseDaysDefault,
+    marketScope: schema.hotelContract.marketScope,
+    guestNationalityScope: sql<string | null>`null`.as("guest_nationality_scope"),
+    remarks: schema.hotelContract.remarks,
+    revisionNo: sql<number>`1`.as("revision_no"),
+    status: schema.hotelContract.status,
+    isActive: schema.hotelContract.isActive,
+    createdAt: schema.hotelContract.createdAt,
+    updatedAt: schema.hotelContract.updatedAt,
+  };
+}
+
+function getLegacyHotelContractWriteValues(
+  values: z.infer<typeof createHotelContractSchema> & {
+    hotelId: string;
+    companyId: string;
+  }
+) {
+  return {
+    companyId: values.companyId,
+    hotelId: values.hotelId,
+    code: values.code,
+    supplierOrgId: values.supplierOrgId,
+    contractRef: values.contractRef,
+    currencyCode: values.currencyCode,
+    validFrom: values.validFrom,
+    validTo: values.validTo,
+    releaseDaysDefault: values.releaseDaysDefault,
+    marketScope: values.marketScope,
+    remarks: values.remarks,
+    status: values.status,
+    isActive: values.isActive,
+  };
+}
+
+function getLegacyHotelContractUpdateValues(values: z.infer<typeof updateHotelContractSchema>) {
+  return {
+    code: values.code,
+    supplierOrgId: values.supplierOrgId,
+    contractRef: values.contractRef,
+    currencyCode: values.currencyCode,
+    validFrom: values.validFrom,
+    validTo: values.validTo,
+    releaseDaysDefault: values.releaseDaysDefault,
+    marketScope: values.marketScope,
+    remarks: values.remarks,
+    status: values.status,
+    isActive: values.isActive,
+    updatedAt: new Date(),
+  };
 }
 
 async function getCompanyId(requestHeaders: Headers) {
@@ -263,6 +443,57 @@ async function ensureInventoryDayOwned(companyId: string, inventoryDayId: string
   return row.hotelId;
 }
 
+async function ensureRoomRateOwned(companyId: string, roomRateId: string) {
+  const [row] = await db
+    .select({
+      id: schema.hotelRoomRate.id,
+      hotelId: schema.hotelRoomRate.hotelId,
+      ratePlanId: schema.hotelRoomRate.ratePlanId,
+    })
+    .from(schema.hotelRoomRate)
+    .innerJoin(schema.hotel, eq(schema.hotel.id, schema.hotelRoomRate.hotelId))
+    .where(and(eq(schema.hotelRoomRate.id, roomRateId), eq(schema.hotel.companyId, companyId)))
+    .limit(1);
+
+  if (!row) {
+    throw new AccommodationContractingError(
+      404,
+      "HOTEL_ROOM_RATE_NOT_FOUND",
+      "Hotel room rate not found."
+    );
+  }
+
+  return row;
+}
+
+async function ensureContractInventoryDayOwned(companyId: string, inventoryDayId: string) {
+  const [row] = await db
+    .select({
+      id: schema.hotelContractInventoryDay.id,
+      hotelId: schema.hotelContractInventoryDay.hotelId,
+      contractId: schema.hotelContractInventoryDay.contractId,
+    })
+    .from(schema.hotelContractInventoryDay)
+    .innerJoin(schema.hotel, eq(schema.hotel.id, schema.hotelContractInventoryDay.hotelId))
+    .where(
+      and(
+        eq(schema.hotelContractInventoryDay.id, inventoryDayId),
+        eq(schema.hotel.companyId, companyId)
+      )
+    )
+    .limit(1);
+
+  if (!row) {
+    throw new AccommodationContractingError(
+      404,
+      "HOTEL_CONTRACT_INVENTORY_DAY_NOT_FOUND",
+      "Hotel contract inventory day not found."
+    );
+  }
+
+  return row;
+}
+
 function applyTextSearch(
   query: string | undefined,
   clauses: SQL[],
@@ -316,12 +547,30 @@ export async function listHotelContracts(
       schema.hotelContract.remarks,
     ]);
 
-    return db
-      .select()
-      .from(schema.hotelContract)
-      .where(and(...clauses))
-      .orderBy(asc(schema.hotelContract.validFrom), asc(schema.hotelContract.code))
-      .limit(parsed.data.limit);
+    try {
+      return await db
+        .select()
+        .from(schema.hotelContract)
+        .where(and(...clauses))
+        .orderBy(asc(schema.hotelContract.validFrom), asc(schema.hotelContract.code))
+        .limit(parsed.data.limit);
+    } catch (error) {
+      if (!isLegacyHotelContractSchemaError(error)) {
+        throw error;
+      }
+
+      console.warn(
+        "[accommodation-contracting] Falling back to legacy hotel_contract column set while listing contracts.",
+        getDatabaseErrorDetails(error)
+      );
+
+      return db
+        .select(getLegacyHotelContractSelect())
+        .from(schema.hotelContract)
+        .where(and(...clauses))
+        .orderBy(asc(schema.hotelContract.validFrom), asc(schema.hotelContract.code))
+        .limit(parsed.data.limit);
+    }
   });
 }
 
@@ -344,14 +593,41 @@ export async function createHotelContract(
   await ensureSupplierOwned(companyId, parsed.data.supplierOrgId);
 
   try {
-    const [created] = await db
-      .insert(schema.hotelContract)
-      .values({
-        ...parsed.data,
-        hotelId,
-        companyId,
-      })
-      .returning();
+    const values = {
+      ...parsed.data,
+      hotelId,
+      companyId,
+    };
+    let created: HotelContractRecord | undefined;
+
+    try {
+      [created] = await db
+        .insert(schema.hotelContract)
+        .values(values)
+        .returning();
+    } catch (error) {
+      if (!isLegacyHotelContractSchemaError(error)) {
+        throw error;
+      }
+
+      console.warn(
+        "[accommodation-contracting] Falling back to legacy hotel_contract column set while creating a contract.",
+        getDatabaseErrorDetails(error)
+      );
+
+      [created] = await db
+        .insert(schema.hotelContract)
+        .values(getLegacyHotelContractWriteValues(values))
+        .returning(getLegacyHotelContractSelect());
+    }
+
+    if (!created) {
+      throw new AccommodationContractingError(
+        500,
+        "HOTEL_CONTRACT_CREATE_FAILED",
+        "Failed to create hotel contract."
+      );
+    }
     return created;
   } finally {
     await invalidateMasterDataCacheByPrefixes([
@@ -379,14 +655,33 @@ export async function updateHotelContract(
   await ensureSupplierOwned(companyId, parsed.data.supplierOrgId);
 
   try {
-    const [updated] = await db
-      .update(schema.hotelContract)
-      .set({
-        ...parsed.data,
-        updatedAt: new Date(),
-      })
-      .where(and(eq(schema.hotelContract.id, contractId), eq(schema.hotelContract.hotelId, hotelId)))
-      .returning();
+    let updated: HotelContractRecord | undefined;
+
+    try {
+      [updated] = await db
+        .update(schema.hotelContract)
+        .set({
+          ...parsed.data,
+          updatedAt: new Date(),
+        })
+        .where(and(eq(schema.hotelContract.id, contractId), eq(schema.hotelContract.hotelId, hotelId)))
+        .returning();
+    } catch (error) {
+      if (!isLegacyHotelContractSchemaError(error)) {
+        throw error;
+      }
+
+      console.warn(
+        "[accommodation-contracting] Falling back to legacy hotel_contract column set while updating a contract.",
+        getDatabaseErrorDetails(error)
+      );
+
+      [updated] = await db
+        .update(schema.hotelContract)
+        .set(getLegacyHotelContractUpdateValues(parsed.data))
+        .where(and(eq(schema.hotelContract.id, contractId), eq(schema.hotelContract.hotelId, hotelId)))
+        .returning(getLegacyHotelContractSelect());
+    }
 
     if (!updated) {
       throw new AccommodationContractingError(
@@ -975,6 +1270,48 @@ export async function listHotelRoomRates(
   });
 }
 
+export async function listHotelRateBlackouts(
+  ratePlanId: string,
+  searchParams: URLSearchParams,
+  headers: Headers
+): Promise<HotelRateBlackoutRecord[]> {
+  const parsed = contractingListQuerySchema.safeParse(Object.fromEntries(searchParams));
+  if (!parsed.success) {
+    throw new AccommodationContractingError(
+      400,
+      "VALIDATION_ERROR",
+      normalizeZodError(parsed.error)
+    );
+  }
+
+  const companyId = await getCompanyId(headers);
+  await ensureRatePlanOwned(companyId, ratePlanId);
+
+  const cacheKey = masterDataListCacheKey(
+    "accommodation-contracting",
+    companyId,
+    `hotel-rate-blackouts:${ratePlanId}`,
+    parsed.data
+  );
+
+  return getOrSetMasterDataCache(cacheKey, async () => {
+    const clauses: SQL[] = [eq(schema.hotelRateBlackout.ratePlanId, ratePlanId)];
+    applyActiveFilter(parsed.data.isActive, clauses, schema.hotelRateBlackout.isActive);
+    applyTextSearch(parsed.data.q, clauses, [
+      schema.hotelRateBlackout.code,
+      schema.hotelRateBlackout.reason,
+      schema.hotelRateBlackout.marketCode,
+    ]);
+
+    return db
+      .select()
+      .from(schema.hotelRateBlackout)
+      .where(and(...clauses))
+      .orderBy(asc(schema.hotelRateBlackout.stayFrom), asc(schema.hotelRateBlackout.code))
+      .limit(parsed.data.limit);
+  });
+}
+
 export async function createHotelRoomRate(
   ratePlanId: string,
   payload: unknown,
@@ -1064,6 +1401,294 @@ export async function updateHotelRoomRate(
       );
     }
     return updated;
+  } finally {
+    await invalidateMasterDataCacheByPrefixes([
+      masterDataCachePrefix("accommodation-contracting", companyId),
+    ]);
+  }
+}
+
+export async function createHotelRateBlackout(
+  ratePlanId: string,
+  payload: unknown,
+  headers: Headers
+): Promise<HotelRateBlackoutRecord> {
+  const companyId = await ensureWritable(headers);
+  const parsed = createHotelRateBlackoutSchema.safeParse(payload);
+  if (!parsed.success) {
+    throw new AccommodationContractingError(
+      400,
+      "VALIDATION_ERROR",
+      normalizeZodError(parsed.error)
+    );
+  }
+
+  const hotelId = await ensureRatePlanOwned(companyId, ratePlanId);
+  if (parsed.data.roomTypeId) {
+    await ensureRoomTypeOwnedByHotel(hotelId, parsed.data.roomTypeId);
+  }
+
+  try {
+    const [created] = await db
+      .insert(schema.hotelRateBlackout)
+      .values({
+        ...parsed.data,
+        ratePlanId,
+      })
+      .returning();
+    return created;
+  } finally {
+    await invalidateMasterDataCacheByPrefixes([
+      masterDataCachePrefix("accommodation-contracting", companyId),
+    ]);
+  }
+}
+
+export async function updateHotelRateBlackout(
+  blackoutId: string,
+  payload: unknown,
+  headers: Headers
+): Promise<HotelRateBlackoutRecord> {
+  const companyId = await ensureWritable(headers);
+  const parsed = updateHotelRateBlackoutSchema.safeParse(payload);
+  if (!parsed.success) {
+    throw new AccommodationContractingError(
+      400,
+      "VALIDATION_ERROR",
+      normalizeZodError(parsed.error)
+    );
+  }
+
+  const [existing] = await db
+    .select({
+      id: schema.hotelRateBlackout.id,
+      hotelId: schema.hotelContract.hotelId,
+    })
+    .from(schema.hotelRateBlackout)
+    .innerJoin(schema.hotelRatePlan, eq(schema.hotelRatePlan.id, schema.hotelRateBlackout.ratePlanId))
+    .innerJoin(schema.hotelContract, eq(schema.hotelContract.id, schema.hotelRatePlan.contractId))
+    .innerJoin(schema.hotel, eq(schema.hotel.id, schema.hotelContract.hotelId))
+    .where(and(eq(schema.hotelRateBlackout.id, blackoutId), eq(schema.hotel.companyId, companyId)))
+    .limit(1);
+
+  if (!existing) {
+    throw new AccommodationContractingError(
+      404,
+      "HOTEL_RATE_BLACKOUT_NOT_FOUND",
+      "Hotel rate blackout not found."
+    );
+  }
+
+  if (parsed.data.roomTypeId) {
+    await ensureRoomTypeOwnedByHotel(existing.hotelId, parsed.data.roomTypeId);
+  }
+
+  try {
+    const [updated] = await db
+      .update(schema.hotelRateBlackout)
+      .set({
+        ...parsed.data,
+        updatedAt: new Date(),
+      })
+      .where(eq(schema.hotelRateBlackout.id, blackoutId))
+      .returning();
+    if (!updated) {
+      throw new AccommodationContractingError(
+        404,
+        "HOTEL_RATE_BLACKOUT_NOT_FOUND",
+        "Hotel rate blackout not found."
+      );
+    }
+    return updated;
+  } finally {
+    await invalidateMasterDataCacheByPrefixes([
+      masterDataCachePrefix("accommodation-contracting", companyId),
+    ]);
+  }
+}
+
+export async function deleteHotelRateBlackout(blackoutId: string, headers: Headers) {
+  const companyId = await ensureWritable(headers);
+  const [existing] = await db
+    .select({ id: schema.hotelRateBlackout.id })
+    .from(schema.hotelRateBlackout)
+    .innerJoin(schema.hotelRatePlan, eq(schema.hotelRatePlan.id, schema.hotelRateBlackout.ratePlanId))
+    .innerJoin(schema.hotelContract, eq(schema.hotelContract.id, schema.hotelRatePlan.contractId))
+    .innerJoin(schema.hotel, eq(schema.hotel.id, schema.hotelContract.hotelId))
+    .where(and(eq(schema.hotelRateBlackout.id, blackoutId), eq(schema.hotel.companyId, companyId)))
+    .limit(1);
+
+  if (!existing) {
+    throw new AccommodationContractingError(
+      404,
+      "HOTEL_RATE_BLACKOUT_NOT_FOUND",
+      "Hotel rate blackout not found."
+    );
+  }
+
+  try {
+    await db.delete(schema.hotelRateBlackout).where(eq(schema.hotelRateBlackout.id, blackoutId));
+  } finally {
+    await invalidateMasterDataCacheByPrefixes([
+      masterDataCachePrefix("accommodation-contracting", companyId),
+    ]);
+  }
+}
+
+export async function listHotelRateChildPolicies(
+  roomRateId: string,
+  searchParams: URLSearchParams,
+  headers: Headers
+): Promise<HotelRateChildPolicyRecord[]> {
+  const parsed = contractingListQuerySchema.safeParse(Object.fromEntries(searchParams));
+  if (!parsed.success) {
+    throw new AccommodationContractingError(
+      400,
+      "VALIDATION_ERROR",
+      normalizeZodError(parsed.error)
+    );
+  }
+
+  const companyId = await getCompanyId(headers);
+  await ensureRoomRateOwned(companyId, roomRateId);
+
+  const cacheKey = masterDataListCacheKey(
+    "accommodation-contracting",
+    companyId,
+    `hotel-rate-child-policies:${roomRateId}`,
+    parsed.data
+  );
+
+  return getOrSetMasterDataCache(cacheKey, async () => {
+    const clauses: SQL[] = [eq(schema.hotelRateChildPolicy.roomRateId, roomRateId)];
+    applyActiveFilter(parsed.data.isActive, clauses, schema.hotelRateChildPolicy.isActive);
+    applyTextSearch(parsed.data.q, clauses, [
+      schema.hotelRateChildPolicy.code,
+      schema.hotelRateChildPolicy.name,
+      schema.hotelRateChildPolicy.guestType,
+    ]);
+
+    return db
+      .select()
+      .from(schema.hotelRateChildPolicy)
+      .where(and(...clauses))
+      .orderBy(
+        asc(schema.hotelRateChildPolicy.minAge),
+        asc(schema.hotelRateChildPolicy.maxAge),
+        asc(schema.hotelRateChildPolicy.code)
+      )
+      .limit(parsed.data.limit);
+  });
+}
+
+export async function createHotelRateChildPolicy(
+  roomRateId: string,
+  payload: unknown,
+  headers: Headers
+): Promise<HotelRateChildPolicyRecord> {
+  const companyId = await ensureWritable(headers);
+  const parsed = createHotelRateChildPolicySchema.safeParse(payload);
+  if (!parsed.success) {
+    throw new AccommodationContractingError(
+      400,
+      "VALIDATION_ERROR",
+      normalizeZodError(parsed.error)
+    );
+  }
+
+  await ensureRoomRateOwned(companyId, roomRateId);
+
+  try {
+    const [created] = await db
+      .insert(schema.hotelRateChildPolicy)
+      .values({
+        ...parsed.data,
+        roomRateId,
+      })
+      .returning();
+    return created;
+  } finally {
+    await invalidateMasterDataCacheByPrefixes([
+      masterDataCachePrefix("accommodation-contracting", companyId),
+    ]);
+  }
+}
+
+export async function updateHotelRateChildPolicy(
+  childPolicyId: string,
+  payload: unknown,
+  headers: Headers
+): Promise<HotelRateChildPolicyRecord> {
+  const companyId = await ensureWritable(headers);
+  const parsed = updateHotelRateChildPolicySchema.safeParse(payload);
+  if (!parsed.success) {
+    throw new AccommodationContractingError(
+      400,
+      "VALIDATION_ERROR",
+      normalizeZodError(parsed.error)
+    );
+  }
+
+  const [existing] = await db
+    .select({ id: schema.hotelRateChildPolicy.id })
+    .from(schema.hotelRateChildPolicy)
+    .innerJoin(schema.hotelRoomRate, eq(schema.hotelRoomRate.id, schema.hotelRateChildPolicy.roomRateId))
+    .innerJoin(schema.hotel, eq(schema.hotel.id, schema.hotelRoomRate.hotelId))
+    .where(and(eq(schema.hotelRateChildPolicy.id, childPolicyId), eq(schema.hotel.companyId, companyId)))
+    .limit(1);
+
+  if (!existing) {
+    throw new AccommodationContractingError(
+      404,
+      "HOTEL_RATE_CHILD_POLICY_NOT_FOUND",
+      "Hotel rate child policy not found."
+    );
+  }
+
+  try {
+    const [updated] = await db
+      .update(schema.hotelRateChildPolicy)
+      .set({
+        ...parsed.data,
+        updatedAt: new Date(),
+      })
+      .where(eq(schema.hotelRateChildPolicy.id, childPolicyId))
+      .returning();
+    if (!updated) {
+      throw new AccommodationContractingError(
+        404,
+        "HOTEL_RATE_CHILD_POLICY_NOT_FOUND",
+        "Hotel rate child policy not found."
+      );
+    }
+    return updated;
+  } finally {
+    await invalidateMasterDataCacheByPrefixes([
+      masterDataCachePrefix("accommodation-contracting", companyId),
+    ]);
+  }
+}
+
+export async function deleteHotelRateChildPolicy(childPolicyId: string, headers: Headers) {
+  const companyId = await ensureWritable(headers);
+  const [existing] = await db
+    .select({ id: schema.hotelRateChildPolicy.id })
+    .from(schema.hotelRateChildPolicy)
+    .innerJoin(schema.hotelRoomRate, eq(schema.hotelRoomRate.id, schema.hotelRateChildPolicy.roomRateId))
+    .innerJoin(schema.hotel, eq(schema.hotel.id, schema.hotelRoomRate.hotelId))
+    .where(and(eq(schema.hotelRateChildPolicy.id, childPolicyId), eq(schema.hotel.companyId, companyId)))
+    .limit(1);
+
+  if (!existing) {
+    throw new AccommodationContractingError(
+      404,
+      "HOTEL_RATE_CHILD_POLICY_NOT_FOUND",
+      "Hotel rate child policy not found."
+    );
+  }
+
+  try {
+    await db.delete(schema.hotelRateChildPolicy).where(eq(schema.hotelRateChildPolicy.id, childPolicyId));
   } finally {
     await invalidateMasterDataCacheByPrefixes([
       masterDataCachePrefix("accommodation-contracting", companyId),
@@ -1340,6 +1965,373 @@ export async function createHotelFeeRule(
   }
 }
 
+export async function listHotelRateAdjustments(
+  ratePlanId: string,
+  searchParams: URLSearchParams,
+  headers: Headers
+): Promise<HotelRateAdjustmentRecord[]> {
+  const parsed = contractingListQuerySchema.safeParse(Object.fromEntries(searchParams));
+  if (!parsed.success) {
+    throw new AccommodationContractingError(
+      400,
+      "VALIDATION_ERROR",
+      normalizeZodError(parsed.error)
+    );
+  }
+
+  const companyId = await getCompanyId(headers);
+  await ensureRatePlanOwned(companyId, ratePlanId);
+
+  const cacheKey = masterDataListCacheKey(
+    "accommodation-contracting",
+    companyId,
+    `hotel-rate-adjustments:${ratePlanId}`,
+    parsed.data
+  );
+
+  return getOrSetMasterDataCache(cacheKey, async () => {
+    const clauses: SQL[] = [eq(schema.hotelRateAdjustment.ratePlanId, ratePlanId)];
+    applyActiveFilter(parsed.data.isActive, clauses, schema.hotelRateAdjustment.isActive);
+    applyTextSearch(parsed.data.q, clauses, [
+      schema.hotelRateAdjustment.code,
+      schema.hotelRateAdjustment.name,
+      schema.hotelRateAdjustment.adjustmentType,
+    ]);
+
+    return db
+      .select()
+      .from(schema.hotelRateAdjustment)
+      .where(and(...clauses))
+      .orderBy(
+        asc(schema.hotelRateAdjustment.priority),
+        asc(schema.hotelRateAdjustment.validFrom),
+        asc(schema.hotelRateAdjustment.code)
+      )
+      .limit(parsed.data.limit);
+  });
+}
+
+export async function createHotelRateAdjustment(
+  ratePlanId: string,
+  payload: unknown,
+  headers: Headers
+): Promise<HotelRateAdjustmentRecord> {
+  const companyId = await ensureWritable(headers);
+  const parsed = createHotelRateAdjustmentSchema.safeParse(payload);
+  if (!parsed.success) {
+    throw new AccommodationContractingError(
+      400,
+      "VALIDATION_ERROR",
+      normalizeZodError(parsed.error)
+    );
+  }
+
+  const hotelId = await ensureRatePlanOwned(companyId, ratePlanId);
+  if (parsed.data.roomTypeId) {
+    await ensureRoomTypeOwnedByHotel(hotelId, parsed.data.roomTypeId);
+  }
+  if (parsed.data.roomRateId) {
+    const roomRate = await ensureRoomRateOwned(companyId, parsed.data.roomRateId);
+    if (roomRate.ratePlanId !== ratePlanId) {
+      throw new AccommodationContractingError(
+        400,
+        "ROOM_RATE_SCOPE_MISMATCH",
+        "Room rate must belong to the selected rate plan."
+      );
+    }
+  }
+
+  try {
+    const [created] = await db
+      .insert(schema.hotelRateAdjustment)
+      .values({
+        ...parsed.data,
+        ratePlanId,
+      })
+      .returning();
+    return created;
+  } finally {
+    await invalidateMasterDataCacheByPrefixes([
+      masterDataCachePrefix("accommodation-contracting", companyId),
+    ]);
+  }
+}
+
+export async function updateHotelRateAdjustment(
+  adjustmentId: string,
+  payload: unknown,
+  headers: Headers
+): Promise<HotelRateAdjustmentRecord> {
+  const companyId = await ensureWritable(headers);
+  const parsed = updateHotelRateAdjustmentSchema.safeParse(payload);
+  if (!parsed.success) {
+    throw new AccommodationContractingError(
+      400,
+      "VALIDATION_ERROR",
+      normalizeZodError(parsed.error)
+    );
+  }
+
+  const [existing] = await db
+    .select({
+      id: schema.hotelRateAdjustment.id,
+      ratePlanId: schema.hotelRateAdjustment.ratePlanId,
+      hotelId: schema.hotelContract.hotelId,
+    })
+    .from(schema.hotelRateAdjustment)
+    .innerJoin(schema.hotelRatePlan, eq(schema.hotelRatePlan.id, schema.hotelRateAdjustment.ratePlanId))
+    .innerJoin(schema.hotelContract, eq(schema.hotelContract.id, schema.hotelRatePlan.contractId))
+    .innerJoin(schema.hotel, eq(schema.hotel.id, schema.hotelContract.hotelId))
+    .where(and(eq(schema.hotelRateAdjustment.id, adjustmentId), eq(schema.hotel.companyId, companyId)))
+    .limit(1);
+
+  if (!existing) {
+    throw new AccommodationContractingError(
+      404,
+      "HOTEL_RATE_ADJUSTMENT_NOT_FOUND",
+      "Hotel rate adjustment not found."
+    );
+  }
+
+  if (parsed.data.roomTypeId) {
+    await ensureRoomTypeOwnedByHotel(existing.hotelId, parsed.data.roomTypeId);
+  }
+  if (parsed.data.roomRateId) {
+    const roomRate = await ensureRoomRateOwned(companyId, parsed.data.roomRateId);
+    if (roomRate.ratePlanId !== existing.ratePlanId) {
+      throw new AccommodationContractingError(
+        400,
+        "ROOM_RATE_SCOPE_MISMATCH",
+        "Room rate must belong to the selected rate plan."
+      );
+    }
+  }
+
+  try {
+    const [updated] = await db
+      .update(schema.hotelRateAdjustment)
+      .set({
+        ...parsed.data,
+        updatedAt: new Date(),
+      })
+      .where(eq(schema.hotelRateAdjustment.id, adjustmentId))
+      .returning();
+    if (!updated) {
+      throw new AccommodationContractingError(
+        404,
+        "HOTEL_RATE_ADJUSTMENT_NOT_FOUND",
+        "Hotel rate adjustment not found."
+      );
+    }
+    return updated;
+  } finally {
+    await invalidateMasterDataCacheByPrefixes([
+      masterDataCachePrefix("accommodation-contracting", companyId),
+    ]);
+  }
+}
+
+export async function deleteHotelRateAdjustment(adjustmentId: string, headers: Headers) {
+  const companyId = await ensureWritable(headers);
+  const [existing] = await db
+    .select({ id: schema.hotelRateAdjustment.id })
+    .from(schema.hotelRateAdjustment)
+    .innerJoin(schema.hotelRatePlan, eq(schema.hotelRatePlan.id, schema.hotelRateAdjustment.ratePlanId))
+    .innerJoin(schema.hotelContract, eq(schema.hotelContract.id, schema.hotelRatePlan.contractId))
+    .innerJoin(schema.hotel, eq(schema.hotel.id, schema.hotelContract.hotelId))
+    .where(and(eq(schema.hotelRateAdjustment.id, adjustmentId), eq(schema.hotel.companyId, companyId)))
+    .limit(1);
+
+  if (!existing) {
+    throw new AccommodationContractingError(
+      404,
+      "HOTEL_RATE_ADJUSTMENT_NOT_FOUND",
+      "Hotel rate adjustment not found."
+    );
+  }
+
+  try {
+    await db.delete(schema.hotelRateAdjustment).where(eq(schema.hotelRateAdjustment.id, adjustmentId));
+  } finally {
+    await invalidateMasterDataCacheByPrefixes([
+      masterDataCachePrefix("accommodation-contracting", companyId),
+    ]);
+  }
+}
+
+export async function listHotelSellRateRules(
+  ratePlanId: string,
+  searchParams: URLSearchParams,
+  headers: Headers
+): Promise<HotelSellRateRuleRecord[]> {
+  const parsed = contractingListQuerySchema.safeParse(Object.fromEntries(searchParams));
+  if (!parsed.success) {
+    throw new AccommodationContractingError(
+      400,
+      "VALIDATION_ERROR",
+      normalizeZodError(parsed.error)
+    );
+  }
+
+  const companyId = await getCompanyId(headers);
+  await ensureRatePlanOwned(companyId, ratePlanId);
+
+  const cacheKey = masterDataListCacheKey(
+    "accommodation-contracting",
+    companyId,
+    `hotel-sell-rate-rules:${ratePlanId}`,
+    parsed.data
+  );
+
+  return getOrSetMasterDataCache(cacheKey, async () => {
+    const clauses: SQL[] = [eq(schema.hotelSellRateRule.sellRatePlanId, ratePlanId)];
+    applyActiveFilter(parsed.data.isActive, clauses, schema.hotelSellRateRule.isActive);
+    applyTextSearch(parsed.data.q, clauses, [
+      schema.hotelSellRateRule.code,
+      schema.hotelSellRateRule.name,
+      schema.hotelSellRateRule.calculationMode,
+    ]);
+
+    return db
+      .select()
+      .from(schema.hotelSellRateRule)
+      .where(and(...clauses))
+      .orderBy(asc(schema.hotelSellRateRule.validFrom), asc(schema.hotelSellRateRule.code))
+      .limit(parsed.data.limit);
+  });
+}
+
+export async function createHotelSellRateRule(
+  sellRatePlanId: string,
+  payload: unknown,
+  headers: Headers
+): Promise<HotelSellRateRuleRecord> {
+  const companyId = await ensureWritable(headers);
+  const parsed = createHotelSellRateRuleSchema.safeParse(payload);
+  if (!parsed.success) {
+    throw new AccommodationContractingError(
+      400,
+      "VALIDATION_ERROR",
+      normalizeZodError(parsed.error)
+    );
+  }
+
+  const hotelId = await ensureRatePlanOwned(companyId, sellRatePlanId);
+  await ensureRatePlanOwned(companyId, parsed.data.sourceRatePlanId);
+  if (parsed.data.roomTypeId) {
+    await ensureRoomTypeOwnedByHotel(hotelId, parsed.data.roomTypeId);
+  }
+
+  try {
+    const [created] = await db
+      .insert(schema.hotelSellRateRule)
+      .values({
+        ...parsed.data,
+        sellRatePlanId,
+      })
+      .returning();
+    return created;
+  } finally {
+    await invalidateMasterDataCacheByPrefixes([
+      masterDataCachePrefix("accommodation-contracting", companyId),
+    ]);
+  }
+}
+
+export async function updateHotelSellRateRule(
+  sellRateRuleId: string,
+  payload: unknown,
+  headers: Headers
+): Promise<HotelSellRateRuleRecord> {
+  const companyId = await ensureWritable(headers);
+  const parsed = updateHotelSellRateRuleSchema.safeParse(payload);
+  if (!parsed.success) {
+    throw new AccommodationContractingError(
+      400,
+      "VALIDATION_ERROR",
+      normalizeZodError(parsed.error)
+    );
+  }
+
+  const [existing] = await db
+    .select({
+      id: schema.hotelSellRateRule.id,
+      hotelId: schema.hotelContract.hotelId,
+    })
+    .from(schema.hotelSellRateRule)
+    .innerJoin(schema.hotelRatePlan, eq(schema.hotelRatePlan.id, schema.hotelSellRateRule.sellRatePlanId))
+    .innerJoin(schema.hotelContract, eq(schema.hotelContract.id, schema.hotelRatePlan.contractId))
+    .innerJoin(schema.hotel, eq(schema.hotel.id, schema.hotelContract.hotelId))
+    .where(and(eq(schema.hotelSellRateRule.id, sellRateRuleId), eq(schema.hotel.companyId, companyId)))
+    .limit(1);
+
+  if (!existing) {
+    throw new AccommodationContractingError(
+      404,
+      "HOTEL_SELL_RATE_RULE_NOT_FOUND",
+      "Hotel sell rate rule not found."
+    );
+  }
+
+  if (parsed.data.sourceRatePlanId) {
+    await ensureRatePlanOwned(companyId, parsed.data.sourceRatePlanId);
+  }
+  if (parsed.data.roomTypeId) {
+    await ensureRoomTypeOwnedByHotel(existing.hotelId, parsed.data.roomTypeId);
+  }
+
+  try {
+    const [updated] = await db
+      .update(schema.hotelSellRateRule)
+      .set({
+        ...parsed.data,
+        updatedAt: new Date(),
+      })
+      .where(eq(schema.hotelSellRateRule.id, sellRateRuleId))
+      .returning();
+    if (!updated) {
+      throw new AccommodationContractingError(
+        404,
+        "HOTEL_SELL_RATE_RULE_NOT_FOUND",
+        "Hotel sell rate rule not found."
+      );
+    }
+    return updated;
+  } finally {
+    await invalidateMasterDataCacheByPrefixes([
+      masterDataCachePrefix("accommodation-contracting", companyId),
+    ]);
+  }
+}
+
+export async function deleteHotelSellRateRule(sellRateRuleId: string, headers: Headers) {
+  const companyId = await ensureWritable(headers);
+  const [existing] = await db
+    .select({ id: schema.hotelSellRateRule.id })
+    .from(schema.hotelSellRateRule)
+    .innerJoin(schema.hotelRatePlan, eq(schema.hotelRatePlan.id, schema.hotelSellRateRule.sellRatePlanId))
+    .innerJoin(schema.hotelContract, eq(schema.hotelContract.id, schema.hotelRatePlan.contractId))
+    .innerJoin(schema.hotel, eq(schema.hotel.id, schema.hotelContract.hotelId))
+    .where(and(eq(schema.hotelSellRateRule.id, sellRateRuleId), eq(schema.hotel.companyId, companyId)))
+    .limit(1);
+
+  if (!existing) {
+    throw new AccommodationContractingError(
+      404,
+      "HOTEL_SELL_RATE_RULE_NOT_FOUND",
+      "Hotel sell rate rule not found."
+    );
+  }
+
+  try {
+    await db.delete(schema.hotelSellRateRule).where(eq(schema.hotelSellRateRule.id, sellRateRuleId));
+  } finally {
+    await invalidateMasterDataCacheByPrefixes([
+      masterDataCachePrefix("accommodation-contracting", companyId),
+    ]);
+  }
+}
+
 export async function updateHotelFeeRule(
   feeRuleId: string,
   payload: unknown,
@@ -1500,6 +2492,147 @@ export async function createHotelInventoryDay(
   }
 }
 
+export async function listHotelContractInventoryDays(
+  contractId: string,
+  searchParams: URLSearchParams,
+  headers: Headers
+): Promise<HotelContractInventoryDayRecord[]> {
+  const parsed = inventoryDayListQuerySchema.safeParse(Object.fromEntries(searchParams));
+  if (!parsed.success) {
+    throw new AccommodationContractingError(
+      400,
+      "VALIDATION_ERROR",
+      normalizeZodError(parsed.error)
+    );
+  }
+
+  const companyId = await getCompanyId(headers);
+  await ensureContractOwned(companyId, contractId);
+
+  const cacheKey = masterDataListCacheKey(
+    "accommodation-contracting",
+    companyId,
+    `hotel-contract-inventory-days:${contractId}`,
+    parsed.data
+  );
+
+  return getOrSetMasterDataCache(cacheKey, async () => {
+    const clauses: SQL[] = [eq(schema.hotelContractInventoryDay.contractId, contractId)];
+    applyTextSearch(parsed.data.q, clauses, [schema.hotelContractInventoryDay.code]);
+    if (parsed.data.roomTypeId) {
+      clauses.push(eq(schema.hotelContractInventoryDay.roomTypeId, parsed.data.roomTypeId));
+    }
+    if (parsed.data.dateFrom) {
+      clauses.push(gte(schema.hotelContractInventoryDay.date, parsed.data.dateFrom));
+    }
+    if (parsed.data.dateTo) {
+      clauses.push(lte(schema.hotelContractInventoryDay.date, parsed.data.dateTo));
+    }
+
+    return db
+      .select()
+      .from(schema.hotelContractInventoryDay)
+      .where(and(...clauses))
+      .orderBy(asc(schema.hotelContractInventoryDay.date), asc(schema.hotelContractInventoryDay.roomTypeId))
+      .limit(parsed.data.limit);
+  });
+}
+
+export async function createHotelContractInventoryDay(
+  contractId: string,
+  payload: unknown,
+  headers: Headers
+): Promise<HotelContractInventoryDayRecord> {
+  const companyId = await ensureWritable(headers);
+  const parsed = createHotelContractInventoryDaySchema.safeParse(payload);
+  if (!parsed.success) {
+    throw new AccommodationContractingError(
+      400,
+      "VALIDATION_ERROR",
+      normalizeZodError(parsed.error)
+    );
+  }
+
+  const hotelId = await ensureContractOwned(companyId, contractId);
+  await ensureRoomTypeOwnedByHotel(hotelId, parsed.data.roomTypeId);
+
+  try {
+    const [created] = await db
+      .insert(schema.hotelContractInventoryDay)
+      .values({
+        ...parsed.data,
+        contractId,
+        hotelId,
+      })
+      .returning();
+    return created;
+  } finally {
+    await invalidateMasterDataCacheByPrefixes([
+      masterDataCachePrefix("accommodation-contracting", companyId),
+    ]);
+  }
+}
+
+export async function updateHotelContractInventoryDay(
+  inventoryDayId: string,
+  payload: unknown,
+  headers: Headers
+): Promise<HotelContractInventoryDayRecord> {
+  const companyId = await ensureWritable(headers);
+  const parsed = updateHotelContractInventoryDaySchema.safeParse(payload);
+  if (!parsed.success) {
+    throw new AccommodationContractingError(
+      400,
+      "VALIDATION_ERROR",
+      normalizeZodError(parsed.error)
+    );
+  }
+
+  const existing = await ensureContractInventoryDayOwned(companyId, inventoryDayId);
+  if (parsed.data.roomTypeId) {
+    await ensureRoomTypeOwnedByHotel(existing.hotelId, parsed.data.roomTypeId);
+  }
+
+  try {
+    const [updated] = await db
+      .update(schema.hotelContractInventoryDay)
+      .set({
+        ...parsed.data,
+        updatedAt: new Date(),
+      })
+      .where(eq(schema.hotelContractInventoryDay.id, inventoryDayId))
+      .returning();
+
+    if (!updated) {
+      throw new AccommodationContractingError(
+        404,
+        "HOTEL_CONTRACT_INVENTORY_DAY_NOT_FOUND",
+        "Hotel contract inventory day not found."
+      );
+    }
+    return updated;
+  } finally {
+    await invalidateMasterDataCacheByPrefixes([
+      masterDataCachePrefix("accommodation-contracting", companyId),
+    ]);
+  }
+}
+
+export async function deleteHotelContractInventoryDay(inventoryDayId: string, headers: Headers) {
+  const companyId = await ensureWritable(headers);
+  await ensureContractInventoryDayOwned(companyId, inventoryDayId);
+
+  try {
+    await db
+      .delete(schema.hotelContractInventoryDay)
+      .where(eq(schema.hotelContractInventoryDay.id, inventoryDayId));
+  } finally {
+    await invalidateMasterDataCacheByPrefixes([
+      masterDataCachePrefix("accommodation-contracting", companyId),
+    ]);
+  }
+}
+
 export async function updateHotelInventoryDay(
   inventoryDayId: string,
   payload: unknown,
@@ -1573,14 +2706,14 @@ export async function loadHotelContractingBundle(
     const contractIds = contracts.map((row) => row.id);
     const policyIds = cancellationPolicies.map((row) => row.id);
 
-    const [ratePlans, restrictions, feeRules, roomRates, cancellationPolicyRules] =
+    const [ratePlans, restrictions, blackouts, feeRules, roomRates, cancellationPolicyRules] =
       await Promise.all([
         contractIds.length === 0
           ? Promise.resolve([] as HotelRatePlanRecord[])
           : db
               .select()
               .from(schema.hotelRatePlan)
-              .where(sql`${schema.hotelRatePlan.contractId} = ANY(${contractIds})`)
+              .where(inArray(schema.hotelRatePlan.contractId, contractIds))
               .orderBy(asc(schema.hotelRatePlan.validFrom), asc(schema.hotelRatePlan.code)),
         contractIds.length === 0
           ? Promise.resolve([] as HotelRateRestrictionRecord[])
@@ -1592,7 +2725,18 @@ export async function loadHotelContractingBundle(
                 eq(schema.hotelRatePlan.id, schema.hotelRateRestriction.ratePlanId)
               )
               .where(inArray(schema.hotelRatePlan.contractId, contractIds))
-              .then((rows) => rows.map((row) => row.hotelRateRestriction)),
+              .then((rows) => rows.map((row) => row.hotel_rate_restriction)),
+        contractIds.length === 0
+          ? Promise.resolve([] as HotelRateBlackoutRecord[])
+          : db
+              .select()
+              .from(schema.hotelRateBlackout)
+              .innerJoin(
+                schema.hotelRatePlan,
+                eq(schema.hotelRatePlan.id, schema.hotelRateBlackout.ratePlanId)
+              )
+              .where(inArray(schema.hotelRatePlan.contractId, contractIds))
+              .then((rows) => rows.map((row) => row.hotel_rate_blackout)),
         contractIds.length === 0
           ? Promise.resolve([] as HotelFeeRuleRecord[])
           : db
@@ -1603,7 +2747,7 @@ export async function loadHotelContractingBundle(
                 eq(schema.hotelRatePlan.id, schema.hotelFeeRule.ratePlanId)
               )
               .where(inArray(schema.hotelRatePlan.contractId, contractIds))
-              .then((rows) => rows.map((row) => row.hotelFeeRule)),
+              .then((rows) => rows.map((row) => row.hotel_fee_rule)),
         contractIds.length === 0
           ? Promise.resolve([] as HotelRoomRateRecord[])
           : db
@@ -1614,7 +2758,7 @@ export async function loadHotelContractingBundle(
                 eq(schema.hotelRatePlan.id, schema.hotelRoomRate.ratePlanId)
               )
               .where(inArray(schema.hotelRatePlan.contractId, contractIds))
-              .then((rows) => rows.map((row) => row.hotelRoomRate)),
+              .then((rows) => rows.map((row) => row.hotel_room_rate)),
         policyIds.length === 0
           ? Promise.resolve([] as HotelCancellationPolicyRuleRecord[])
           : db
@@ -1627,15 +2771,89 @@ export async function loadHotelContractingBundle(
               ),
       ]);
 
+    const ratePlanIds = ratePlans.map((row) => row.id);
+    const roomRateIds = roomRates.map((row) => row.id);
+
+    const loadOptionalEntities = async () => {
+      try {
+        return await Promise.all([
+          roomRateIds.length === 0
+            ? Promise.resolve([] as HotelRateChildPolicyRecord[])
+            : db
+                .select()
+                .from(schema.hotelRateChildPolicy)
+                .where(inArray(schema.hotelRateChildPolicy.roomRateId, roomRateIds))
+                .orderBy(
+                  asc(schema.hotelRateChildPolicy.minAge),
+                  asc(schema.hotelRateChildPolicy.maxAge),
+                  asc(schema.hotelRateChildPolicy.code)
+                ),
+          ratePlanIds.length === 0
+            ? Promise.resolve([] as HotelRateAdjustmentRecord[])
+            : db
+                .select()
+                .from(schema.hotelRateAdjustment)
+                .where(inArray(schema.hotelRateAdjustment.ratePlanId, ratePlanIds))
+                .orderBy(
+                  asc(schema.hotelRateAdjustment.priority),
+                  asc(schema.hotelRateAdjustment.validFrom),
+                  asc(schema.hotelRateAdjustment.code)
+                ),
+          ratePlanIds.length === 0
+            ? Promise.resolve([] as HotelSellRateRuleRecord[])
+            : db
+                .select()
+                .from(schema.hotelSellRateRule)
+                .where(inArray(schema.hotelSellRateRule.sellRatePlanId, ratePlanIds))
+                .orderBy(
+                  asc(schema.hotelSellRateRule.validFrom),
+                  asc(schema.hotelSellRateRule.code)
+                ),
+          contractIds.length === 0
+            ? Promise.resolve([] as HotelContractInventoryDayRecord[])
+            : db
+                .select()
+                .from(schema.hotelContractInventoryDay)
+                .where(inArray(schema.hotelContractInventoryDay.contractId, contractIds))
+                .orderBy(
+                  asc(schema.hotelContractInventoryDay.date),
+                  asc(schema.hotelContractInventoryDay.roomTypeId)
+                ),
+        ]);
+      } catch (error) {
+        if (isMissingOptionalContractingSchemaError(error)) {
+          console.warn(
+            "[accommodation-contracting] Optional contracting tables are not available yet. Returning empty optional sections.",
+            getDatabaseErrorDetails(error)
+          );
+          return [
+            [] as HotelRateChildPolicyRecord[],
+            [] as HotelRateAdjustmentRecord[],
+            [] as HotelSellRateRuleRecord[],
+            [] as HotelContractInventoryDayRecord[],
+          ] as const;
+        }
+        throw error;
+      }
+    };
+
+    const [childPolicies, adjustments, sellRateRules, contractInventoryDays] =
+      await loadOptionalEntities();
+
     return {
       contracts,
       ratePlans,
       roomRates,
       restrictions,
+      blackouts,
+      childPolicies,
+      adjustments,
+      sellRateRules,
       feeRules,
       cancellationPolicies,
       cancellationPolicyRules,
       inventoryDays,
+      contractInventoryDays,
     };
   });
 }
@@ -1872,6 +3090,20 @@ export function toAccommodationContractingErrorResponse(error: unknown) {
       body: { message: error.message, code: error.code },
     };
   }
+  if (isSchemaOutOfDateError(error)) {
+    console.error("[accommodation-contracting] Schema out of date.", error);
+    const details = getDatabaseErrorDetails(error);
+    return {
+      status: 500,
+      body: {
+        message:
+          "Accommodation contracting schema is out of date. Run `npm run db:push` to apply the latest hotel contracting tables and columns.",
+        code: "SCHEMA_OUT_OF_DATE",
+        detail: details?.message ?? null,
+      },
+    };
+  }
+  console.error("[accommodation-contracting] Unexpected error.", error);
   return {
     status: 500,
     body: {

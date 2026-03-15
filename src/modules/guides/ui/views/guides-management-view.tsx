@@ -1,8 +1,9 @@
 "use client";
 
 import { useDashboardAccessState } from "@/modules/dashboard/ui/components/dashboard-shell-provider";
+import type { GuideResourceKey } from "@/modules/guides/shared/guides-management-config";
 import type { GuidesManagementInitialData } from "@/modules/guides/shared/guides-management-types";
-import { GuidesManagementSection, type GuideResourceKey } from "@/modules/guides/ui/components/guides-management-section";
+import { GuidesManagementSection } from "@/modules/guides/ui/components/guides-management-section";
 
 export function GuidesManagementView({
   initialResource = "guides",

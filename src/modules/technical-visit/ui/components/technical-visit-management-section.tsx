@@ -7,10 +7,17 @@ import { TechnicalVisitManagementView as TechnicalVisitManagementImpl } from "@/
 export function TechnicalVisitManagementSection({
   initialResource = "technical-visits",
   initialData = null,
+  isReadOnly,
 }: {
   initialResource?: TechnicalVisitResourceKey;
   initialData?: TechnicalVisitManagementInitialData | null;
   isReadOnly: boolean;
 }) {
-  return <TechnicalVisitManagementImpl initialResource={initialResource} initialData={initialData} />;
+  return (
+    <TechnicalVisitManagementImpl
+      initialResource={initialResource}
+      initialData={initialData}
+      isReadOnly={isReadOnly}
+    />
+  );
 }

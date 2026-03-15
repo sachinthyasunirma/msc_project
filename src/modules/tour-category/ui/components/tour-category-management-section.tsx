@@ -13,6 +13,11 @@ export function TourCategoryManagementSection({
   initialData?: TourCategoryManagementInitialData | null;
   isReadOnly: boolean;
 }) {
-  void isReadOnly;
-  return <TourCategoryManagementImpl initialResource={initialResource} initialData={initialData} />;
+  return (
+    <TourCategoryManagementImpl
+      initialResource={initialResource}
+      initialData={initialData}
+      isReadOnly={isReadOnly}
+    />
+  );
 }

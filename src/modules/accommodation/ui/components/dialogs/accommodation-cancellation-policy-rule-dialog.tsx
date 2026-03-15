@@ -51,11 +51,11 @@ export function AccommodationCancellationPolicyRuleDialog({
 }: Props) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-2xl">
+      <DialogContent className="w-[96vw] max-w-[96vw] max-h-[90vh] overflow-y-auto sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>{mode === "create" ? "Add Cancellation Rule" : "Edit Cancellation Rule"}</DialogTitle>
           <DialogDescription>
-            Define the penalty window and charge basis for this cancellation policy.
+            Define the penalty window and charge basis for this cancellation policy. Use a range such as 30 to 15 days before check-in.
           </DialogDescription>
         </DialogHeader>
 
@@ -84,7 +84,7 @@ export function AccommodationCancellationPolicyRuleDialog({
             </Select>
           </div>
           <div className="grid gap-2">
-            <Label>From days before</Label>
+            <Label>From days before check-in</Label>
             <Input
               type="number"
               min="0"
@@ -94,7 +94,7 @@ export function AccommodationCancellationPolicyRuleDialog({
             />
           </div>
           <div className="grid gap-2">
-            <Label>To days before</Label>
+            <Label>To days before check-in</Label>
             <Input
               type="number"
               min="0"

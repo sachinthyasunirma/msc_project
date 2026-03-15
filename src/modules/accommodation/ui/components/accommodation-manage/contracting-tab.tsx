@@ -138,126 +138,30 @@ export function ContractingTab({
       </div>
 
       <Accordion type="multiple" className="rounded-lg border border-border/70 bg-card px-4">
-        <AccordionItem value="contracts">
-          <AccordionTrigger>
-            <div className="flex w-full items-center justify-between gap-3 pr-2">
-              <span>Hotel Contracts</span>
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                onClick={(event) => {
-                  event.preventDefault();
-                  event.stopPropagation();
-                  contractingState.openContractDialog("create");
-                }}
-                disabled={isReadOnly || contractingState.saving}
-              >
-                <Plus className="mr-2 size-4" />
-                Add Contract
-              </Button>
-            </div>
-          </AccordionTrigger>
-          <AccordionContent>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Code</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Currency</TableHead>
-                  <TableHead>Validity</TableHead>
-                  <TableHead>Release</TableHead>
-                  <TableHead className="w-[120px]">Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {contracting.contracts.length > 0 ? (
-                  contracting.contracts.map((row) => (
-                    <TableRow
-                      key={row.id}
-                      data-state={contractingState.selectedContractId === row.id ? "selected" : undefined}
-                      onClick={() => contractingState.setSelectedContractId(row.id)}
-                      className="cursor-pointer"
-                    >
-                      <TableCell className="font-medium">
-                        <div>{row.code}</div>
-                        <div className="text-xs text-muted-foreground">{row.contractRef || "No supplier ref"}</div>
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant={row.isActive ? "secondary" : "outline"}>{row.status}</Badge>
-                      </TableCell>
-                      <TableCell>{row.currencyCode}</TableCell>
-                      <TableCell>{formatDate(row.validFrom)} to {formatDate(row.validTo)}</TableCell>
-                      <TableCell>{row.releaseDaysDefault ?? "Default"}</TableCell>
-                      <TableCell>
-                        <div className="flex items-center justify-end gap-1">
-                          <Button
-                            type="button"
-                            size="icon"
-                            variant="ghost"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              contractingState.openContractDialog("edit", row);
-                            }}
-                            disabled={isReadOnly || contractingState.saving}
-                          >
-                            <Pencil className="size-4" />
-                          </Button>
-                          <Button
-                            type="button"
-                            size="icon"
-                            variant="ghost"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              void contractingState.deleteContract(row);
-                            }}
-                            disabled={isReadOnly || contractingState.saving}
-                          >
-                            <Trash2 className="size-4" />
-                          </Button>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ))
-                ) : (
-                  <TableRow>
-                    <TableCell colSpan={6} className="text-muted-foreground">
-                      No contracts configured.
-                    </TableCell>
-                  </TableRow>
-                )}
-              </TableBody>
-            </Table>
-          </AccordionContent>
-        </AccordionItem>
-
         <AccordionItem value="rate-plans">
-          <AccordionTrigger>
-            <div className="flex w-full items-center justify-between gap-3 pr-2">
+          <div className="flex items-center gap-3">
+            <AccordionTrigger className="min-w-0 flex-1">
               <div>
                 <div>Rate Plans & Occupancy Buying</div>
                 <div className="text-xs font-normal text-muted-foreground">
                   {contractingState.selectedContract
                     ? `Selected contract: ${contractingState.selectedContract.code}`
-                    : "Select a contract to manage its plans"}
+                    : "Create a hotel contract in the next section first, then manage its plans here."}
                 </div>
               </div>
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                onClick={(event) => {
-                  event.preventDefault();
-                  event.stopPropagation();
-                  contractingState.openRatePlanDialog("create");
-                }}
-                disabled={isReadOnly || contractingState.saving || !contractingState.selectedContractId}
-              >
-                <Plus className="mr-2 size-4" />
-                Add Rate Plan
-              </Button>
-            </div>
-          </AccordionTrigger>
+            </AccordionTrigger>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => contractingState.openRatePlanDialog("create")}
+              disabled={isReadOnly || contractingState.saving || !contractingState.selectedContractId}
+              className="shrink-0"
+            >
+              <Plus className="mr-2 size-4" />
+              Add Rate Plan
+            </Button>
+          </div>
           <AccordionContent className="space-y-4">
             <Table>
               <TableHeader>
@@ -396,6 +300,96 @@ export function ContractingTab({
                       {contractingState.selectedRatePlanId
                         ? "No occupancy-based room rates configured for the selected rate plan."
                         : "Select a rate plan to manage occupancy room rates."}
+                    </TableCell>
+                  </TableRow>
+                )}
+              </TableBody>
+            </Table>
+          </AccordionContent>
+        </AccordionItem>
+
+        <AccordionItem value="contracts">
+          <div className="flex items-center gap-3">
+            <AccordionTrigger className="min-w-0 flex-1">
+              <span>Hotel Contracts</span>
+            </AccordionTrigger>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => contractingState.openContractDialog("create")}
+              disabled={isReadOnly || contractingState.saving}
+              className="shrink-0"
+            >
+              <Plus className="mr-2 size-4" />
+              Add Contract
+            </Button>
+          </div>
+          <AccordionContent>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Code</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Currency</TableHead>
+                  <TableHead>Validity</TableHead>
+                  <TableHead>Release</TableHead>
+                  <TableHead className="w-[120px]">Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {contracting.contracts.length > 0 ? (
+                  contracting.contracts.map((row) => (
+                    <TableRow
+                      key={row.id}
+                      data-state={contractingState.selectedContractId === row.id ? "selected" : undefined}
+                      onClick={() => contractingState.setSelectedContractId(row.id)}
+                      className="cursor-pointer"
+                    >
+                      <TableCell className="font-medium">
+                        <div>{row.code}</div>
+                        <div className="text-xs text-muted-foreground">{row.contractRef || "No supplier ref"}</div>
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant={row.isActive ? "secondary" : "outline"}>{row.status}</Badge>
+                      </TableCell>
+                      <TableCell>{row.currencyCode}</TableCell>
+                      <TableCell>{formatDate(row.validFrom)} to {formatDate(row.validTo)}</TableCell>
+                      <TableCell>{row.releaseDaysDefault ?? "Default"}</TableCell>
+                      <TableCell>
+                        <div className="flex items-center justify-end gap-1">
+                          <Button
+                            type="button"
+                            size="icon"
+                            variant="ghost"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              contractingState.openContractDialog("edit", row);
+                            }}
+                            disabled={isReadOnly || contractingState.saving}
+                          >
+                            <Pencil className="size-4" />
+                          </Button>
+                          <Button
+                            type="button"
+                            size="icon"
+                            variant="ghost"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              void contractingState.deleteContract(row);
+                            }}
+                            disabled={isReadOnly || contractingState.saving}
+                          >
+                            <Trash2 className="size-4" />
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))
+                ) : (
+                  <TableRow>
+                    <TableCell colSpan={6} className="text-muted-foreground">
+                      No contracts configured yet. Add a contract here before creating rate plans.
                     </TableCell>
                   </TableRow>
                 )}
@@ -716,25 +710,22 @@ export function ContractingTab({
         </AccordionItem>
 
         <AccordionItem value="inventory">
-          <AccordionTrigger>
-            <div className="flex w-full items-center justify-between gap-3 pr-2">
+          <div className="flex items-center gap-3">
+            <AccordionTrigger className="min-w-0 flex-1">
               <span>Inventory Snapshot</span>
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                onClick={(event) => {
-                  event.preventDefault();
-                  event.stopPropagation();
-                  contractingState.openInventoryDayDialog("create");
-                }}
-                disabled={isReadOnly || contractingState.saving}
-              >
-                <Plus className="mr-2 size-4" />
-                Add Inventory Day
-              </Button>
-            </div>
-          </AccordionTrigger>
+            </AccordionTrigger>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => contractingState.openInventoryDayDialog("create")}
+              disabled={isReadOnly || contractingState.saving}
+              className="shrink-0"
+            >
+              <Plus className="mr-2 size-4" />
+              Add Inventory Day
+            </Button>
+          </div>
           <AccordionContent>
             <Table>
               <TableHeader>

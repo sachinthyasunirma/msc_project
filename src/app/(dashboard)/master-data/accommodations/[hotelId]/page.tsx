@@ -3,8 +3,6 @@ import {
   getHotelById,
   listAvailability,
   listHotelImages,
-  listRoomRateHeaders,
-  listRoomRates,
   listRoomTypes,
 } from "@/modules/accommodation/server/accommodation-service";
 import { loadAccommodationContractingData } from "@/modules/accommodation/server/accommodation-contracting-loader";
@@ -34,8 +32,6 @@ async function loadInitialHotelDetail(hotelId: string) {
     const [
       selectedHotel,
       roomTypes,
-      roomRateHeaders,
-      roomRates,
       availability,
       images,
       seasons,
@@ -43,8 +39,6 @@ async function loadInitialHotelDetail(hotelId: string) {
     ] = await Promise.all([
       getHotelById(hotelId, requestHeaders),
       listRoomTypes(hotelId, nestedParams, requestHeaders),
-      listRoomRateHeaders(hotelId, nestedParams, requestHeaders),
-      listRoomRates(hotelId, nestedParams, requestHeaders),
       listAvailability(hotelId, nestedParams, requestHeaders),
       listHotelImages(hotelId, nestedParams, requestHeaders),
       listSeasons(seasonParams, requestHeaders),
@@ -54,8 +48,6 @@ async function loadInitialHotelDetail(hotelId: string) {
     return {
       selectedHotel: toPlainRecord(selectedHotel),
       roomTypes: roomTypes.map((item) => toPlainRecord(item)),
-      roomRateHeaders: roomRateHeaders.map((item) => toPlainRecord(item)),
-      roomRates: roomRates.map((item) => toPlainRecord(item)),
       availability: availability.map((item) => toPlainRecord(item)),
       images: images.map((item) => toPlainRecord(item)),
       seasons: seasons.items.map((item) => toPlainRecord(item)),

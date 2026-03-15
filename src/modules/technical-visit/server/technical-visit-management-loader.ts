@@ -68,7 +68,7 @@ export async function loadTechnicalVisitManagementInitialData(
       })),
       restaurants: toPlainRecords(
         organizations.filter((row) => {
-          const type = String(row.type ?? "");
+          const type = String((row as Record<string, unknown>).type ?? "");
           return type === "SUPPLIER" || type === "RESTAURANT";
         })
       ),

@@ -49,7 +49,7 @@ function AccommodationRoomRateDialogComponent({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="w-[96vw] max-w-[96vw] sm:max-w-5xl">
+      <DialogContent className="w-[96vw] max-w-[96vw] max-h-[90vh] overflow-y-auto sm:max-w-5xl">
         <DialogHeader>
           <DialogTitle>{mode === "create" ? "Add Room Rate" : "Edit Room Rate"}</DialogTitle>
         </DialogHeader>

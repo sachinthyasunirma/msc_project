@@ -48,7 +48,7 @@ export function AccommodationRoomRateHeaderDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
+      <DialogContent className="w-[96vw] max-w-[96vw] max-h-[90vh] overflow-y-auto sm:max-w-3xl">
         <DialogHeader>
           <DialogTitle>{mode === "create" ? "Add Room Rate Header" : "Edit Room Rate Header"}</DialogTitle>
         </DialogHeader>

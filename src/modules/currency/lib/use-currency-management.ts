@@ -1,8 +1,18 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  keepPreviousData,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useConfirm } from "@/components/app-confirm-provider";
 import { notify } from "@/lib/notify";
+import {
+  buildCurrencyRecordsParams,
+  currencyKeys,
+} from "@/modules/currency/lib/currency-query";
 import {
   createCurrencyRecord,
   deleteCurrencyRecord,
@@ -28,6 +38,8 @@ type UseCurrencyManagementOptions = {
   isReadOnly: boolean;
 };
 
+const EMPTY_ROWS: Array<Record<string, unknown>> = [];
+
 export function useCurrencyManagement({
   initialResource = "currencies",
   managedCurrencyId = "",
@@ -35,22 +47,10 @@ export function useCurrencyManagement({
   isReadOnly,
 }: UseCurrencyManagementOptions) {
   const confirm = useConfirm();
+  const queryClient = useQueryClient();
   const isCurrencyManageMode = Boolean(managedCurrencyId);
-  const skipInitialRecordsLoadRef = useRef(
-    Boolean(initialData && initialData.resource === initialResource)
-  );
-  const skipInitialLookupsLoadRef = useRef(Boolean(initialData));
   const [resource, setResource] = useState<CurrencyResourceKey>(initialResource);
   const [query, setQuery] = useState("");
-  const [records, setRecords] = useState<Array<Record<string, unknown>>>(initialData?.records ?? []);
-  const [loading, setLoading] = useState(!initialData);
-  const [saving, setSaving] = useState(false);
-  const [currencies, setCurrencies] = useState<Array<Record<string, unknown>>>(
-    initialData?.currencies ?? []
-  );
-  const [providers, setProviders] = useState<Array<Record<string, unknown>>>(
-    initialData?.providers ?? []
-  );
   const [dialog, setDialog] = useState<{
     open: boolean;
     mode: "create" | "edit";
@@ -59,6 +59,112 @@ export function useCurrencyManagement({
   const [form, setForm] = useState<Record<string, unknown>>({});
   const [pageSize, setPageSize] = useState(25);
   const [currentPage, setCurrentPage] = useState(1);
+
+  useEffect(() => {
+    setResource(initialResource);
+  }, [initialResource]);
+
+  const recordsInput = useMemo(
+    () =>
+      buildCurrencyRecordsParams({
+        resource,
+        q: query || undefined,
+        limit: 200,
+        currencyId:
+          isCurrencyManageMode &&
+          (resource === "exchange-rates" || resource === "money-settings")
+            ? managedCurrencyId
+            : undefined,
+      }),
+    [isCurrencyManageMode, managedCurrencyId, query, resource]
+  );
+
+  const isDefaultRecordsQuery = resource === initialResource && query.length === 0;
+  const lookupsInitialData = initialData
+    ? {
+        currencies: initialData.currencies,
+        providers: initialData.providers,
+      }
+    : undefined;
+
+  const {
+    data: lookupsData,
+    error: lookupsError,
+    isFetching: lookupsLoading,
+    refetch: refetchLookups,
+  } = useQuery({
+    queryKey: currencyKeys.lookups(),
+    queryFn: async () => {
+      const [currencies, providers] = await Promise.all([
+        listCurrencyRecords("currencies", { limit: 200 }),
+        listCurrencyRecords("fx-providers", { limit: 200 }),
+      ]);
+      return {
+        currencies,
+        providers,
+      };
+    },
+    initialData: lookupsInitialData,
+  });
+
+  const {
+    data: records = EMPTY_ROWS,
+    error: recordsError,
+    isFetching: recordsLoading,
+    refetch: refetchRecords,
+  } = useQuery({
+    queryKey: currencyKeys.records({
+      resource,
+      q: recordsInput.q,
+      currencyId: recordsInput.currencyId,
+      limit: recordsInput.limit,
+    }),
+    queryFn: () => listCurrencyRecords(resource, recordsInput),
+    initialData: isDefaultRecordsQuery ? initialData?.records ?? undefined : undefined,
+    placeholderData: keepPreviousData,
+  });
+
+  const createCurrencyMutation = useMutation({
+    mutationFn: ({ targetResource, payload }: { targetResource: string; payload: Record<string, unknown> }) =>
+      createCurrencyRecord(targetResource, payload),
+  });
+  const updateCurrencyMutation = useMutation({
+    mutationFn: ({
+      targetResource,
+      id,
+      payload,
+    }: {
+      targetResource: string;
+      id: string;
+      payload: Record<string, unknown>;
+    }) => updateCurrencyRecord(targetResource, id, payload),
+  });
+  const deleteCurrencyMutation = useMutation({
+    mutationFn: ({ targetResource, id }: { targetResource: string; id: string }) =>
+      deleteCurrencyRecord(targetResource, id),
+  });
+
+  const currencies = lookupsData?.currencies ?? EMPTY_ROWS;
+  const providers = lookupsData?.providers ?? EMPTY_ROWS;
+  const loading = lookupsLoading || recordsLoading;
+  const saving =
+    createCurrencyMutation.isPending ||
+    updateCurrencyMutation.isPending ||
+    deleteCurrencyMutation.isPending;
+
+  useEffect(() => {
+    if (!lookupsError) return;
+    notify.error(
+      lookupsError instanceof Error ? lookupsError.message : "Failed to load currency lookups."
+    );
+  }, [lookupsError]);
+
+  useEffect(() => {
+    if (!recordsError) return;
+    notify.error(
+      recordsError instanceof Error ? recordsError.message : "Failed to load records."
+    );
+  }, [recordsError]);
 
   const managedCurrency = useMemo(
     () => currencies.find((item) => String(item.id) === managedCurrencyId) ?? null,
@@ -186,61 +292,6 @@ export function useCurrencyManagement({
     [fields, isCurrencyManageMode, resource]
   );
 
-  const loadLookups = useCallback(async () => {
-    try {
-      const [currencyList, providerList] = await Promise.all([
-        listCurrencyRecords("currencies", { limit: 200 }),
-        listCurrencyRecords("fx-providers", { limit: 200 }),
-      ]);
-      setCurrencies(currencyList);
-      setProviders(providerList);
-    } catch (error) {
-      setCurrencies([]);
-      setProviders([]);
-      notify.error(error instanceof Error ? error.message : "Failed to load currency lookups.");
-    }
-  }, []);
-
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const rows = await listCurrencyRecords(resource, {
-        q: query || undefined,
-        limit: 200,
-        currencyId:
-          isCurrencyManageMode &&
-          (resource === "exchange-rates" || resource === "money-settings")
-            ? managedCurrencyId
-            : undefined,
-      });
-      setRecords(rows);
-    } catch (error) {
-      notify.error(error instanceof Error ? error.message : "Failed to load records.");
-    } finally {
-      setLoading(false);
-    }
-  }, [isCurrencyManageMode, managedCurrencyId, query, resource]);
-
-  useEffect(() => {
-    if (skipInitialLookupsLoadRef.current) {
-      skipInitialLookupsLoadRef.current = false;
-      return;
-    }
-    void loadLookups();
-  }, [loadLookups]);
-
-  useEffect(() => {
-    if (
-      skipInitialRecordsLoadRef.current &&
-      resource === initialResource &&
-      query.length === 0
-    ) {
-      skipInitialRecordsLoadRef.current = false;
-      return;
-    }
-    void load();
-  }, [initialResource, load, query.length, resource]);
-
   useEffect(() => {
     if (!visibleResources.includes(resource)) {
       setResource(visibleResources[0]);
@@ -266,8 +317,12 @@ export function useCurrencyManagement({
   }, [currentPage, totalPages]);
 
   const refreshAll = useCallback(async () => {
-    await Promise.all([load(), loadLookups()]);
-  }, [load, loadLookups]);
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: currencyKeys.lookups() }),
+      queryClient.invalidateQueries({ queryKey: currencyKeys.recordsRoot() }),
+    ]);
+    await Promise.all([refetchLookups(), refetchRecords()]);
+  }, [queryClient, refetchLookups, refetchRecords]);
 
   const openDialog = useCallback((mode: "create" | "edit", row?: Record<string, unknown>) => {
     if (mode === "create" && isReadOnly) {
@@ -299,7 +354,6 @@ export function useCurrencyManagement({
 
   const onSubmit = useCallback(async () => {
     try {
-      setSaving(true);
       const payload: Record<string, unknown> = {};
       visibleFields.forEach((field) => {
         const value = form[field.key];
@@ -330,20 +384,33 @@ export function useCurrencyManagement({
         payload.baseCurrencyId = managedCurrencyId;
       }
       if (dialog.mode === "create") {
-        await createCurrencyRecord(resource, payload);
+        await createCurrencyMutation.mutateAsync({ targetResource: resource, payload });
         notify.success("Record created.");
       } else if (dialog.row?.id) {
-        await updateCurrencyRecord(resource, String(dialog.row.id), payload);
+        await updateCurrencyMutation.mutateAsync({
+          targetResource: resource,
+          id: String(dialog.row.id),
+          payload,
+        });
         notify.success("Record updated.");
       }
       setDialog({ open: false, mode: "create", row: null });
       await refreshAll();
     } catch (error) {
       notify.error(error instanceof Error ? error.message : "Failed to save record.");
-    } finally {
-      setSaving(false);
     }
-  }, [dialog.mode, dialog.row, form, isCurrencyManageMode, managedCurrencyId, refreshAll, resource, visibleFields]);
+  }, [
+    createCurrencyMutation,
+    dialog.mode,
+    dialog.row,
+    form,
+    isCurrencyManageMode,
+    managedCurrencyId,
+    refreshAll,
+    resource,
+    updateCurrencyMutation,
+    visibleFields,
+  ]);
 
   const onDelete = useCallback(async (row: Record<string, unknown>) => {
     if (!row.id) return;
@@ -360,16 +427,16 @@ export function useCurrencyManagement({
     });
     if (!confirmed) return;
     try {
-      setSaving(true);
-      await deleteCurrencyRecord(resource, String(row.id));
+      await deleteCurrencyMutation.mutateAsync({
+        targetResource: resource,
+        id: String(row.id),
+      });
       notify.success("Record deleted.");
       await refreshAll();
     } catch (error) {
       notify.error(error instanceof Error ? error.message : "Failed to delete record.");
-    } finally {
-      setSaving(false);
     }
-  }, [confirm, refreshAll, resource]);
+  }, [confirm, deleteCurrencyMutation, refreshAll, resource]);
 
   return {
     resource,

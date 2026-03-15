@@ -218,7 +218,7 @@ export async function PATCH(request: Request) {
         );
       }
 
-      return NextResponse.json({ success: true });
+      return NextResponse.json({ success: true, companyId: updated.id });
     }
 
     if (parsed.data.joinExisting) {
@@ -278,6 +278,7 @@ export async function PATCH(request: Request) {
       return NextResponse.json({
         success: true,
         joined: true,
+        companyId: existingCompany.id,
         role: canBeManager ? "MANAGER" : "USER",
       });
     }
@@ -317,7 +318,7 @@ export async function PATCH(request: Request) {
     await ensureCompanyDefaultRoles(created.id);
     await assignSystemRoleToUser(created.id, session.user.id, "ADMIN");
 
-    return NextResponse.json({ success: true });
+    return NextResponse.json({ success: true, companyId: created.id });
   } catch (error) {
     if (error instanceof AccessControlError) {
       return NextResponse.json(

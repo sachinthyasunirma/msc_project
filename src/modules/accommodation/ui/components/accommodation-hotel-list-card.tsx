@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { TableLoadingRow } from "@/components/ui/table-loading-row";
+import { TablePagination } from "@/components/ui/table-pagination";
 import {
   Select,
   SelectContent,
@@ -186,20 +187,15 @@ function AccommodationHotelListCardComponent({
             )}
           </TableBody>
         </Table>
-
-        <div className="flex items-center justify-between">
-          <p className="text-sm text-muted-foreground">
-            Page {pageIndex + 1} {hasNext ? "(more)" : ""}
-          </p>
-          <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" onClick={onPreviousPage} disabled={pageIndex === 0}>
-              Previous
-            </Button>
-            <Button variant="outline" size="sm" onClick={onNextPage} disabled={!hasNext || !nextCursor}>
-              Next
-            </Button>
-          </div>
-        </div>
+        {!loadingHotels && hotels.length > 0 ? (
+          <TablePagination
+            summaryText={`Page ${pageIndex + 1}${hasNext ? " | More results available" : " | End of results"}`}
+            canPrevious={!loadingHotels && pageIndex > 0}
+            canNext={!loadingHotels && Boolean(hasNext && nextCursor)}
+            onPrevious={onPreviousPage}
+            onNext={onNextPage}
+          />
+        ) : null}
       </CardContent>
     </Card>
   );

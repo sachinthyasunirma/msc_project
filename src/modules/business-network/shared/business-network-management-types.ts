@@ -1,4 +1,4 @@
-import type { BusinessNetworkResourceKey } from "@/modules/business-network/ui/views/business-network-management-view-impl";
+import type { BusinessNetworkResourceKey } from "@/modules/business-network/shared/business-network-management-config";
 
 export type BusinessNetworkManagementInitialData = {
   resource: BusinessNetworkResourceKey;

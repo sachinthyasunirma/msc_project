@@ -1,7 +1,6 @@
 "use client";
 
 import * as React from "react";
-import Link from "next/link";
 import {
   CalendarRange,
   Command,
@@ -24,6 +23,7 @@ import {
 import { NavUser } from "@/modules/dashboard/ui/components/nav-user";
 import { useDashboardAccessState } from "@/modules/dashboard/ui/components/dashboard-shell-provider";
 import { DashboardSidebarSecondary } from "@/modules/dashboard/ui/components/dashboard-sidebar-secondary";
+import { DashboardSidebarNavLink } from "@/modules/dashboard/ui/components/dashboard-sidebar-nav-link";
 import { DashboardSidebarMain } from "./dashboard-sidebar-main";
 
 const data = {
@@ -184,7 +184,7 @@ export function DashboardSidebar({
         <SidebarMenu>
           <SidebarMenuItem>
             <SidebarMenuButton size="lg" asChild>
-              <Link href="/">
+              <DashboardSidebarNavLink href="/" label="Dashboard">
                 <div className="bg-sidebar-primary text-sidebar-primary-foreground flex aspect-square size-8 items-center justify-center rounded-lg">
                   <Command className="size-4" />
                 </div>
@@ -192,7 +192,7 @@ export function DashboardSidebar({
                   <span className="truncate font-medium">MSC Project</span>
                   <span className="truncate text-xs">Travel Platform</span>
                 </div>
-              </Link>
+              </DashboardSidebarNavLink>
             </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>
