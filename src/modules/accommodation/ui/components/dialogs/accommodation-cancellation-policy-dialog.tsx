@@ -39,7 +39,7 @@ export function AccommodationCancellationPolicyDialog({
 }: Props) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-2xl">
+      <DialogContent className="w-[96vw] max-w-[96vw] max-h-[90vh] overflow-y-auto sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>{mode === "create" ? "Add Cancellation Policy" : "Edit Cancellation Policy"}</DialogTitle>
           <DialogDescription>

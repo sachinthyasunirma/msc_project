@@ -55,7 +55,7 @@ export function AccommodationInventoryDayDialog({
 }: Props) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-3xl">
+      <DialogContent className="w-[96vw] max-w-[96vw] max-h-[90vh] overflow-y-auto sm:max-w-3xl">
         <DialogHeader>
           <DialogTitle>{mode === "create" ? "Add Inventory Day" : "Edit Inventory Day"}</DialogTitle>
           <DialogDescription>

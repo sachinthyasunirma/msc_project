@@ -73,16 +73,21 @@ import type {
 function createContractForm(row?: HotelContractRecord | null): AccommodationContractFormState {
   return {
     code: row?.code ?? "",
+    name: row?.name ?? "",
     supplierOrgId: row?.supplierOrgId ?? "",
     contractRef: row?.contractRef ?? "",
+    contractType: row?.contractType ?? "FIT",
     currencyCode: row?.currencyCode ?? "USD",
     validFrom: row?.validFrom ?? "",
     validTo: row?.validTo ?? "",
+    bookingFrom: row?.bookingFrom ?? "",
+    bookingTo: row?.bookingTo ?? "",
     releaseDaysDefault:
       row?.releaseDaysDefault === null || row?.releaseDaysDefault === undefined
         ? ""
         : String(row.releaseDaysDefault),
     marketScope: row?.marketScope ?? "",
+    guestNationalityScope: row?.guestNationalityScope ?? "",
     remarks: row?.remarks ?? "",
     status: row?.status ?? "DRAFT",
     isActive: row?.isActive ?? true,
@@ -93,11 +98,15 @@ function createRatePlanForm(row?: HotelRatePlanRecord | null): AccommodationRate
   return {
     code: row?.code ?? "",
     name: row?.name ?? "",
+    description: row?.description ?? "",
+    rateType: row?.rateType ?? "CONTRACTED_BUY",
     boardBasis: row?.boardBasis ?? "BB",
     pricingModel: row?.pricingModel ?? "PER_ROOM_PER_NIGHT",
     cancellationPolicyId: row?.cancellationPolicyId ?? "",
     validFrom: row?.validFrom ?? "",
     validTo: row?.validTo ?? "",
+    bookingFrom: row?.bookingFrom ?? "",
+    bookingTo: row?.bookingTo ?? "",
     releaseDaysOverride:
       row?.releaseDaysOverride === null || row?.releaseDaysOverride === undefined
         ? ""
@@ -107,6 +116,8 @@ function createRatePlanForm(row?: HotelRatePlanRecord | null): AccommodationRate
     isRefundable: row?.isRefundable ?? true,
     isCommissionable: row?.isCommissionable ?? false,
     isPackageOnly: row?.isPackageOnly ?? false,
+    priority: row?.priority === null || row?.priority === undefined ? "0" : String(row.priority),
+    status: row?.status ?? "ACTIVE",
     isActive: row?.isActive ?? true,
   };
 }
@@ -494,16 +505,33 @@ export function useAccommodationContractingTab({
   );
 
   const submitContract = useCallback(async () => {
+    if (!contractDialog.form.code.trim()) {
+      notify.warning("Contract code is required.");
+      return;
+    }
+    if (!contractDialog.form.currencyCode.trim()) {
+      notify.warning("Currency code is required.");
+      return;
+    }
+    if (!contractDialog.form.validFrom || !contractDialog.form.validTo) {
+      notify.warning("Valid from and valid to dates are required.");
+      return;
+    }
     try {
       setSaving(true);
       const payload = {
         ...contractDialog.form,
+        name: contractDialog.form.name || null,
         supplierOrgId: contractDialog.form.supplierOrgId || null,
         contractRef: contractDialog.form.contractRef || null,
+        contractType: contractDialog.form.contractType,
+        bookingFrom: contractDialog.form.bookingFrom || null,
+        bookingTo: contractDialog.form.bookingTo || null,
         releaseDaysDefault: contractDialog.form.releaseDaysDefault
           ? Number(contractDialog.form.releaseDaysDefault)
           : null,
         marketScope: contractDialog.form.marketScope || null,
+        guestNationalityScope: contractDialog.form.guestNationalityScope || null,
         remarks: contractDialog.form.remarks || null,
       };
       const next =
@@ -559,12 +587,18 @@ export function useAccommodationContractingTab({
       setSaving(true);
       const payload = {
         ...ratePlanDialog.form,
+        description: ratePlanDialog.form.description || null,
+        rateType: ratePlanDialog.form.rateType,
         cancellationPolicyId: ratePlanDialog.form.cancellationPolicyId || null,
+        bookingFrom: ratePlanDialog.form.bookingFrom || null,
+        bookingTo: ratePlanDialog.form.bookingTo || null,
         releaseDaysOverride: ratePlanDialog.form.releaseDaysOverride
           ? Number(ratePlanDialog.form.releaseDaysOverride)
           : null,
         marketCode: ratePlanDialog.form.marketCode || null,
         guestNationalityScope: ratePlanDialog.form.guestNationalityScope || null,
+        priority: Number(ratePlanDialog.form.priority || 0),
+        status: ratePlanDialog.form.status,
       };
       const next =
         ratePlanDialog.dialog.mode === "create"
@@ -862,6 +896,25 @@ export function useAccommodationContractingTab({
   const submitCancellationPolicyRule = useCallback(async () => {
     if (!selectedCancellationPolicyId && cancellationPolicyRuleDialog.dialog.mode === "create") {
       notify.warning("Select a cancellation policy before adding rules.");
+      return;
+    }
+    if (!cancellationPolicyRuleDialog.form.code.trim()) {
+      notify.warning("Cancellation rule code is required.");
+      return;
+    }
+    if (!cancellationPolicyRuleDialog.form.penaltyValue.trim()) {
+      notify.warning("Penalty value is required.");
+      return;
+    }
+    if (
+      cancellationPolicyRuleDialog.form.fromDaysBefore &&
+      cancellationPolicyRuleDialog.form.toDaysBefore &&
+      Number(cancellationPolicyRuleDialog.form.fromDaysBefore) <
+        Number(cancellationPolicyRuleDialog.form.toDaysBefore)
+    ) {
+      notify.warning(
+        "From days before must be greater than or equal to To days before. Example: 30 to 15."
+      );
       return;
     }
     try {
