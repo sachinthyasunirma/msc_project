@@ -1,11 +1,8 @@
 import { headers } from "next/headers";
 import {
   getHotelById,
-  listAvailability,
-  listHotelImages,
   listRoomTypes,
 } from "@/modules/accommodation/server/accommodation-service";
-import { loadAccommodationContractingData } from "@/modules/accommodation/server/accommodation-contracting-loader";
 import { listSeasons } from "@/modules/season/server/season-service";
 import { AccommodationManagementView } from "@/modules/accommodation/ui/views/accommodation-management-view";
 
@@ -29,29 +26,16 @@ async function loadInitialHotelDetail(hotelId: string) {
     const nestedParams = new URLSearchParams({ limit: "100" });
     const seasonParams = new URLSearchParams({ limit: "100" });
 
-    const [
-      selectedHotel,
-      roomTypes,
-      availability,
-      images,
-      seasons,
-      contractingData,
-    ] = await Promise.all([
+    const [selectedHotel, roomTypes, seasons] = await Promise.all([
       getHotelById(hotelId, requestHeaders),
       listRoomTypes(hotelId, nestedParams, requestHeaders),
-      listAvailability(hotelId, nestedParams, requestHeaders),
-      listHotelImages(hotelId, nestedParams, requestHeaders),
       listSeasons(seasonParams, requestHeaders),
-      loadAccommodationContractingData(hotelId, requestHeaders),
     ]);
 
     return {
       selectedHotel: toPlainRecord(selectedHotel),
       roomTypes: roomTypes.map((item) => toPlainRecord(item)),
-      availability: availability.map((item) => toPlainRecord(item)),
-      images: images.map((item) => toPlainRecord(item)),
       seasons: seasons.items.map((item) => toPlainRecord(item)),
-      contracting: contractingData.contracting,
     };
   } catch {
     return null;

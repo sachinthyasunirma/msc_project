@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { withApiLogging } from "@/lib/logging/request";
+import { withApiLogging, type ApiRouteContext } from "@/lib/logging/request";
 import {
   createPreTourRecord,
   listPreTourRecords,
@@ -8,7 +8,7 @@ import {
 
 const getHandler = withApiLogging(
   { route: "/api/pre-tours/[resource]", feature: "pre-tour" },
-  async (request, context) => {
+  async (request: Request, context: ApiRouteContext<{ resource: string }>) => {
     try {
       const params = await context.params;
       if (!params?.resource) {
@@ -29,7 +29,7 @@ const getHandler = withApiLogging(
 
 const postHandler = withApiLogging(
   { route: "/api/pre-tours/[resource]", feature: "pre-tour" },
-  async (request, context) => {
+  async (request: Request, context: ApiRouteContext<{ resource: string }>) => {
     try {
       const params = await context.params;
       if (!params?.resource) {

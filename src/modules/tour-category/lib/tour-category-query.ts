@@ -3,6 +3,7 @@ import type { TourCategoryResourceKey } from "@/modules/tour-category/shared/tou
 type TourCategoryRecordsInput = {
   resource: TourCategoryResourceKey;
   q?: string;
+  page?: number;
   limit?: number;
 };
 
@@ -10,13 +11,15 @@ export const tourCategoryKeys = {
   all: ["tour-category-management"] as const,
   lookups: () => [...tourCategoryKeys.all, "lookups"] as const,
   recordsRoot: () => [...tourCategoryKeys.all, "records"] as const,
+  recordsByResource: (resource: TourCategoryResourceKey) =>
+    [...tourCategoryKeys.recordsRoot(), resource] as const,
   records: (input: TourCategoryRecordsInput) =>
     [
-      ...tourCategoryKeys.recordsRoot(),
+      ...tourCategoryKeys.recordsByResource(input.resource),
       {
-        resource: input.resource,
         q: input.q ?? "",
-        limit: input.limit ?? 500,
+        page: input.page ?? 1,
+        limit: input.limit ?? 25,
       },
     ] as const,
 };
@@ -24,6 +27,7 @@ export const tourCategoryKeys = {
 export function buildTourCategoryRecordsParams(input: TourCategoryRecordsInput) {
   return {
     q: input.q,
-    limit: input.limit ?? 500,
+    page: input.page ?? 1,
+    limit: input.limit ?? 25,
   };
 }

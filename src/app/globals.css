@@ -44,6 +44,8 @@
 }
 
 :root {
+  --font-geist-sans: "Inter", "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+  --font-geist-mono: "SFMono-Regular", "Cascadia Code", "Fira Code", "Consolas", monospace;
   --radius: 0.5rem;
   --background: oklch(0.985 0 0);
   --foreground: oklch(0.24 0 0);

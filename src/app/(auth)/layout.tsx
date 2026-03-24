@@ -1,15 +1,13 @@
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
-import { auth } from "@/lib/auth";
+import { getRequestSession } from "@/lib/request-session";
 
 interface Props {
   children: React.ReactNode;
 }
 
 const Layout = async ({ children }: Props) => {
-  const session = await auth.api.getSession({
-    headers: await headers(),
-  });
+  const session = await getRequestSession(await headers());
 
   if (session?.user) {
     redirect("/");

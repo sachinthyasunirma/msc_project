@@ -3,6 +3,7 @@ import type { CurrencyResourceKey } from "@/modules/currency/ui/components/curre
 export type CurrencyManagementInitialData = {
   resource: CurrencyResourceKey;
   records: Array<Record<string, unknown>>;
+  totalRecords: number;
   currencies: Array<Record<string, unknown>>;
   providers: Array<Record<string, unknown>>;
 };

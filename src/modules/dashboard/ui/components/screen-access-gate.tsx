@@ -16,6 +16,7 @@ const PATH_PRIVILEGE_RULES: Array<{ prefix: string; privilege: string }> = [
   { prefix: "/master-data/tour-categories", privilege: "SCREEN_MASTER_TOUR_CATEGORIES" },
   { prefix: "/master-data/business-network", privilege: "SCREEN_MASTER_BUSINESS_NETWORK" },
   { prefix: "/master-data/pre-tours", privilege: "SCREEN_PRE_TOURS" },
+  { prefix: "/tours/on-tours", privilege: "SCREEN_PRE_TOURS" },
   { prefix: "/master-data/technical-visits", privilege: "SCREEN_TECHNICAL_VISITS" },
   { prefix: "/configuration/company", privilege: "SCREEN_CONFIGURATION_COMPANY" },
   { prefix: "/billing/plans", privilege: "SUBSCRIPTION_MANAGE" },

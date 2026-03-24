@@ -16,6 +16,8 @@ import {
 import {
   createCurrencyRecord,
   deleteCurrencyRecord,
+  listAllCurrencyCodes,
+  listCurrencyRecordPage,
   listCurrencyRecords,
   updateCurrencyRecord,
 } from "@/modules/currency/lib/currency-api";
@@ -39,6 +41,8 @@ type UseCurrencyManagementOptions = {
 };
 
 const EMPTY_ROWS: Array<Record<string, unknown>> = [];
+const DEFAULT_PAGE_SIZE = 25;
+const LOOKUP_LIMIT = 100;
 
 export function useCurrencyManagement({
   initialResource = "currencies",
@@ -69,17 +73,22 @@ export function useCurrencyManagement({
       buildCurrencyRecordsParams({
         resource,
         q: query || undefined,
-        limit: 200,
+        page: currentPage,
+        limit: pageSize,
         currencyId:
           isCurrencyManageMode &&
           (resource === "exchange-rates" || resource === "money-settings")
             ? managedCurrencyId
             : undefined,
       }),
-    [isCurrencyManageMode, managedCurrencyId, query, resource]
+    [currentPage, isCurrencyManageMode, managedCurrencyId, pageSize, query, resource]
   );
 
-  const isDefaultRecordsQuery = resource === initialResource && query.length === 0;
+  const isDefaultRecordsQuery =
+    resource === initialResource &&
+    query.length === 0 &&
+    currentPage === 1 &&
+    pageSize === DEFAULT_PAGE_SIZE;
   const lookupsInitialData = initialData
     ? {
         currencies: initialData.currencies,
@@ -96,8 +105,8 @@ export function useCurrencyManagement({
     queryKey: currencyKeys.lookups(),
     queryFn: async () => {
       const [currencies, providers] = await Promise.all([
-        listCurrencyRecords("currencies", { limit: 200 }),
-        listCurrencyRecords("fx-providers", { limit: 200 }),
+        listCurrencyRecords("currencies", { limit: LOOKUP_LIMIT }),
+        listCurrencyRecords("fx-providers", { limit: LOOKUP_LIMIT }),
       ]);
       return {
         currencies,
@@ -105,10 +114,11 @@ export function useCurrencyManagement({
       };
     },
     initialData: lookupsInitialData,
+    staleTime: 5 * 60 * 1000,
   });
 
   const {
-    data: records = EMPTY_ROWS,
+    data: recordsPage,
     error: recordsError,
     isFetching: recordsLoading,
     refetch: refetchRecords,
@@ -117,10 +127,18 @@ export function useCurrencyManagement({
       resource,
       q: recordsInput.q,
       currencyId: recordsInput.currencyId,
+      page: recordsInput.page,
       limit: recordsInput.limit,
     }),
-    queryFn: () => listCurrencyRecords(resource, recordsInput),
-    initialData: isDefaultRecordsQuery ? initialData?.records ?? undefined : undefined,
+    queryFn: () => listCurrencyRecordPage(resource, recordsInput),
+    initialData: isDefaultRecordsQuery
+      ? {
+          rows: initialData?.records ?? EMPTY_ROWS,
+          total: initialData?.totalRecords ?? 0,
+          page: 1,
+          limit: DEFAULT_PAGE_SIZE,
+        }
+      : undefined,
     placeholderData: keepPreviousData,
   });
 
@@ -146,6 +164,8 @@ export function useCurrencyManagement({
 
   const currencies = lookupsData?.currencies ?? EMPTY_ROWS;
   const providers = lookupsData?.providers ?? EMPTY_ROWS;
+  const records = recordsPage?.rows ?? EMPTY_ROWS;
+  const totalRecords = recordsPage?.total ?? 0;
   const loading = lookupsLoading || recordsLoading;
   const saving =
     createCurrencyMutation.isPending ||
@@ -299,14 +319,11 @@ export function useCurrencyManagement({
   }, [resource, visibleResources]);
 
   const totalPages = useMemo(
-    () => Math.max(1, Math.ceil(records.length / pageSize)),
-    [records.length, pageSize]
+    () => Math.max(1, Math.ceil(totalRecords / pageSize)),
+    [pageSize, totalRecords]
   );
 
-  const pagedRecords = useMemo(() => {
-    const start = (currentPage - 1) * pageSize;
-    return records.slice(start, start + pageSize);
-  }, [records, currentPage, pageSize]);
+  const pagedRecords = records;
 
   useEffect(() => {
     setCurrentPage(1);
@@ -317,12 +334,18 @@ export function useCurrencyManagement({
   }, [currentPage, totalPages]);
 
   const refreshAll = useCallback(async () => {
-    await Promise.all([
-      queryClient.invalidateQueries({ queryKey: currencyKeys.lookups() }),
-      queryClient.invalidateQueries({ queryKey: currencyKeys.recordsRoot() }),
-    ]);
-    await Promise.all([refetchLookups(), refetchRecords()]);
-  }, [queryClient, refetchLookups, refetchRecords]);
+    await queryClient.invalidateQueries({
+      queryKey: currencyKeys.recordsByResource(resource),
+    });
+
+    if (resource === "currencies" || resource === "fx-providers") {
+      await queryClient.invalidateQueries({ queryKey: currencyKeys.lookups() });
+      await Promise.all([refetchLookups(), refetchRecords()]);
+      return;
+    }
+
+    await refetchRecords();
+  }, [queryClient, refetchLookups, refetchRecords, resource]);
 
   const openDialog = useCallback((mode: "create" | "edit", row?: Record<string, unknown>) => {
     if (mode === "create" && isReadOnly) {
@@ -438,12 +461,22 @@ export function useCurrencyManagement({
     }
   }, [confirm, deleteCurrencyMutation, refreshAll, resource]);
 
+  const refreshCurrencyExistingCodes = useCallback(async () => {
+    const rows = await listAllCurrencyCodes("currencies", { limit: 100 });
+    return new Set(
+      rows
+        .map((row) => String(row.code ?? "").trim().toUpperCase())
+        .filter((value) => value.length > 0)
+    );
+  }, []);
+
   return {
     resource,
     setResource,
     query,
     setQuery,
     records,
+    totalRecords,
     pagedRecords,
     loading,
     saving,
@@ -463,6 +496,7 @@ export function useCurrencyManagement({
     openDialog,
     onSubmit,
     onDelete,
+    refreshCurrencyExistingCodes,
     meta: CURRENCY_META[resource],
     isCurrencyManageMode,
   };

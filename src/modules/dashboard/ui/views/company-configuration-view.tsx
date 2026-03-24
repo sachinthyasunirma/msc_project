@@ -516,7 +516,7 @@ export function CompanyConfigurationView({
                   <Label>Subscription Plan</Label>
                   <Select
                     value={subscriptionPlan}
-                    onValueChange={(value) => setSubscriptionPlan(value as Plan)}
+                    onValueChange={(value) => setSubscriptionPlan(value as CompanyPlan)}
                     disabled={savingCompany}
                   >
                     <SelectTrigger>
@@ -648,7 +648,7 @@ export function CompanyConfigurationView({
                               onValueChange={(value) =>
                                 setDrafts((prev) => ({
                                   ...prev,
-                                  [entry.id]: { ...draft, role: value as Role },
+                                  [entry.id]: { ...draft, role: value as CompanyRole },
                                 }))
                               }
                             >

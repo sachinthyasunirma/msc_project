@@ -34,7 +34,8 @@ export const user = pgTable(
       .notNull(),
   },
   (table) => [
-     {companyIdx: index("idx_user_hotel_company").on(table.companyId)}
+    { companyIdx: index("idx_user_hotel_company").on(table.companyId) },
+    { companyCreatedIdx: index("idx_user_company_created").on(table.companyId, table.createdAt) },
   ]
 );
 

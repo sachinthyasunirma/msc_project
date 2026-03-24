@@ -22,7 +22,6 @@ type ActivityRecordTableCardProps = {
   selectedActivityLabel: string;
   query: string;
   loading: boolean;
-  records: Array<Record<string, unknown>>;
   pagedRecords: Array<Record<string, unknown>>;
   currentPage: number;
   pageSize: number;
@@ -48,7 +47,6 @@ export function ActivityRecordTableCard({
   selectedActivityLabel,
   query,
   loading,
-  records,
   pagedRecords,
   currentPage,
   pageSize,
@@ -134,7 +132,7 @@ export function ActivityRecordTableCard({
                 title="Planning your activity map"
                 description="Loading activity records, availability, and pricing stops."
               />
-            ) : records.length === 0 ? (
+            ) : totalItems === 0 ? (
               <TableRow>
                 <TableCell colSpan={ACTIVITY_COLUMNS[resource].length + 1} className="text-center text-muted-foreground">
                   No records found.
@@ -191,7 +189,7 @@ export function ActivityRecordTableCard({
           </TableBody>
         </Table>
 
-        {!loading && records.length > 0 ? (
+        {!loading && totalItems > 0 ? (
           <TablePagination
             totalItems={totalItems}
             page={currentPage}

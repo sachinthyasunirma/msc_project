@@ -5,8 +5,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import Link from "next/link";
 import { useState } from "react";
 import Image from "next/image";
-import { authClient } from "@/lib/auth-client";
-import { useRouter } from "next/navigation";
+import { authActionClient } from "@/lib/auth-action-client";
 import { OctagonAlertIcon } from "lucide-react";
 import { FaGithub, FaGoogle } from "react-icons/fa";
 
@@ -36,7 +35,6 @@ const formSchema = z
   });
 
 export const SignUpView = () => {
-  const router = useRouter();
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const form = useForm<z.infer<typeof formSchema>>({
@@ -53,7 +51,7 @@ export const SignUpView = () => {
     setError(null);
     setPending(true);
 
-    await authClient.signUp.email(
+    await authActionClient.signUp.email(
       {
         name: data.name,
         email: data.email,
@@ -68,7 +66,7 @@ export const SignUpView = () => {
       {
         onSuccess: () => {
           setPending(false);
-          router.replace("/");
+          window.location.replace("/");
         },
         onError: ({ error }) => {
           setPending(false);

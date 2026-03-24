@@ -12,6 +12,7 @@ export type TechnicalVisitResourceKey = z.infer<typeof technicalVisitResourceSch
 export const technicalVisitListQuerySchema = z.object({
   q: z.string().trim().max(160).optional(),
   limit: z.coerce.number().int().min(1).max(500).default(200),
+  page: z.coerce.number().int().min(1).optional(),
   visitId: z.string().trim().min(1).optional(),
   visitType: z
     .enum(["HOTEL", "ACTIVITY", "VEHICLE", "GUIDE", "RESTAURANT"])

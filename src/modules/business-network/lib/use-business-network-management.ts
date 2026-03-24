@@ -16,6 +16,7 @@ import {
 import {
   createBusinessNetworkRecord,
   deleteBusinessNetworkRecord,
+  listBusinessNetworkRecordPage,
   listBusinessNetworkRecords,
   updateBusinessNetworkRecord,
 } from "@/modules/business-network/lib/business-network-api";
@@ -41,6 +42,8 @@ type UseBusinessNetworkManagementOptions = {
 };
 
 const EMPTY_ROWS: Array<Record<string, unknown>> = [];
+const DEFAULT_PAGE_SIZE = 25;
+const LOOKUP_LIMIT = 100;
 
 const ORG_MEMBER_ROLE_OPTIONS_BY_TYPE: Record<
   "PLATFORM" | "OPERATOR" | "MARKET" | "SUPPLIER",
@@ -109,7 +112,7 @@ export function useBusinessNetworkManagement({
     row: Record<string, unknown> | null;
   }>({ open: false, mode: "create", row: null });
   const [form, setForm] = useState<Record<string, unknown>>({});
-  const [pageSize, setPageSize] = useState(25);
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
   const [currentPage, setCurrentPage] = useState(1);
 
   useEffect(() => {
@@ -129,12 +132,17 @@ export function useBusinessNetworkManagement({
       buildBusinessNetworkRecordsParams({
         resource,
         q: query || undefined,
-        limit: 200,
+        page: currentPage,
+        limit: pageSize,
       }),
-    [query, resource]
+    [currentPage, pageSize, query, resource]
   );
 
-  const isDefaultRecordsQuery = resource === initialResource && query.length === 0;
+  const isDefaultRecordsQuery =
+    resource === initialResource &&
+    query.length === 0 &&
+    currentPage === 1 &&
+    pageSize === DEFAULT_PAGE_SIZE;
 
   const {
     data: lookupsData,
@@ -145,9 +153,9 @@ export function useBusinessNetworkManagement({
     queryKey: businessNetworkKeys.lookups(),
     queryFn: async () => {
       const [organizations, users, currencies] = await Promise.all([
-        listBusinessNetworkRecords("organizations", { limit: 200 }),
-        listCompanyUsersLookup(),
-        listCurrencyRecords("currencies", { limit: 500 }),
+        listBusinessNetworkRecords("organizations", { limit: LOOKUP_LIMIT }),
+        listCompanyUsersLookup({ limit: LOOKUP_LIMIT }),
+        listCurrencyRecords("currencies", { limit: LOOKUP_LIMIT }),
       ]);
       return {
         organizations,
@@ -156,10 +164,11 @@ export function useBusinessNetworkManagement({
       };
     },
     initialData: lookupsInitialData,
+    staleTime: 5 * 60 * 1000,
   });
 
   const {
-    data: records = EMPTY_ROWS,
+    data: recordsPage,
     error: recordsError,
     isFetching: recordsLoading,
     refetch: refetchRecords,
@@ -167,10 +176,18 @@ export function useBusinessNetworkManagement({
     queryKey: businessNetworkKeys.records({
       resource,
       q: recordsInput.q,
+      page: recordsInput.page,
       limit: recordsInput.limit,
     }),
-    queryFn: () => listBusinessNetworkRecords(resource, recordsInput),
-    initialData: isDefaultRecordsQuery ? initialData?.records ?? undefined : undefined,
+    queryFn: () => listBusinessNetworkRecordPage(resource, recordsInput),
+    initialData: isDefaultRecordsQuery
+      ? {
+          rows: initialData?.records ?? EMPTY_ROWS,
+          total: initialData?.totalRecords ?? 0,
+          page: 1,
+          limit: DEFAULT_PAGE_SIZE,
+        }
+      : undefined,
     placeholderData: keepPreviousData,
   });
 
@@ -202,6 +219,8 @@ export function useBusinessNetworkManagement({
   const organizations = lookupsData?.organizations ?? EMPTY_ROWS;
   const users = lookupsData?.users ?? EMPTY_ROWS;
   const currencies = lookupsData?.currencies ?? EMPTY_ROWS;
+  const records = recordsPage?.rows ?? EMPTY_ROWS;
+  const totalRecords = recordsPage?.total ?? 0;
   const loading = lookupsLoading || recordsLoading;
   const saving =
     createBusinessNetworkMutation.isPending ||
@@ -546,14 +565,11 @@ export function useBusinessNetworkManagement({
   ]);
 
   const totalPages = useMemo(
-    () => Math.max(1, Math.ceil(records.length / pageSize)),
-    [pageSize, records.length]
+    () => Math.max(1, Math.ceil(totalRecords / pageSize)),
+    [pageSize, totalRecords]
   );
 
-  const pagedRecords = useMemo(() => {
-    const start = (currentPage - 1) * pageSize;
-    return records.slice(start, start + pageSize);
-  }, [currentPage, pageSize, records]);
+  const pagedRecords = records;
 
   useEffect(() => {
     setCurrentPage(1);
@@ -566,12 +582,18 @@ export function useBusinessNetworkManagement({
   }, [currentPage, totalPages]);
 
   const refreshAll = useCallback(async () => {
-    await Promise.all([
-      queryClient.invalidateQueries({ queryKey: businessNetworkKeys.lookups() }),
-      queryClient.invalidateQueries({ queryKey: businessNetworkKeys.recordsRoot() }),
-    ]);
-    await Promise.all([refetchLookups(), refetchRecords()]);
-  }, [queryClient, refetchLookups, refetchRecords]);
+    await queryClient.invalidateQueries({
+      queryKey: businessNetworkKeys.recordsByResource(resource),
+    });
+
+    if (resource === "organizations") {
+      await queryClient.invalidateQueries({ queryKey: businessNetworkKeys.lookups() });
+      await Promise.all([refetchLookups(), refetchRecords()]);
+      return;
+    }
+
+    await refetchRecords();
+  }, [queryClient, refetchLookups, refetchRecords, resource]);
 
   const openDialog = useCallback(
     (mode: "create" | "edit", row?: Record<string, unknown>) => {
@@ -704,6 +726,7 @@ export function useBusinessNetworkManagement({
     pagedRecords,
     query,
     records,
+    totalRecords,
     refreshAll,
     resource,
     saving,

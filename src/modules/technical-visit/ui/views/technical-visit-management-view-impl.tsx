@@ -198,7 +198,7 @@ export function TechnicalVisitManagementView({
                   Loading...
                 </TableCell>
               </TableRow>
-            ) : state.rows.length === 0 ? (
+            ) : state.totalRows === 0 ? (
               <TableRow>
                 <TableCell colSpan={COLUMNS[state.resource].length + 1} className="text-center text-muted-foreground">
                   No records found.
@@ -236,9 +236,9 @@ export function TechnicalVisitManagementView({
           </TableBody>
         </Table>
 
-        {!state.loading && state.rows.length > 0 ? (
+        {!state.loading && state.totalRows > 0 ? (
           <TablePagination
-            totalItems={state.rows.length}
+            totalItems={state.totalRows}
             page={state.page}
             pageSize={state.pageSize}
             onPageChange={state.setPage}

@@ -14,6 +14,14 @@ export const PRE_TOUR_MARKUP_MODES = ["NONE", "PERCENT", "FIXED"] as const;
 export type PreTourMarkupMode = (typeof PRE_TOUR_MARKUP_MODES)[number];
 
 export type PreTourPriceMode = "EXCLUSIVE" | "INCLUSIVE";
+export type PreTourTransportChargeMethod =
+  | "PER_TRANSFER"
+  | "PER_VEHICLE"
+  | "PER_PAX"
+  | "PER_HOUR"
+  | "PER_DAY"
+  | "PER_KM"
+  | "SLAB";
 
 export type PreTourRateSourceType = "MASTER_RATE" | "CONTRACT_RATE" | "MANUAL";
 
@@ -75,6 +83,39 @@ export type ResolveAccommodationRateResponse = {
   options: PreTourAccommodationRateCard[];
 };
 
+export type PreTourTransportRateCard = PreTourRateCard & {
+  chargeMethod: PreTourTransportChargeMethod;
+  rateBasis: "VEHICLE_CATEGORY" | "VEHICLE_TYPE";
+  pricingModel: string;
+  fromLocationId: string;
+  fromLocationLabel: string;
+  toLocationId: string;
+  toLocationLabel: string;
+  vehicleCategoryId: string | null;
+  vehicleCategoryLabel: string | null;
+  vehicleTypeId: string | null;
+  vehicleTypeLabel: string | null;
+  distanceKm: number | null;
+  durationMin: number | null;
+  minCharge: number;
+  nightSurcharge: number;
+  matchedTierLabel: string | null;
+};
+
+export type ResolveTransportRateRequest = {
+  chargeMethod: PreTourTransportChargeMethod;
+  fromLocationId: string;
+  toLocationId: string;
+  serviceDate?: string | null;
+  vehicleCategoryId?: string | null;
+  vehicleTypeId?: string | null;
+  pax?: number | null;
+};
+
+export type ResolveTransportRateResponse = {
+  options: PreTourTransportRateCard[];
+};
+
 export type PreTourPricingSnapshot = {
   snapshotVersion: 1;
   source: {
@@ -128,7 +169,9 @@ export type PreTourActivityAllocationState = {
 };
 
 export type PreTourTransportAllocationState = {
+  vehicleCategoryId: string;
   vehicleTypeId: string;
+  chargeMethod: PreTourTransportChargeMethod;
   tripMode: "TRANSFER" | "ROUNDTRIP" | "CHARTER" | "DISPOSAL";
   fromLocationId: string;
   toLocationId: string;

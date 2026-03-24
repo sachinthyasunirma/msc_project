@@ -18,6 +18,7 @@ export type ActivityField = {
 export type ActivityManagementInitialData = {
   resource: ActivityResourceKey;
   records: Array<Record<string, unknown>>;
+  totalRecords: number;
   activities: Array<Record<string, unknown>>;
   locations: Array<Record<string, unknown>>;
 };

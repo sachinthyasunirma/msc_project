@@ -93,19 +93,48 @@ export async function resolveAccommodationRates(
   if (!hotel) {
     throw new PreTourRateResolutionError(404, "HOTEL_NOT_FOUND", "Hotel not found.");
   }
-  const rows = await resolveHotelContractRates(
-    {
-      hotelId: parsed.data.hotelId,
-      stayDate: travelDate,
-      roomTypeId: parsed.data.roomTypeId ?? null,
-      boardBasis: roomBasis,
-      adults: 2,
-      children: 0,
-    },
-    headers
-  );
+  const [singleRows, doubleRows, tripleRows] = await Promise.all([
+    resolveHotelContractRates(
+      {
+        hotelId: parsed.data.hotelId,
+        stayDate: travelDate,
+        roomTypeId: parsed.data.roomTypeId ?? null,
+        boardBasis: roomBasis,
+        adults: 1,
+        children: 0,
+      },
+      headers
+    ),
+    resolveHotelContractRates(
+      {
+        hotelId: parsed.data.hotelId,
+        stayDate: travelDate,
+        roomTypeId: parsed.data.roomTypeId ?? null,
+        boardBasis: roomBasis,
+        adults: 2,
+        children: 0,
+      },
+      headers
+    ),
+    resolveHotelContractRates(
+      {
+        hotelId: parsed.data.hotelId,
+        stayDate: travelDate,
+        roomTypeId: parsed.data.roomTypeId ?? null,
+        boardBasis: roomBasis,
+        adults: 3,
+        children: 0,
+      },
+      headers
+    ),
+  ]);
 
-  return rows.map((row) => {
+  const doubleRowsByRoomRateId = new Map(doubleRows.map((row) => [row.roomRateId, row]));
+  const tripleRowsByRoomRateId = new Map(tripleRows.map((row) => [row.roomRateId, row]));
+
+  return singleRows.map((row) => {
+    const doubleRow = doubleRowsByRoomRateId.get(row.roomRateId);
+    const tripleRow = tripleRowsByRoomRateId.get(row.roomRateId);
     const hotelLabel = `${hotel.code} - ${hotel.name}`;
     const roomLabel = `${row.roomTypeCode} - ${row.roomTypeName}`;
     const sourceLabel = `${hotelLabel} • ${roomLabel}${row.boardBasis ? ` • ${row.boardBasis}` : ""}`;
@@ -150,6 +179,23 @@ export async function resolveAccommodationRates(
         applicableFees: row.applicableFees,
         applicableRestrictions: row.applicableRestrictions,
         singleSupplementRate: row.singleSupplementRate,
+        occupancyPricing: {
+          single: {
+            baseAmount: toNumber(row.buyBaseAmount),
+            taxAmount: toNumber(row.buyTaxAmount),
+            totalAmount: toNumber(row.buyTotalAmount),
+          },
+          double: {
+            baseAmount: toNumber(doubleRow?.buyBaseAmount),
+            taxAmount: toNumber(doubleRow?.buyTaxAmount),
+            totalAmount: toNumber(doubleRow?.buyTotalAmount),
+          },
+          triple: {
+            baseAmount: toNumber(tripleRow?.buyBaseAmount),
+            taxAmount: toNumber(tripleRow?.buyTaxAmount),
+            totalAmount: toNumber(tripleRow?.buyTotalAmount),
+          },
+        },
       },
       locked: true,
     };

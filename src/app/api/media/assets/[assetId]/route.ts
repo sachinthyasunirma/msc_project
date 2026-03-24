@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { withApiLogging } from "@/lib/logging/request";
+import { withApiLogging, type ApiRouteContext } from "@/lib/logging/request";
 import {
   deactivateMediaAsset,
   toMediaErrorResponse,
@@ -8,7 +8,7 @@ import {
 
 export const PATCH = withApiLogging(
   { route: "/api/media/assets/[assetId]", method: "PATCH", feature: "media-assets" },
-  async (request, context) => {
+  async (request: Request, context: ApiRouteContext<{ assetId: string }>) => {
     try {
       const params = await context.params;
       const payload = await request.json();
@@ -23,7 +23,7 @@ export const PATCH = withApiLogging(
 
 export const DELETE = withApiLogging(
   { route: "/api/media/assets/[assetId]", method: "DELETE", feature: "media-assets" },
-  async (request, context) => {
+  async (request: Request, context: ApiRouteContext<{ assetId: string }>) => {
     try {
       const params = await context.params;
       const updated = await deactivateMediaAsset(params?.assetId || "", request.headers);

@@ -26,6 +26,10 @@ import {
 } from "@/modules/accommodation/lib/accommodation-view-helpers";
 import { useAccommodationFormDialog } from "@/modules/accommodation/lib/use-accommodation-form-dialog";
 import { createHotelSchema } from "@/modules/accommodation/shared/accommodation-schemas";
+import {
+  listAllTransportRecords,
+  listTransportRecords,
+} from "@/modules/transport/lib/transport-api";
 
 type HotelFilters = {
   isActive: string;
@@ -39,6 +43,7 @@ const DEFAULT_HOTEL_FILTERS: HotelFilters = {
   country: "",
 };
 const EMPTY_HOTELS: Hotel[] = [];
+const EMPTY_LOCATION_OPTIONS: HotelSystemLocationOption[] = [];
 
 export type AccommodationHotelListData = {
   items: Hotel[];
@@ -46,6 +51,53 @@ export type AccommodationHotelListData = {
   hasNext: boolean;
   limit: number;
 };
+
+export type HotelSystemLocationOption = {
+  id: string;
+  code: string;
+  name: string;
+  city: string;
+  country: string;
+  address: string;
+  label: string;
+};
+
+function normalizeLocationValue(value: string | null | undefined) {
+  return String(value ?? "").trim().toLowerCase();
+}
+
+function buildLocationLabel(option: Pick<HotelSystemLocationOption, "code" | "name" | "city" | "country">) {
+  const primary = [option.code, option.name].filter(Boolean).join(" - ");
+  const secondary = [option.city, option.country].filter(Boolean).join(", ");
+  return secondary ? `${primary} (${secondary})` : primary;
+}
+
+function findMatchingLocationId(
+  options: HotelSystemLocationOption[],
+  city: string,
+  country: string
+) {
+  const normalizedCity = normalizeLocationValue(city);
+  const normalizedCountry = normalizeLocationValue(country);
+
+  if (!normalizedCity && !normalizedCountry) return "";
+
+  const exactMatch = options.find((option) => {
+    const optionCountry = normalizeLocationValue(option.country);
+    const countryMatches = !normalizedCountry || !optionCountry || optionCountry === normalizedCountry;
+    return countryMatches && normalizeLocationValue(option.city) === normalizedCity;
+  });
+
+  if (exactMatch) return exactMatch.id;
+
+  const nameMatch = options.find((option) => {
+    const optionCountry = normalizeLocationValue(option.country);
+    const countryMatches = !normalizedCountry || !optionCountry || optionCountry === normalizedCountry;
+    return countryMatches && normalizeLocationValue(option.name) === normalizedCity;
+  });
+
+  return nameMatch?.id ?? "";
+}
 
 type UseAccommodationHotelListOptions = {
   isReadOnly: boolean;
@@ -83,6 +135,14 @@ export function useAccommodationHotelList({
   }, [debouncedHotelSearch, hotelFilters.city, hotelFilters.country, hotelFilters.isActive]);
 
   const activeCursor = cursorHistory[pageIndex] ?? null;
+  const systemLocationsMode: "idle" | "dialog" | "batch" = batchOpen
+    ? "batch"
+    : hotelDialog.dialog.open
+      ? "dialog"
+      : "idle";
+  const systemLocationsQuery = hotelDialog.dialog.open
+    ? hotelDialog.form.city.trim() || hotelDialog.form.country.trim() || undefined
+    : undefined;
   const isDefaultQuery =
     debouncedHotelSearch.length === 0 &&
     hotelFilters.isActive === DEFAULT_HOTEL_FILTERS.isActive &&
@@ -113,6 +173,53 @@ export function useAccommodationHotelList({
     queryFn: () => listHotels(buildHotelListParams(hotelListInput)),
     initialData: isDefaultQuery ? initialData ?? undefined : undefined,
     placeholderData: keepPreviousData,
+  });
+
+  const {
+    data: systemLocationOptions = EMPTY_LOCATION_OPTIONS,
+    error: systemLocationsError,
+    isFetching: loadingSystemLocations,
+  } = useQuery({
+    queryKey: accommodationKeys.systemLocations({
+      mode: systemLocationsMode,
+      q: systemLocationsQuery,
+    }),
+    enabled: systemLocationsMode !== "idle",
+    queryFn: async () => {
+      const rows =
+        systemLocationsMode === "batch"
+          ? await listAllTransportRecords("locations", { limit: 100 })
+          : (
+              await listTransportRecords("locations", {
+                q: systemLocationsQuery,
+                limit: 100,
+              })
+            ).rows;
+
+      return rows
+        .map((row) => {
+          const id = String(row.id ?? "").trim();
+          const code = String(row.code ?? "").trim();
+          const name = String(row.name ?? "").trim();
+          const region = String(row.region ?? "").trim();
+          const country = String(row.country ?? "").trim();
+          const address = String(row.address ?? "").trim();
+          const city = region || name;
+
+          if (!id || !name) return null;
+
+          return {
+            id,
+            code,
+            name,
+            city,
+            country,
+            address,
+            label: buildLocationLabel({ code, name, city, country }),
+          } satisfies HotelSystemLocationOption;
+        })
+        .filter((location): location is HotelSystemLocationOption => location !== null);
+    },
   });
 
   const createHotelMutation = useMutation({
@@ -150,6 +257,15 @@ export function useAccommodationHotelList({
   }, [hotelListError]);
 
   useEffect(() => {
+    if (!systemLocationsError) return;
+    notify.error(
+      systemLocationsError instanceof Error
+        ? systemLocationsError.message
+        : "Failed to load system locations."
+    );
+  }, [systemLocationsError]);
+
+  useEffect(() => {
     if (hotels.length === 0) {
       setSelectedHotelId(null);
       return;
@@ -159,6 +275,23 @@ export function useAccommodationHotelList({
       current && hotels.some((hotel) => hotel.id === current) ? current : (hotels[0]?.id ?? null)
     );
   }, [hotels]);
+
+  useEffect(() => {
+    if (!hotelDialog.dialog.open || hotelDialog.form.locationId) return;
+
+    const matchedLocationId = findMatchingLocationId(
+      systemLocationOptions,
+      hotelDialog.form.city,
+      hotelDialog.form.country
+    );
+
+    if (!matchedLocationId) return;
+
+    hotelDialog.setForm({
+      ...hotelDialog.form,
+      locationId: matchedLocationId,
+    });
+  }, [hotelDialog, systemLocationOptions]);
 
   const refreshHotelQueries = useCallback(async () => {
     await Promise.all([
@@ -184,11 +317,21 @@ export function useAccommodationHotelList({
   );
 
   const submitHotel = useCallback(async () => {
+    const selectedLocation =
+      systemLocationOptions.find((location) => location.id === hotelDialog.form.locationId) ?? null;
+
     const parsed = createHotelSchema.safeParse({
-      ...hotelDialog.form,
+      code: hotelDialog.form.code,
+      name: hotelDialog.form.name,
       description: hotelDialog.form.description || null,
+      address:
+        hotelDialog.form.address.trim() || selectedLocation?.address || hotelDialog.form.address,
+      city: selectedLocation?.city || hotelDialog.form.city,
+      country: selectedLocation?.country || hotelDialog.form.country,
+      starRating: hotelDialog.form.starRating,
       contactEmail: hotelDialog.form.contactEmail || null,
       contactPhone: hotelDialog.form.contactPhone || null,
+      isActive: hotelDialog.form.isActive,
     });
     if (!parsed.success) {
       notify.error(parsed.error.issues[0]?.message || "Invalid hotel data.");
@@ -213,7 +356,13 @@ export function useAccommodationHotelList({
     } catch (error) {
       notify.error(error instanceof Error ? error.message : "Failed to save hotel.");
     }
-  }, [createHotelMutation, hotelDialog, refreshHotelQueries, updateHotelMutation]);
+  }, [
+    createHotelMutation,
+    hotelDialog,
+    refreshHotelQueries,
+    systemLocationOptions,
+    updateHotelMutation,
+  ]);
 
   const deleteHotelRecord = useCallback(
     async (hotel: Hotel) => {
@@ -297,6 +446,8 @@ export function useAccommodationHotelList({
     goPreviousPage,
     goNextPage,
     hotelDialog,
+    systemLocationOptions,
+    loadingSystemLocations,
     hotelExistingCodes,
     refreshHotelExistingCodes,
   };

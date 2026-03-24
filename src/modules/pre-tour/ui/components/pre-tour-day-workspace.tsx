@@ -1,3 +1,4 @@
+import { memo, useMemo } from "react";
 import { CalendarDays, Route, Sun } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -28,31 +29,41 @@ type Props = {
   items: Row[];
   selectedDayId: string;
   onSelectDay: (dayId: string) => void;
-  lookupLabel: (id: unknown) => string;
+  routeSummary?: string;
+  hasMoreDays?: boolean;
+  onLoadMoreDays?: () => void;
   onAddItem?: () => void;
   disableAdd?: boolean;
 };
 
-export function PreTourDayWorkspace({
+function PreTourDayWorkspaceComponent({
   days,
   items,
   selectedDayId,
   onSelectDay,
-  lookupLabel,
+  routeSummary,
+  hasMoreDays = false,
+  onLoadMoreDays,
   onAddItem,
   disableAdd = false,
 }: Props) {
-  const sortedDays = [...days].sort(
-    (a, b) => asNumber(a.dayNumber, 0) - asNumber(b.dayNumber, 0)
+  const selectedDay = useMemo(
+    () => days.find((day) => String(day.id) === selectedDayId) ?? null,
+    [days, selectedDayId]
   );
 
-  const selectedDay = sortedDays.find((day) => String(day.id) === selectedDayId) ?? null;
+  const selectedDayItems = useMemo(
+    () =>
+      items
+        .filter((item) => String(item.dayId) === selectedDayId)
+        .sort((a, b) => asNumber(a.sortOrder, 0) - asNumber(b.sortOrder, 0)),
+    [items, selectedDayId]
+  );
 
-  const selectedDayItems = items
-    .filter((item) => String(item.dayId) === selectedDayId)
-    .sort((a, b) => asNumber(a.sortOrder, 0) - asNumber(b.sortOrder, 0));
-
-  const activeItems = selectedDayItems.filter((item) => Boolean(item.isActive)).length;
+  const activeItems = useMemo(
+    () => selectedDayItems.filter((item) => Boolean(item.isActive)).length,
+    [selectedDayItems]
+  );
 
   return (
     <Card className="border-border/70 bg-muted/20 shadow-none">
@@ -76,12 +87,12 @@ export function PreTourDayWorkspace({
         </div>
 
         <div className="flex gap-1.5 overflow-x-auto pb-1">
-          {sortedDays.length === 0 ? (
+          {days.length === 0 ? (
             <div className="rounded-md border border-dashed px-2.5 py-1.5 text-xs text-muted-foreground">
               No days configured yet.
             </div>
           ) : (
-            sortedDays.map((day) => {
+            days.map((day) => {
               const dayId = String(day.id);
               const selected = dayId === selectedDayId;
               return (
@@ -98,6 +109,11 @@ export function PreTourDayWorkspace({
               );
             })
           )}
+          {hasMoreDays && onLoadMoreDays ? (
+            <Button type="button" variant="outline" onClick={onLoadMoreDays}>
+              + Load More Days
+            </Button>
+          ) : null}
         </div>
 
         {selectedDay ? (
@@ -117,7 +133,7 @@ export function PreTourDayWorkspace({
               <p className="text-xs font-medium text-muted-foreground">Route Context</p>
               <p className="mt-1 text-xs text-muted-foreground">
                 <Route className="mr-1 inline size-3" />
-                {lookupLabel(selectedDay.startLocationId)} → {lookupLabel(selectedDay.endLocationId)}
+                {routeSummary?.trim() || "Set route in the Transport allocation tab"}
               </p>
             </div>
 
@@ -134,3 +150,5 @@ export function PreTourDayWorkspace({
     </Card>
   );
 }
+
+export const PreTourDayWorkspace = memo(PreTourDayWorkspaceComponent);

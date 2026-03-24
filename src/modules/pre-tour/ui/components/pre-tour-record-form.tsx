@@ -21,19 +21,6 @@ import {
 import type { Field, PreTourResourceKey, Row } from "@/modules/pre-tour/shared/pre-tour-management-types";
 import { formatDate, toNightCount } from "@/modules/pre-tour/lib/pre-tour-management-utils";
 
-type DayTransportForm = {
-  enabled: boolean;
-  serviceId: string;
-  startAt: string;
-  endAt: string;
-  pax: string;
-  baseAmount: string;
-  taxAmount: string;
-  totalAmount: string;
-  status: string;
-  notes: string;
-};
-
 type PreTourRecordFormProps = {
   resource: PreTourResourceKey;
   visibleFields: Field[];
@@ -42,10 +29,6 @@ type PreTourRecordFormProps = {
   selectedDialogMarketOrgId: string;
   hasContractForSelectedDialogMarket: boolean;
   selectedPreTourItemType: string;
-  lookupLabel: (id: unknown) => string;
-  dayTransportForm: DayTransportForm;
-  setDayTransportForm: Dispatch<SetStateAction<DayTransportForm>>;
-  transportVehicleOptions: Array<{ value: string; label: string }>;
   autoCodeFieldKey?: "code" | "planCode" | null;
   autoCodeEnabled?: boolean;
   onAutoCodeEnabledChange?: (enabled: boolean) => void;
@@ -61,10 +44,6 @@ export function PreTourRecordForm({
   selectedDialogMarketOrgId,
   hasContractForSelectedDialogMarket,
   selectedPreTourItemType,
-  lookupLabel,
-  dayTransportForm,
-  setDayTransportForm,
-  transportVehicleOptions,
   autoCodeFieldKey = null,
   autoCodeEnabled = false,
   onAutoCodeEnabledChange,
@@ -258,146 +237,11 @@ export function PreTourRecordForm({
     })()
   );
 
-  const renderDayTransport = () => {
-    if (resource !== "pre-tour-days") return null;
-    return (
-      <div className="mt-3 space-y-3 rounded-xl border border-border/70 bg-muted/20 p-3.5 md:col-span-2">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div>
-            <p className="text-sm font-semibold">Day Transport Plan</p>
-            <p className="text-xs text-muted-foreground">
-              Optional transport baseline for this day. It will save as the day transport record.
-            </p>
-          </div>
-          <div className="flex items-center gap-2 rounded-md border bg-background px-2.5 py-1.5">
-            <span className="text-xs text-muted-foreground">{dayTransportForm.enabled ? "Enabled" : "Disabled"}</span>
-            <Switch
-              checked={dayTransportForm.enabled}
-              onCheckedChange={(checked) => setDayTransportForm((prev) => ({ ...prev, enabled: checked }))}
-            />
-          </div>
-        </div>
-
-        {dayTransportForm.enabled ? (
-          <div className="space-y-3">
-            <div className="rounded-lg border bg-background p-3">
-              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Service & Schedule</p>
-              <div className="grid gap-2.5 md:grid-cols-2">
-                <div>
-                  <Label className="mb-1 block text-xs font-medium">Vehicle Type *</Label>
-                  <Select
-                    value={dayTransportForm.serviceId || "__none__"}
-                    onValueChange={(value) =>
-                      setDayTransportForm((prev) => ({ ...prev, serviceId: value === "__none__" ? "" : value }))
-                    }
-                  >
-                    <SelectTrigger className="w-full">
-                      <SelectValue placeholder="Select vehicle type" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="__none__">None</SelectItem>
-                      {transportVehicleOptions.map((option) => (
-                        <SelectItem key={option.value} value={option.value}>
-                          {option.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div>
-                  <Label className="mb-1 block text-xs font-medium">Status</Label>
-                  <Select
-                    value={dayTransportForm.status}
-                    onValueChange={(value) => setDayTransportForm((prev) => ({ ...prev, status: value }))}
-                  >
-                    <SelectTrigger className="w-full">
-                      <SelectValue placeholder="Select status" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="PLANNED">PLANNED</SelectItem>
-                      <SelectItem value="CONFIRMED">CONFIRMED</SelectItem>
-                      <SelectItem value="CANCELLED">CANCELLED</SelectItem>
-                      <SelectItem value="COMPLETED">COMPLETED</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div>
-                  <Label className="mb-1 block text-xs font-medium">Start Time</Label>
-                  <Input
-                    type="datetime-local"
-                    value={dayTransportForm.startAt}
-                    onChange={(event) => setDayTransportForm((prev) => ({ ...prev, startAt: event.target.value }))}
-                  />
-                </div>
-                <div>
-                  <Label className="mb-1 block text-xs font-medium">End Time</Label>
-                  <Input
-                    type="datetime-local"
-                    value={dayTransportForm.endAt}
-                    onChange={(event) => setDayTransportForm((prev) => ({ ...prev, endAt: event.target.value }))}
-                  />
-                </div>
-                <div>
-                  <Label className="mb-1 block text-xs font-medium">Pax</Label>
-                  <Input
-                    type="number"
-                    value={dayTransportForm.pax}
-                    onChange={(event) => setDayTransportForm((prev) => ({ ...prev, pax: event.target.value }))}
-                  />
-                </div>
-              </div>
-            </div>
-
-            <div className="rounded-lg border bg-background p-3">
-              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Costing</p>
-              <div className="grid gap-2.5 md:grid-cols-3">
-                <div>
-                  <Label className="mb-1 block text-xs font-medium">Base Amount</Label>
-                  <Input
-                    type="number"
-                    value={dayTransportForm.baseAmount}
-                    onChange={(event) => setDayTransportForm((prev) => ({ ...prev, baseAmount: event.target.value }))}
-                  />
-                </div>
-                <div>
-                  <Label className="mb-1 block text-xs font-medium">Tax Amount</Label>
-                  <Input
-                    type="number"
-                    value={dayTransportForm.taxAmount}
-                    onChange={(event) => setDayTransportForm((prev) => ({ ...prev, taxAmount: event.target.value }))}
-                  />
-                </div>
-                <div>
-                  <Label className="mb-1 block text-xs font-medium">Total Amount</Label>
-                  <Input
-                    type="number"
-                    value={dayTransportForm.totalAmount}
-                    onChange={(event) => setDayTransportForm((prev) => ({ ...prev, totalAmount: event.target.value }))}
-                  />
-                </div>
-              </div>
-            </div>
-
-            <div className="rounded-lg border bg-background p-3">
-              <Label className="mb-1 block text-xs font-medium">Transport Notes</Label>
-              <Textarea
-                value={dayTransportForm.notes}
-                onChange={(event) => setDayTransportForm((prev) => ({ ...prev, notes: event.target.value }))}
-                className="min-h-[90px]"
-              />
-            </div>
-          </div>
-        ) : null}
-      </div>
-    );
-  };
-
   if (resource === "pre-tour-days") {
     const groupedKeys = new Set(PRE_TOUR_DAY_FORM_GROUPS.flatMap((group) => group.keys));
     const ungroupedFields = visibleFields.filter((field) => !groupedKeys.has(field.key));
     const currentDayNumber = String(form.dayNumber ?? "-");
     const currentDayDate = String(form.date ?? "");
-    const currentRoute = `${lookupLabel(form.startLocationId) || "-"} -> ${lookupLabel(form.endLocationId) || "-"}`;
 
     return (
       <>
@@ -441,8 +285,10 @@ export function PreTourRecordForm({
                   </p>
                 </div>
                 <div className="space-y-1">
-                  <p className="text-muted-foreground">Route</p>
-                  <p className="rounded-md bg-background px-2 py-1.5 text-foreground">{currentRoute}</p>
+                  <p className="text-muted-foreground">Transport Routing</p>
+                  <p className="rounded-md bg-background px-2 py-1.5 text-foreground">
+                    Manage start and end locations in transport allocations for this day.
+                  </p>
                 </div>
                 <div className="flex items-center justify-between gap-2">
                   <span className="text-muted-foreground">Status</span>
@@ -454,7 +300,6 @@ export function PreTourRecordForm({
             </div>
           </div>
         </div>
-        {renderDayTransport()}
       </>
     );
   }

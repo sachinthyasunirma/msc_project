@@ -30,6 +30,8 @@ export const loggingConfig = {
     process.env.LOG_PRETTY?.trim().toLowerCase() === "true" ||
     process.env.NODE_ENV !== "production",
   runtime: (process.env.NEXT_RUNTIME?.trim() as RuntimeKind | undefined) || "server",
+  profileOperations: process.env.LOG_PROFILE_OPERATIONS?.trim().toLowerCase() === "true",
+  slowOperationThresholdMs: Number(process.env.LOG_SLOW_OPERATION_MS ?? "250"),
   maxFieldLength: Number(process.env.LOG_MAX_FIELD_LENGTH ?? "500"),
   maxArrayLength: Number(process.env.LOG_MAX_ARRAY_LENGTH ?? "20"),
   maxObjectKeys: Number(process.env.LOG_MAX_OBJECT_KEYS ?? "50"),

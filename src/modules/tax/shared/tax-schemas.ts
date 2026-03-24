@@ -15,6 +15,7 @@ export const taxResourceSchema = z.enum([
 export const taxListQuerySchema = z.object({
   q: z.string().trim().max(160).optional(),
   limit: z.coerce.number().int().min(1).max(500).default(200),
+  page: z.coerce.number().int().min(1).optional(),
   taxId: z.string().trim().min(1).optional(),
 });
 

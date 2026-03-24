@@ -12,6 +12,8 @@ import { notify } from "@/lib/notify";
 import {
   createTransportRecord,
   deleteTransportRecord,
+  listAllTransportCodes,
+  listAllTransportRecords,
   listTransportRecords,
   updateTransportRecord,
 } from "@/modules/transport/lib/transport-api";
@@ -37,11 +39,93 @@ type UseTransportManagementOptions = {
 };
 
 const EMPTY_ROWS: Array<Record<string, unknown>> = [];
-const EMPTY_CATALOGS = {
-  locations: EMPTY_ROWS,
-  vehicleCategories: EMPTY_ROWS,
-  vehicleTypes: EMPTY_ROWS,
-};
+const LOOKUP_LIMIT = 100;
+
+function asRecordArray(value: unknown): Array<Record<string, unknown>> {
+  return Array.isArray(value) ? (value as Array<Record<string, unknown>>) : EMPTY_ROWS;
+}
+
+function asTotalCount(value: unknown, fallback: number) {
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
+function uniqueRows(rows: Array<Record<string, unknown>>) {
+  const seen = new Set<string>();
+  const merged: Array<Record<string, unknown>> = [];
+
+  rows.forEach((row) => {
+    const id = String(row.id ?? "");
+    if (!id || seen.has(id)) return;
+    seen.add(id);
+    merged.push(row);
+  });
+
+  return merged;
+}
+
+function collectCatalogRefs(
+  resource: TransportResourceKey,
+  rows: Array<Record<string, unknown>>
+) {
+  const locationIds = new Set<string>();
+  const vehicleCategoryIds = new Set<string>();
+  const vehicleTypeIds = new Set<string>();
+
+  rows.forEach((row) => {
+    const pushId = (bucket: Set<string>, value: unknown) => {
+      const id = String(value ?? "").trim();
+      if (id) bucket.add(id);
+    };
+
+    if (resource === "vehicle-types") {
+      pushId(vehicleCategoryIds, row.categoryId);
+      return;
+    }
+
+    if (
+      resource === "location-rates" ||
+      resource === "pax-vehicle-rates" ||
+      resource === "baggage-rates"
+    ) {
+      pushId(locationIds, row.fromLocationId);
+      pushId(locationIds, row.toLocationId);
+      pushId(vehicleCategoryIds, row.vehicleCategoryId);
+      pushId(vehicleTypeIds, row.vehicleTypeId);
+      return;
+    }
+
+    if (resource === "location-expenses") {
+      pushId(locationIds, row.locationId);
+      pushId(vehicleCategoryIds, row.vehicleCategoryId);
+      pushId(vehicleTypeIds, row.vehicleTypeId);
+    }
+  });
+
+  return {
+    locationIds: [...locationIds],
+    vehicleCategoryIds: [...vehicleCategoryIds],
+    vehicleTypeIds: [...vehicleTypeIds],
+  };
+}
+
+function getCatalogInvalidationTargets(resource: TransportResourceKey): TransportResourceKey[] {
+  switch (resource) {
+    case "locations":
+      return ["location-rates", "location-expenses", "pax-vehicle-rates", "baggage-rates"];
+    case "vehicle-categories":
+      return [
+        "vehicle-types",
+        "location-rates",
+        "location-expenses",
+        "pax-vehicle-rates",
+        "baggage-rates",
+      ];
+    case "vehicle-types":
+      return ["location-rates", "location-expenses", "pax-vehicle-rates", "baggage-rates"];
+    default:
+      return [];
+  }
+}
 
 export function useTransportManagement({
   initialResource = "locations",
@@ -74,19 +158,64 @@ export function useTransportManagement({
       buildTransportRecordsParams({
         resource,
         q: query || undefined,
-        limit: 200,
+        page: currentPage,
+        limit: pageSize,
       }),
-    [query, resource]
+    [currentPage, pageSize, query, resource]
   );
 
-  const isDefaultRecordsQuery = resource === initialResource && query.length === 0;
-  const catalogsInitialData = initialData?.catalogs
-    ? {
-        locations: initialData.catalogs.locations,
-        vehicleCategories: initialData.catalogs.vehicleCategories,
-        vehicleTypes: initialData.catalogs.vehicleTypes,
-      }
-    : undefined;
+  const isDefaultRecordsQuery =
+    resource === initialResource && query.length === 0 && currentPage === 1 && pageSize === 25;
+
+  const {
+    data: recordsData,
+    error: recordsError,
+    isFetching: recordsLoading,
+    refetch: refetchRecords,
+  } = useQuery({
+    queryKey: transportKeys.records({
+      resource,
+      q: recordsInput.q,
+      page: recordsInput.page,
+      limit: recordsInput.limit,
+    }),
+    queryFn: () => listTransportRecords(resource, recordsInput),
+    initialData: isDefaultRecordsQuery
+      ? {
+          rows: initialData?.records ?? [],
+          total: initialData?.totalRecords ?? 0,
+          page: 1,
+          limit: 25,
+        }
+      : undefined,
+    placeholderData: keepPreviousData,
+  });
+
+  const records = asRecordArray(
+    Array.isArray(recordsData) ? recordsData : recordsData?.rows
+  );
+  const totalRecords = asTotalCount(
+    Array.isArray(recordsData) ? recordsData.length : recordsData?.total,
+    records.length
+  );
+  const selectionMode: "none" | "dialog" | "batch" = batchOpen
+    ? "batch"
+    : dialog.open
+      ? "dialog"
+      : "none";
+  const catalogRefs = useMemo(() => collectCatalogRefs(resource, records), [records, resource]);
+  const catalogInvalidationTargets = useMemo(
+    () => getCatalogInvalidationTargets(resource),
+    [resource]
+  );
+  const catalogsInitialData =
+    initialData?.catalogs && selectionMode === "none" && isDefaultRecordsQuery
+      ? {
+          locations: initialData.catalogs.locations,
+          vehicleCategories: initialData.catalogs.vehicleCategories,
+          vehicleTypes: initialData.catalogs.vehicleTypes,
+        }
+      : undefined;
 
   const {
     data: catalogsData,
@@ -94,32 +223,47 @@ export function useTransportManagement({
     isFetching: catalogsLoading,
     refetch: refetchCatalogs,
   } = useQuery({
-    queryKey: transportKeys.catalogs(),
+    queryKey: transportKeys.catalogs({
+      resource,
+      transportRateBasis,
+      selectionMode,
+      locationIds: catalogRefs.locationIds,
+      vehicleCategoryIds: catalogRefs.vehicleCategoryIds,
+      vehicleTypeIds: catalogRefs.vehicleTypeIds,
+    }),
     queryFn: async () => {
-      const results = await Promise.allSettled([
-        listTransportRecords("locations", { limit: 200 }),
-        listTransportRecords("vehicle-categories", { limit: 200 }),
-        listTransportRecords("vehicle-types", { limit: 200 }),
+      const fetchCatalog = async (
+        targetResource: "locations" | "vehicle-categories" | "vehicle-types",
+        ids: string[]
+      ) => {
+        const rows: Array<Record<string, unknown>> = [];
+
+        if (selectionMode === "batch") {
+          const allRows = await listAllTransportRecords(targetResource, { limit: LOOKUP_LIMIT });
+          rows.push(...allRows);
+        } else if (selectionMode === "dialog") {
+          const generic = await listTransportRecords(targetResource, {
+            limit: LOOKUP_LIMIT,
+          });
+          rows.push(...generic.rows);
+        }
+
+        if (ids.length > 0) {
+          const referenced = await listTransportRecords(targetResource, {
+            ids,
+            limit: Math.max(ids.length, 1),
+          });
+          rows.push(...referenced.rows);
+        }
+
+        return uniqueRows(rows);
+      };
+
+      const [locations, vehicleCategories, vehicleTypes] = await Promise.all([
+        fetchCatalog("locations", catalogRefs.locationIds),
+        fetchCatalog("vehicle-categories", catalogRefs.vehicleCategoryIds),
+        fetchCatalog("vehicle-types", catalogRefs.vehicleTypeIds),
       ]);
-
-      const errors: string[] = [];
-      const [locationsResult, vehicleCategoriesResult, vehicleTypesResult] = results;
-      const locations =
-        locationsResult.status === "fulfilled"
-          ? locationsResult.value
-          : (errors.push("locations"), EMPTY_ROWS);
-      const vehicleCategories =
-        vehicleCategoriesResult.status === "fulfilled"
-          ? vehicleCategoriesResult.value
-          : (errors.push("vehicle categories"), EMPTY_ROWS);
-      const vehicleTypes =
-        vehicleTypesResult.status === "fulfilled"
-          ? vehicleTypesResult.value
-          : (errors.push("vehicle types"), EMPTY_ROWS);
-
-      if (errors.length > 0) {
-        throw new Error(`Could not load ${errors.join(", ")}.`);
-      }
 
       return {
         locations,
@@ -128,22 +272,7 @@ export function useTransportManagement({
       };
     },
     initialData: catalogsInitialData,
-  });
-
-  const {
-    data: records = EMPTY_ROWS,
-    error: recordsError,
-    isFetching: recordsLoading,
-    refetch: refetchRecords,
-  } = useQuery({
-    queryKey: transportKeys.records({
-      resource,
-      q: recordsInput.q,
-      limit: recordsInput.limit,
-    }),
-    queryFn: () => listTransportRecords(resource, recordsInput),
-    initialData: isDefaultRecordsQuery ? initialData?.records ?? undefined : undefined,
-    placeholderData: keepPreviousData,
+    staleTime: 5 * 60 * 1000,
   });
 
   const createTransportMutation = useMutation({
@@ -171,7 +300,14 @@ export function useTransportManagement({
       deleteTransportRecord(targetResource, id),
   });
 
-  const catalogs = catalogsData ?? EMPTY_CATALOGS;
+  const catalogs = useMemo(
+    () => ({
+      locations: asRecordArray(catalogsData?.locations),
+      vehicleCategories: asRecordArray(catalogsData?.vehicleCategories),
+      vehicleTypes: asRecordArray(catalogsData?.vehicleTypes),
+    }),
+    [catalogsData]
+  );
   const loading = catalogsLoading || recordsLoading;
   const saving =
     createTransportMutation.isPending ||
@@ -510,13 +646,10 @@ export function useTransportManagement({
   }, [catalogs, resource, transportRateBasis]);
 
   const totalPages = useMemo(
-    () => Math.max(1, Math.ceil(records.length / pageSize)),
-    [records.length, pageSize]
+    () => Math.max(1, Math.ceil(totalRecords / pageSize)),
+    [pageSize, totalRecords]
   );
-  const pagedRecords = useMemo(() => {
-    const start = (currentPage - 1) * pageSize;
-    return records.slice(start, start + pageSize);
-  }, [records, currentPage, pageSize]);
+  const pagedRecords = records;
 
   useEffect(() => {
     setCurrentPage(1);
@@ -529,12 +662,32 @@ export function useTransportManagement({
   }, [currentPage, totalPages]);
 
   const refreshAll = useCallback(async () => {
-    await Promise.all([
-      queryClient.invalidateQueries({ queryKey: transportKeys.catalogs() }),
-      queryClient.invalidateQueries({ queryKey: transportKeys.recordsRoot() }),
-    ]);
-    await Promise.all([refetchCatalogs(), refetchRecords()]);
-  }, [queryClient, refetchCatalogs, refetchRecords]);
+    await queryClient.invalidateQueries({
+      queryKey: transportKeys.recordsByResource(resource),
+    });
+
+    if (catalogInvalidationTargets.length > 0) {
+      await Promise.all(
+        catalogInvalidationTargets.map((target) =>
+          queryClient.invalidateQueries({
+            queryKey: transportKeys.catalogsByResource(target),
+          })
+        )
+      );
+    }
+
+    await refetchRecords();
+    if (selectionMode !== "none") {
+      await refetchCatalogs();
+    }
+  }, [
+    catalogInvalidationTargets,
+    queryClient,
+    refetchCatalogs,
+    refetchRecords,
+    resource,
+    selectionMode,
+  ]);
 
   const openDialog = useCallback(
     (mode: "create" | "edit", row?: Record<string, unknown>) => {
@@ -645,7 +798,7 @@ export function useTransportManagement({
   );
 
   const refreshExistingCodes = useCallback(async () => {
-    const rows = await listTransportRecords(resource, { limit: 500 });
+    const rows = await listAllTransportCodes(resource, { limit: LOOKUP_LIMIT });
     return new Set(
       rows
         .map((row) => String(row.code ?? "").trim().toUpperCase())
@@ -659,6 +812,7 @@ export function useTransportManagement({
     query,
     setQuery,
     records,
+    totalRecords,
     pagedRecords,
     loading,
     saving,

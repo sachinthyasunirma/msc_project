@@ -7,7 +7,6 @@ import { RecordAuditMeta } from "@/components/ui/record-audit-meta";
 import { buildAutoCode, getAutoCodeFieldKey, getAutoCodeHint } from "@/modules/pre-tour/lib/pre-tour-code-generator";
 import { META } from "@/modules/pre-tour/shared/pre-tour-management-constants";
 import type { Field, PreTourResourceKey, Row } from "@/modules/pre-tour/shared/pre-tour-management-types";
-import { EMPTY_DAY_TRANSPORT_FORM, type DayTransportForm } from "@/modules/pre-tour/ui/lib/pre-tour-form-config";
 import { PreTourRecordForm } from "@/modules/pre-tour/ui/components/pre-tour-record-form";
 
 type PreTourRecordDialogProps = {
@@ -21,14 +20,11 @@ type PreTourRecordDialogProps = {
   visibleFields: Field[];
   buildVisibleFields?: (form: Row) => Field[];
   initialForm: Row;
-  initialDayTransportForm?: DayTransportForm;
   selectedDialogMarketOrgId: string;
   hasContractForSelectedDialogMarket: boolean;
   getHasContractForSelectedDialogMarket?: (form: Row) => boolean;
   selectedPreTourItemType: string;
-  lookupLabel: (id: unknown) => string;
-  transportVehicleOptions: Array<{ value: string; label: string }>;
-  onSubmit: (payload: { form: Row; dayTransportForm: DayTransportForm }) => void;
+  onSubmit: (form: Row) => void;
 };
 
 export function PreTourRecordDialog({
@@ -42,19 +38,13 @@ export function PreTourRecordDialog({
   visibleFields,
   buildVisibleFields,
   initialForm,
-  initialDayTransportForm,
   selectedDialogMarketOrgId,
   hasContractForSelectedDialogMarket,
   getHasContractForSelectedDialogMarket,
   selectedPreTourItemType,
-  lookupLabel,
-  transportVehicleOptions,
   onSubmit,
 }: PreTourRecordDialogProps) {
   const [form, setForm] = useState<Row>(initialForm);
-  const [dayTransportForm, setDayTransportForm] = useState<DayTransportForm>(
-    initialDayTransportForm ?? EMPTY_DAY_TRANSPORT_FORM
-  );
   const autoCodeFieldKey = useMemo(() => getAutoCodeFieldKey(resource), [resource]);
   const [autoCodeEnabled, setAutoCodeEnabled] = useState(
     mode === "create" && Boolean(autoCodeFieldKey)
@@ -63,13 +53,12 @@ export function PreTourRecordDialog({
   useEffect(() => {
     if (!open) return;
     setForm(initialForm);
-    setDayTransportForm(initialDayTransportForm ?? EMPTY_DAY_TRANSPORT_FORM);
     const initialCodeValue =
       autoCodeFieldKey && mode === "create"
         ? String(initialForm[autoCodeFieldKey] ?? "").trim()
         : "";
     setAutoCodeEnabled(mode === "create" && Boolean(autoCodeFieldKey) && initialCodeValue.length === 0);
-  }, [autoCodeFieldKey, initialDayTransportForm, initialForm, mode, open]);
+  }, [autoCodeFieldKey, initialForm, mode, open]);
 
   const generatedCode = useMemo(() => {
     if (!autoCodeFieldKey || mode !== "create") return "";
@@ -116,10 +105,6 @@ export function PreTourRecordDialog({
             selectedDialogMarketOrgId={resolvedSelectedDialogMarketOrgId}
             hasContractForSelectedDialogMarket={resolvedHasContractForSelectedDialogMarket}
             selectedPreTourItemType={resolvedSelectedPreTourItemType}
-            lookupLabel={lookupLabel}
-            dayTransportForm={dayTransportForm}
-            setDayTransportForm={setDayTransportForm}
-            transportVehicleOptions={transportVehicleOptions}
             autoCodeFieldKey={mode === "create" ? autoCodeFieldKey : null}
             autoCodeEnabled={autoCodeEnabled}
             onAutoCodeEnabledChange={setAutoCodeEnabled}
@@ -133,7 +118,7 @@ export function PreTourRecordDialog({
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             Cancel
           </Button>
-          <Button onClick={() => onSubmit({ form, dayTransportForm })} disabled={saving || isReadOnly}>
+          <Button onClick={() => onSubmit(form)} disabled={saving || isReadOnly}>
             {saving ? "Saving..." : "Save"}
           </Button>
         </DialogFooter>

@@ -44,7 +44,13 @@ export function PreTourItemRateCards<T extends PreTourRateCard>({
                 <div className="flex flex-wrap items-center gap-2">
                   <p className="font-medium">{rate.sourceLabel}</p>
                   <Badge variant={rate.locked ? "secondary" : "outline"}>
-                    {rate.locked ? "Contracted rate" : "Manual rate"}
+                    {rate.sourceType === "CONTRACT_RATE"
+                      ? "Contracted rate"
+                      : rate.sourceType === "MASTER_RATE"
+                        ? "Master rate"
+                        : rate.locked
+                          ? "Locked rate"
+                          : "Manual rate"}
                   </Badge>
                 </div>
                 <p className="text-sm text-muted-foreground">

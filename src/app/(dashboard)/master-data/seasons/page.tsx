@@ -2,6 +2,20 @@ import { headers } from "next/headers";
 import { listSeasons as listSeasonRecords } from "@/modules/season/server/season-service";
 import { SeasonManagementView } from "@/modules/season/ui/views/season-management-view";
 
+function serializeDateValue(
+  value: unknown,
+  mode: "date" | "datetime",
+  fallback?: string
+) {
+  if (value instanceof Date) {
+    return mode === "date" ? value.toISOString().slice(0, 10) : value.toISOString();
+  }
+  if (typeof value === "string") {
+    return value;
+  }
+  return fallback ?? "";
+}
+
 async function loadInitialSeasons() {
   try {
     const requestHeaders = await headers();
@@ -13,14 +27,10 @@ async function loadInitialSeasons() {
       ...result,
       items: result.items.map((season) => ({
         ...season,
-        startDate:
-          season.startDate instanceof Date ? season.startDate.toISOString().slice(0, 10) : season.startDate,
-        endDate:
-          season.endDate instanceof Date ? season.endDate.toISOString().slice(0, 10) : season.endDate,
-        createdAt:
-          season.createdAt instanceof Date ? season.createdAt.toISOString() : season.createdAt,
-        updatedAt:
-          season.updatedAt instanceof Date ? season.updatedAt.toISOString() : season.updatedAt,
+        startDate: serializeDateValue(season.startDate, "date"),
+        endDate: serializeDateValue(season.endDate, "date"),
+        createdAt: serializeDateValue(season.createdAt, "datetime", undefined),
+        updatedAt: serializeDateValue(season.updatedAt, "datetime", undefined),
       })),
     };
   } catch {

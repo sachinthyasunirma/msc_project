@@ -36,6 +36,7 @@ export const currency = pgTable(
   (table) => [
     index("idx_currency_company").on(table.companyId),
     index("idx_currency_active").on(table.isActive),
+    index("idx_currency_company_created").on(table.companyId, table.createdAt),
     unique("uq_currency_company_code").on(table.companyId, table.code),
   ]
 );
@@ -56,6 +57,7 @@ export const fxProvider = pgTable(
   },
   (table) => [
     index("idx_fx_provider_company").on(table.companyId),
+    index("idx_fx_provider_company_created").on(table.companyId, table.createdAt),
     unique("uq_fx_provider_company_code").on(table.companyId, table.code),
   ]
 );
@@ -91,6 +93,14 @@ export const exchangeRate = pgTable(
     index("idx_exchange_rate_pair").on(table.baseCurrencyId, table.quoteCurrencyId),
     index("idx_exchange_rate_asof").on(table.asOf),
     index("idx_exchange_rate_effective_to").on(table.effectiveTo),
+    index("idx_exchange_rate_company_pair_asof").on(
+      table.companyId,
+      table.baseCurrencyId,
+      table.quoteCurrencyId,
+      table.isActive,
+      table.asOf,
+      table.createdAt
+    ),
     unique("uq_exchange_rate_company_code").on(table.companyId, table.code),
   ]
 );
@@ -115,6 +125,11 @@ export const moneySetting = pgTable(
   },
   (table) => [
     index("idx_money_setting_company").on(table.companyId),
+    index("idx_money_setting_company_base_created").on(
+      table.companyId,
+      table.baseCurrencyId,
+      table.createdAt
+    ),
     unique("uq_money_setting_company_code").on(table.companyId, table.code),
   ]
 );

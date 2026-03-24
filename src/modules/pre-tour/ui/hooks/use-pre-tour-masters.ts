@@ -15,6 +15,7 @@ import { listTransportRecords } from "@/modules/transport/lib/transport-api";
 
 const INITIAL_STATE: PreTourMastersData = {
   locations: [],
+  vehicleCategories: [],
   vehicleTypes: [],
   activities: [],
   guides: [],
@@ -27,7 +28,9 @@ const INITIAL_STATE: PreTourMastersData = {
   hotels: [],
   tourCategoryRules: [],
   companyBaseCurrencyCode: "USD",
+  transportRateBasis: "VEHICLE_TYPE",
 };
+let preTourMastersInflight: Promise<PreTourMastersData> | null = null;
 
 type UsePreTourMastersOptions = {
   initialData?: PreTourMastersData | null;
@@ -35,9 +38,16 @@ type UsePreTourMastersOptions = {
 
 export function usePreTourMasters({ initialData = null }: UsePreTourMastersOptions = {}) {
   const skipInitialLoadRef = useRef(Boolean(initialData));
-  const [state, setState] = useState<PreTourMastersData>(initialData ?? INITIAL_STATE);
+  const [state, setState] = useState<PreTourMastersData>(() => initialData ?? INITIAL_STATE);
 
-  const loadMasters = useCallback(async () => {
+  const loadMasters = useCallback(async (options: { force?: boolean } = {}) => {
+    const { force = false } = options;
+    if (!force && preTourMastersInflight) {
+      const nextState = await preTourMastersInflight;
+      setState(nextState);
+      return nextState;
+    }
+
     const optionalMaster = async <T,>(loader: () => Promise<T>, fallback: T) => {
       try {
         return await loader();
@@ -53,61 +63,84 @@ export function usePreTourMasters({ initialData = null }: UsePreTourMastersOptio
       }
     };
 
-    const [
-      locations,
-      vehicleTypes,
-      activities,
-      guides,
-      currencies,
-      organizations,
-      operatorMarketContracts,
-      tourCategoryTypes,
-      tourCategories,
-      tourCategoryRules,
-      technicalVisits,
-      hotelResponse,
-      companyResponse,
-    ] = await Promise.all([
-      listTransportRecords("locations", { limit: 300 }),
-      listTransportRecords("vehicle-types", { limit: 300 }),
-      listActivityRecords("activities", { limit: 300 }),
-      listGuideRecords("guides", { limit: 300 }),
-      optionalMaster(() => listCurrencyRecords("currencies", { limit: 200 }), [] as Row[]),
-      optionalMaster(() => listBusinessNetworkRecords("organizations", { limit: 400 }), [] as Row[]),
-      optionalMaster(
-        () => listBusinessNetworkRecords("operator-market-contracts", { limit: 400 }),
-        [] as Row[]
-      ),
-      listTourCategoryRecords("tour-category-types", { limit: 500 }),
-      listTourCategoryRecords("tour-categories", { limit: 500 }),
-      listTourCategoryRecords("tour-category-rules", { limit: 500 }),
-      listTechnicalVisitRecords("technical-visits", { limit: 500 }),
-      listHotels(new URLSearchParams({ limit: "100" })),
-      fetch("/api/companies/me", { cache: "no-store" }),
-    ]);
+    const request = (async () => {
+      const [
+        locations,
+        vehicleCategories,
+        vehicleTypes,
+        activities,
+        guides,
+        currencies,
+        organizations,
+        operatorMarketContracts,
+        tourCategoryTypes,
+        tourCategories,
+        tourCategoryRules,
+        technicalVisits,
+        hotelResponse,
+        companyResponse,
+      ] = await Promise.all([
+        listTransportRecords("locations", { limit: 100 }),
+        listTransportRecords("vehicle-categories", { limit: 100 }),
+        listTransportRecords("vehicle-types", { limit: 100 }),
+        listActivityRecords("activities", { limit: 100 }),
+        listGuideRecords("guides", { limit: 100 }),
+        optionalMaster(() => listCurrencyRecords("currencies", { limit: 100 }), [] as Row[]),
+        optionalMaster(() => listBusinessNetworkRecords("organizations", { limit: 100 }), [] as Row[]),
+        optionalMaster(
+          () => listBusinessNetworkRecords("operator-market-contracts", { limit: 100 }),
+          [] as Row[]
+        ),
+        listTourCategoryRecords("tour-category-types", { limit: 100 }),
+        listTourCategoryRecords("tour-categories", { limit: 100 }),
+        listTourCategoryRecords("tour-category-rules", { limit: 100 }),
+        listTechnicalVisitRecords("technical-visits", { limit: 100 }),
+        listHotels(new URLSearchParams({ limit: "100" })),
+        fetch("/api/companies/me", { cache: "no-store" }),
+      ]);
 
-    let companyBaseCurrencyCode = "USD";
-    if (companyResponse.ok) {
-      const body = (await companyResponse.json()) as CompanySettingsResponse;
-      const base = body.company?.baseCurrencyCode?.trim().toUpperCase();
-      if (base) companyBaseCurrencyCode = base;
+      let companyBaseCurrencyCode = "USD";
+      let transportRateBasis: "VEHICLE_CATEGORY" | "VEHICLE_TYPE" = "VEHICLE_TYPE";
+      if (companyResponse.ok) {
+        const body = (await companyResponse.json()) as CompanySettingsResponse;
+        const base = body.company?.baseCurrencyCode?.trim().toUpperCase();
+        if (base) companyBaseCurrencyCode = base;
+        transportRateBasis =
+          body.company?.transportRateBasis === "VEHICLE_CATEGORY"
+            ? "VEHICLE_CATEGORY"
+            : "VEHICLE_TYPE";
+      }
+
+      return {
+        locations: locations.rows ?? [],
+        vehicleCategories: vehicleCategories.rows ?? [],
+        vehicleTypes: vehicleTypes.rows ?? [],
+        activities,
+        guides,
+        currencies,
+        organizations,
+        operatorMarketContracts,
+        tourCategoryTypes,
+        tourCategories,
+        technicalVisits,
+        hotels: hotelResponse.items ?? [],
+        tourCategoryRules,
+        companyBaseCurrencyCode,
+        transportRateBasis,
+      } satisfies PreTourMastersData;
+    })();
+
+    preTourMastersInflight = request;
+
+    try {
+      const nextState = await request;
+      setState(nextState);
+      return nextState;
+    } finally {
+      if (preTourMastersInflight === request) {
+        preTourMastersInflight = null;
+      }
     }
-
-    setState({
-      locations,
-      vehicleTypes,
-      activities,
-      guides,
-      currencies,
-      organizations,
-      operatorMarketContracts,
-      tourCategoryTypes,
-      tourCategories,
-      technicalVisits,
-      hotels: hotelResponse.items ?? [],
-      tourCategoryRules,
-      companyBaseCurrencyCode,
-    });
   }, []);
 
   useEffect(() => {
@@ -120,5 +153,5 @@ export function usePreTourMasters({ initialData = null }: UsePreTourMastersOptio
     });
   }, [loadMasters]);
 
-  return { ...state, reloadMasters: loadMasters };
+  return { ...state, reloadMasters: () => loadMasters({ force: true }) };
 }

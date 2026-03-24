@@ -4,6 +4,7 @@ type TaxRecordsInput = {
   resource: TaxResourceKey;
   q?: string;
   taxId?: string;
+  page?: number;
   limit?: number;
 };
 
@@ -11,14 +12,16 @@ export const taxKeys = {
   all: ["taxes-management"] as const,
   lookups: () => [...taxKeys.all, "lookups"] as const,
   recordsRoot: () => [...taxKeys.all, "records"] as const,
+  recordsByResource: (resource: TaxResourceKey) =>
+    [...taxKeys.recordsRoot(), resource] as const,
   records: (input: TaxRecordsInput) =>
     [
-      ...taxKeys.recordsRoot(),
+      ...taxKeys.recordsByResource(input.resource),
       {
-        resource: input.resource,
         q: input.q ?? "",
         taxId: input.taxId ?? null,
-        limit: input.limit ?? 500,
+        page: input.page ?? 1,
+        limit: input.limit ?? 25,
       },
     ] as const,
 };
@@ -27,6 +30,7 @@ export function buildTaxRecordsParams(input: TaxRecordsInput) {
   return {
     q: input.q,
     taxId: input.taxId,
-    limit: input.limit ?? 500,
+    page: input.page ?? 1,
+    limit: input.limit ?? 25,
   };
 }

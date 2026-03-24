@@ -93,6 +93,10 @@ const data = {
           url: "/master-data/pre-tours",
         },
         {
+          title: "On-Tours",
+          url: "/tours/on-tours",
+        },
+        {
           title: "Field Visits",
           url: "/master-data/technical-visits",
         },
@@ -161,6 +165,7 @@ export function DashboardSidebar({
           "/master-data/tour-categories": "SCREEN_MASTER_TOUR_CATEGORIES",
           "/master-data/business-network": "SCREEN_MASTER_BUSINESS_NETWORK",
           "/master-data/pre-tours": "SCREEN_PRE_TOURS",
+          "/tours/on-tours": "SCREEN_PRE_TOURS",
           "/master-data/technical-visits": "SCREEN_TECHNICAL_VISITS",
           "/configuration/company": "SCREEN_CONFIGURATION_COMPANY",
           "/billing/plans": "SUBSCRIPTION_MANAGE",
@@ -189,7 +194,7 @@ export function DashboardSidebar({
                   <Command className="size-4" />
                 </div>
                 <div className="grid flex-1 text-left text-sm leading-tight">
-                  <span className="truncate font-medium">MSC Project</span>
+                  <span className="truncate font-medium">Project</span>
                   <span className="truncate text-xs">Travel Platform</span>
                 </div>
               </DashboardSidebarNavLink>

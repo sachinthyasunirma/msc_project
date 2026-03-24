@@ -1,5 +1,8 @@
 import { headers } from "next/headers";
-import { listActivityRecords } from "@/modules/activity/server/activity-service";
+import {
+  listActivityRecordPage,
+  listActivityRecords,
+} from "@/modules/activity/server/activity-service";
 import type {
   ActivityManagementInitialData,
   ActivityResourceKey,
@@ -30,23 +33,24 @@ export async function loadActivityManagementInitialData(options?: {
   try {
     const requestHeaders = await headers();
     const [activities, locations] = await Promise.all([
-      listActivityRecords("activities", new URLSearchParams({ limit: "500" }), requestHeaders),
-      listTransportRecords("locations", new URLSearchParams({ limit: "500" }), requestHeaders),
+      listActivityRecords("activities", new URLSearchParams({ limit: "100" }), requestHeaders),
+      listTransportRecords("locations", new URLSearchParams({ limit: "100" }), requestHeaders),
     ]);
 
-    const rowParams = new URLSearchParams({ limit: "500" });
+    const rowParams = new URLSearchParams({ page: "1", limit: "25" });
     if (options?.showActivityList === false && options.activityId) {
       if (resource === "activity-supplements") rowParams.set("parentActivityId", options.activityId);
       else if (resource !== "activities") rowParams.set("activityId", options.activityId);
     }
 
-    const rows = await listActivityRecords(resource, rowParams, requestHeaders);
+    const rows = await listActivityRecordPage(resource, rowParams, requestHeaders);
 
     return {
       resource,
-      records: toPlainRecords(rows),
+      records: toPlainRecords(rows.rows),
+      totalRecords: rows.total,
       activities: toPlainRecords(activities),
-      locations: toPlainRecords(locations),
+      locations: toPlainRecords(locations.rows),
     };
   } catch {
     return null;

@@ -3,11 +3,11 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { db } from "@/db";
 import { company, user } from "@/db/schema";
-import { auth } from "@/lib/auth";
 import {
   AccessControlError,
   assignSystemRoleToUser,
   ensureCompanyDefaultRoles,
+  getCachedSession,
   resolveAccess,
 } from "@/lib/security/access-control";
 import { APP_PLANS, getPlanUserLimit } from "@/lib/security/privileges";
@@ -85,15 +85,16 @@ function addDays(date: Date, days: number) {
 
 export async function GET(request: Request) {
   try {
-    const session = await auth.api.getSession({ headers: request.headers });
-    if (!session?.user) {
+    const session = await getCachedSession(request.headers);
+    const sessionUser = session?.user;
+    if (!sessionUser) {
       return NextResponse.json(
         { code: "UNAUTHORIZED", message: "You are not authenticated." },
         { status: 401 }
       );
     }
 
-    const companyId = (session.user as { companyId?: string | null }).companyId;
+    const companyId = sessionUser.companyId;
     if (!companyId) {
       return NextResponse.json({ company: null, needsSetup: true });
     }
@@ -138,8 +139,9 @@ export async function GET(request: Request) {
 
 export async function PATCH(request: Request) {
   try {
-    const session = await auth.api.getSession({ headers: request.headers });
-    if (!session?.user) {
+    const session = await getCachedSession(request.headers);
+    const sessionUser = session?.user;
+    if (!sessionUser?.id) {
       return NextResponse.json(
         { code: "UNAUTHORIZED", message: "You are not authenticated." },
         { status: 401 }
@@ -158,7 +160,7 @@ export async function PATCH(request: Request) {
       );
     }
 
-    const currentCompanyId = (session.user as { companyId?: string | null }).companyId;
+    const currentCompanyId = sessionUser.companyId;
     if (currentCompanyId) {
       const requiredPrivilege = parsed.data.subscriptionPlan
         ? "SUBSCRIPTION_MANAGE"
@@ -272,8 +274,8 @@ export async function PATCH(request: Request) {
           canWritePreTour: canBeManager ? true : false,
           updatedAt: new Date(),
         })
-        .where(eq(user.id, session.user.id));
-      await assignSystemRoleToUser(existingCompany.id, session.user.id, canBeManager ? "MANAGER" : "USER");
+        .where(eq(user.id, sessionUser.id));
+      await assignSystemRoleToUser(existingCompany.id, sessionUser.id, canBeManager ? "MANAGER" : "USER");
 
       return NextResponse.json({
         success: true,
@@ -314,9 +316,9 @@ export async function PATCH(request: Request) {
         canWritePreTour: true,
         updatedAt: new Date(),
       })
-      .where(eq(user.id, session.user.id));
+      .where(eq(user.id, sessionUser.id));
     await ensureCompanyDefaultRoles(created.id);
-    await assignSystemRoleToUser(created.id, session.user.id, "ADMIN");
+    await assignSystemRoleToUser(created.id, sessionUser.id, "ADMIN");
 
     return NextResponse.json({ success: true, companyId: created.id });
   } catch (error) {

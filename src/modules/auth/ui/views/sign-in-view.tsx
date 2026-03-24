@@ -1,5 +1,4 @@
 "use client";
-import { useRouter } from "next/navigation";
 import { z } from "zod";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -8,7 +7,7 @@ import Image from "next/image";
 import { useState } from "react";
 import { FaGithub, FaGoogle } from "react-icons/fa";
 
-import { authClient } from "@/lib/auth-client";
+import { authActionClient } from "@/lib/auth-action-client";
 import { Card, CardContent } from "@/components/ui/card";
 import { OctagonAlertIcon } from "lucide-react";
 
@@ -29,8 +28,41 @@ const formSchema = z.object({
   password: z.string().min(1, { message: "Password is required" }),
 });
 
+function hasSessionUser(payload: unknown) {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    return false;
+  }
+
+  const record = payload as { user?: { id?: unknown } | null };
+  return typeof record.user?.id === "string" && record.user.id.length > 0;
+}
+
+async function waitForSessionActivation(attempts = 10, delayMs = 250) {
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      const response = await fetch("/api/auth/get-session", {
+        method: "GET",
+        cache: "no-store",
+        credentials: "include",
+      });
+
+      if (response.ok) {
+        const payload = (await response.json()) as unknown;
+        if (hasSessionUser(payload)) {
+          return true;
+        }
+      }
+    } catch {
+      // Keep retrying briefly while the session cookie settles.
+    }
+
+    await new Promise((resolve) => window.setTimeout(resolve, delayMs));
+  }
+
+  return false;
+}
+
 export const SignInView = () => {
-  const router = useRouter();
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const form = useForm<z.infer<typeof formSchema>>({
@@ -44,12 +76,18 @@ export const SignInView = () => {
   const onSubmit = async (data: z.infer<typeof formSchema>) => {
     setError(null);
     setPending(true);
-    await authClient.signIn.email(
-      { email: data.email, password: data.password, callbackURL: "/" },
+    await authActionClient.signIn.email(
+      { email: data.email, password: data.password },
       {
-        onSuccess: () => {
+        onSuccess: async () => {
+          const sessionReady = await waitForSessionActivation();
+          if (sessionReady) {
+            window.location.replace("/");
+            return;
+          }
+
           setPending(false);
-          router.replace("/");
+          setError("Sign-in succeeded, but the session was not ready. Please try again.");
         },
         onError: ({ error }) => {
           setPending(false);

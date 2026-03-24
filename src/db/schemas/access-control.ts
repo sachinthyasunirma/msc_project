@@ -59,6 +59,7 @@ export const companyRolePrivilege = pgTable(
     }),
     index("idx_company_role_privilege_company").on(table.companyId),
     index("idx_company_role_privilege_role").on(table.roleId),
+    index("idx_company_role_privilege_company_role").on(table.companyId, table.roleId),
   ]
 );
 
@@ -86,5 +87,6 @@ export const userCompanyRole = pgTable(
     index("idx_user_company_role_company").on(table.companyId),
     index("idx_user_company_role_user").on(table.userId),
     index("idx_user_company_role_role").on(table.roleId),
+    index("idx_user_company_role_company_user").on(table.companyId, table.userId),
   ]
 );

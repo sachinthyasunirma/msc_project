@@ -20,5 +20,5 @@ const postHandler = withApiLogging(
 );
 
 export async function POST(request: Request) {
-  return postHandler(request, {});
+  return postHandler(request);
 }

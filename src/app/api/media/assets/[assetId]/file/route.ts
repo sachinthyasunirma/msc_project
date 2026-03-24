@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { withApiLogging } from "@/lib/logging/request";
+import { withApiLogging, type ApiRouteContext } from "@/lib/logging/request";
 import {
   getMediaAssetReadUrl,
   toMediaErrorResponse,
@@ -7,7 +7,7 @@ import {
 
 export const GET = withApiLogging(
   { route: "/api/media/assets/[assetId]/file", method: "GET", feature: "media-assets" },
-  async (request, context) => {
+  async (request: Request, context: ApiRouteContext<{ assetId: string }>) => {
     try {
       const params = await context.params;
       const result = await getMediaAssetReadUrl(params?.assetId || "", request.headers);

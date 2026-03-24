@@ -196,7 +196,7 @@ Inputs:
 - service date or booking date
 
 Steps:
-1. Build itinerary items (activity/transport/hotel/guide/misc)
+1. Build program items (activity/transport/hotel/guide/misc)
 2. Price each item in its native currency (supplier or base)
 3. Convert to quotation currency using FX strategy
 4. Round using target currency rounding settings

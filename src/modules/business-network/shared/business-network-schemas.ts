@@ -24,6 +24,7 @@ export const businessNetworkResourceSchema = z.enum(BUSINESS_NETWORK_RESOURCE_KE
 export const businessNetworkListQuerySchema = z.object({
   q: z.string().trim().max(120).optional(),
   limit: z.coerce.number().int().min(1).max(500).default(100),
+  page: z.coerce.number().int().min(1).optional(),
   organizationId: z.string().trim().min(1).optional(),
   operatorOrgId: z.string().trim().min(1).optional(),
   marketOrgId: z.string().trim().min(1).optional(),

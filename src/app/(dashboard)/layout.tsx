@@ -22,7 +22,29 @@ interface Props {
 
 const layout = async ({ children }: Props) => {
   const requestHeaders = await headers();
-  const initialShellData = await loadDashboardShellData(requestHeaders);
+  let initialShellData;
+  try {
+    initialShellData = await loadDashboardShellData(requestHeaders);
+  } catch (error) {
+    const message =
+      error instanceof Error && error.message.trim()
+        ? error.message
+        : "The dashboard could not connect to required backend services.";
+
+    return (
+      <div className="flex min-h-svh items-center justify-center bg-background p-4 md:p-6">
+        <div className="w-full max-w-lg rounded-xl border bg-card p-6 shadow-sm">
+          <h2 className="text-lg font-semibold">Dashboard temporarily unavailable</h2>
+          <p className="mt-2 text-sm text-muted-foreground">
+            {message}
+          </p>
+          <p className="mt-2 text-xs text-muted-foreground">
+            Check database/auth connectivity and refresh the page.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   if (!initialShellData.viewer) {
     redirect("/sign-in");

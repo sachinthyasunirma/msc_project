@@ -12,6 +12,7 @@ type RoomTypesTabProps = {
   roomTypes: RoomType[];
   isReadOnly: boolean;
   onAddRoomType: () => void;
+  onOpenBatchUpload: () => void;
   onEditRoomType: (row: RoomType) => void;
   onDeleteRoomType: (row: RoomType) => void;
 };
@@ -21,12 +22,16 @@ export function RoomTypesTab({
   roomTypes,
   isReadOnly,
   onAddRoomType,
+  onOpenBatchUpload,
   onEditRoomType,
   onDeleteRoomType,
 }: RoomTypesTabProps) {
   return (
     <div className="mt-4 space-y-3">
-      <div className="flex justify-end">
+      <div className="flex justify-end gap-2">
+        <Button variant="outline" onClick={onOpenBatchUpload} disabled={isReadOnly}>
+          Batch Upload
+        </Button>
         <Button onClick={onAddRoomType} disabled={isReadOnly} title={isReadOnly ? "View only mode" : undefined}>
           <Plus className="mr-2 size-4" />
           Add Room Type

@@ -3,6 +3,7 @@ import type { GuideResourceKey } from "@/modules/guides/shared/guides-management
 export type GuidesManagementInitialData = {
   resource: GuideResourceKey;
   records: Array<Record<string, unknown>>;
+  totalRecords: number;
   guides: Array<Record<string, unknown>>;
   languages: Array<Record<string, unknown>>;
   locations: Array<Record<string, unknown>>;

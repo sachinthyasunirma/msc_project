@@ -17,7 +17,10 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { notify } from "@/lib/notify";
 import { sanitizeCodePart } from "@/modules/pre-tour/lib/pre-tour-management-utils";
-import { resolvePreTourAccommodationRates } from "@/modules/pre-tour/lib/pre-tour-api";
+import {
+  resolvePreTourAccommodationRates,
+  resolvePreTourTransportRates,
+} from "@/modules/pre-tour/lib/pre-tour-api";
 import { buildPreTourPricingSnapshot } from "@/modules/pre-tour/lib/pricing/pricing-snapshot-builder";
 import {
   calculateCommercialPricing,
@@ -29,6 +32,7 @@ import type {
   PreTourItemAllocationFormState,
   PreTourPricingSnapshot,
   PreTourRateCard,
+  PreTourTransportRateCard,
 } from "@/modules/pre-tour/shared/pre-tour-item-allocation-types";
 import type { Row } from "@/modules/pre-tour/shared/pre-tour-management-types";
 import { AccommodationAllocationTab } from "@/modules/pre-tour/ui/components/allocation-tabs/accommodation-allocation-tab";
@@ -37,6 +41,9 @@ import { SupplementAllocationTab } from "@/modules/pre-tour/ui/components/alloca
 import { TransportAllocationTab } from "@/modules/pre-tour/ui/components/allocation-tabs/transport-allocation-tab";
 import { AllocationPricingPanel } from "@/modules/pre-tour/ui/components/pricing/allocation-pricing-panel";
 import { AllocationRateSummary } from "@/modules/pre-tour/ui/components/pricing/allocation-rate-summary";
+
+const SAMPLE_PRE_TOUR_ADULTS = 1;
+const SAMPLE_PRE_TOUR_CHILDREN = 0;
 
 type Option = { value: string; label: string };
 
@@ -52,8 +59,10 @@ type PreTourItemAllocationDialogProps = {
   companyBaseCurrencyCode: string;
   hotelOptions: Option[];
   activityOptions: Option[];
-  transportOptions: Option[];
   locationOptions: Option[];
+  vehicleCategoryOptions: Option[];
+  vehicleTypeOptions: Option[];
+  transportRateBasis: "VEHICLE_CATEGORY" | "VEHICLE_TYPE";
   canOverrideContractRates: boolean;
   onSubmit: (payload: Record<string, unknown>) => Promise<void> | void;
 };
@@ -98,6 +107,26 @@ function readDimension(snapshot: PreTourPricingSnapshot | null, key: string) {
   return snapshot?.dimensions?.[key];
 }
 
+function readTransportChargeMethodDefault(plan: Row | null) {
+  const pricingPolicy =
+    plan?.pricingPolicy && typeof plan.pricingPolicy === "object" && !Array.isArray(plan.pricingPolicy)
+      ? (plan.pricingPolicy as Record<string, unknown>)
+      : null;
+  const value = toStringValue(pricingPolicy?.transportChargeMethodDefault).toUpperCase();
+  if (
+    value === "PER_TRANSFER" ||
+    value === "PER_VEHICLE" ||
+    value === "PER_PAX" ||
+    value === "PER_HOUR" ||
+    value === "PER_DAY" ||
+    value === "PER_KM" ||
+    value === "SLAB"
+  ) {
+    return value;
+  }
+  return "PER_KM";
+}
+
 function createInitialState(args: {
   row: Row | null;
   selectedPlan: Row | null;
@@ -118,7 +147,7 @@ function createInitialState(args: {
     ) {
       return value;
     }
-    return "ACCOMMODATION";
+    return "TRANSPORT";
   })();
   const selectedDayDate = toDateInput(selectedDay?.date);
   const roomRows = Array.isArray(row?.rooms) ? row?.rooms : [];
@@ -146,7 +175,7 @@ function createInitialState(args: {
     currencyCode:
       toStringValue(row?.currencyCode || snapshot?.buy.currencyCode || selectedPlan?.currencyCode) ||
       companyBaseCurrencyCode,
-    pax: toNumberString(row?.pax, toNumberString(selectedPlan?.adults, "1")),
+    pax: toNumberString(row?.pax, "1"),
     units: toNumberString(row?.units, "1"),
     nights: toNumberString(row?.nights, "1"),
     buyBaseAmount: toNumberString(snapshot?.buy.baseAmount ?? row?.baseAmount, "0"),
@@ -182,21 +211,41 @@ function createInitialState(args: {
       slotNotes: toStringValue(readDimension(snapshot, "slotNotes") || row?.description),
     },
     transport: {
+      vehicleCategoryId: toStringValue(readDimension(snapshot, "vehicleCategoryId")),
       vehicleTypeId:
         itemType === "TRANSPORT" ? toStringValue(row?.serviceId) : toStringValue(readDimension(snapshot, "vehicleTypeId")),
+      chargeMethod: (() => {
+        const chargeMethod = toStringValue(
+          readDimension(snapshot, "chargeMethod") ||
+            readDimension(snapshot, "unitBasis") ||
+            readTransportChargeMethodDefault(selectedPlan)
+        ).toUpperCase();
+        if (chargeMethod === "PER_TRANSFER") return chargeMethod;
+        if (
+          chargeMethod === "PER_VEHICLE" ||
+          chargeMethod === "PER_PAX" ||
+          chargeMethod === "PER_HOUR" ||
+          chargeMethod === "PER_DAY" ||
+          chargeMethod === "PER_KM" ||
+          chargeMethod === "SLAB"
+        ) {
+          return chargeMethod;
+        }
+        return "PER_KM";
+      })(),
       tripMode: (() => {
         const tripMode = toStringValue(readDimension(snapshot, "tripMode")).toUpperCase();
         if (tripMode === "ROUNDTRIP" || tripMode === "CHARTER" || tripMode === "DISPOSAL") return tripMode;
         return "TRANSFER";
       })(),
-      fromLocationId: toStringValue(row?.fromLocationId || readDimension(snapshot, "fromLocationId") || selectedDay?.startLocationId),
-      toLocationId: toStringValue(row?.toLocationId || readDimension(snapshot, "toLocationId") || selectedDay?.endLocationId),
+      fromLocationId: toStringValue(row?.fromLocationId || readDimension(snapshot, "fromLocationId")),
+      toLocationId: toStringValue(row?.toLocationId || readDimension(snapshot, "toLocationId")),
       startAt: toDateTimeInput(readDimension(snapshot, "startAt") || row?.startAt || selectedDay?.date),
       endAt: toDateTimeInput(readDimension(snapshot, "endAt") || row?.endAt),
       unitBasis: toStringValue(readDimension(snapshot, "unitBasis")),
       routeLabel: toStringValue(readDimension(snapshot, "routeLabel")),
       quantity: toNumberString(readDimension(snapshot, "quantity") || row?.units, "1"),
-      pax: toNumberString(readDimension(snapshot, "pax") || row?.pax, "1"),
+      pax: toNumberString(readDimension(snapshot, "pax") || row?.pax || selectedPlan?.adults, "1"),
       routeNotes: toStringValue(readDimension(snapshot, "routeNotes") || row?.description),
     },
     guide: {
@@ -254,7 +303,9 @@ function buildDimensions(
       };
     case "TRANSPORT":
       return {
-        vehicleTypeId: state.transport.vehicleTypeId,
+        vehicleCategoryId: state.transport.vehicleCategoryId || null,
+        vehicleTypeId: state.transport.vehicleTypeId || null,
+        chargeMethod: state.transport.chargeMethod,
         tripMode: state.transport.tripMode,
         fromLocationId: state.transport.fromLocationId || null,
         toLocationId: state.transport.toLocationId || null,
@@ -262,7 +313,7 @@ function buildDimensions(
         endAt: state.transport.endAt || null,
         unitBasis: state.transport.unitBasis || null,
         routeLabel: state.transport.routeLabel || null,
-        pax: Number(state.transport.pax || "0"),
+        pax: Number(state.transport.pax || "1"),
         quantity: Number(state.transport.quantity || "1"),
         routeNotes: state.transport.routeNotes || null,
       };
@@ -297,8 +348,10 @@ export function PreTourItemAllocationDialog({
   companyBaseCurrencyCode,
   hotelOptions,
   activityOptions,
-  transportOptions,
   locationOptions,
+  vehicleCategoryOptions,
+  vehicleTypeOptions,
+  transportRateBasis,
   canOverrideContractRates,
   onSubmit,
 }: PreTourItemAllocationDialogProps) {
@@ -308,12 +361,15 @@ export function PreTourItemAllocationDialog({
   const [validationError, setValidationError] = useState("");
   const [accommodationRates, setAccommodationRates] = useState<PreTourAccommodationRateCard[]>([]);
   const [loadingAccommodationRates, setLoadingAccommodationRates] = useState(false);
+  const [transportRates, setTransportRates] = useState<PreTourTransportRateCard[]>([]);
+  const [loadingTransportRates, setLoadingTransportRates] = useState(false);
 
   useEffect(() => {
     if (!open) return;
     setForm(createInitialState({ row, selectedPlan, selectedDay, companyBaseCurrencyCode }));
     setValidationError("");
     setAccommodationRates([]);
+    setTransportRates([]);
   }, [companyBaseCurrencyCode, open, row, selectedDay, selectedPlan]);
 
   useEffect(() => {
@@ -358,11 +414,78 @@ export function PreTourItemAllocationDialog({
     open,
   ]);
 
+  useEffect(() => {
+    if (!open || form.itemType !== "TRANSPORT") return;
+
+    const fromLocationId = form.transport.fromLocationId;
+    const toLocationId = form.transport.toLocationId;
+    const chargeMethod = form.transport.chargeMethod;
+    const vehicleCategoryId = form.transport.vehicleCategoryId;
+    const vehicleTypeId = form.transport.vehicleTypeId;
+
+    if (!fromLocationId || !toLocationId) {
+      setTransportRates([]);
+      return;
+    }
+    if (transportRateBasis === "VEHICLE_CATEGORY" && !vehicleCategoryId) {
+      setTransportRates([]);
+      return;
+    }
+    if (transportRateBasis === "VEHICLE_TYPE" && !vehicleTypeId) {
+      setTransportRates([]);
+      return;
+    }
+
+    let active = true;
+    setLoadingTransportRates(true);
+    resolvePreTourTransportRates({
+      chargeMethod,
+      fromLocationId,
+      toLocationId,
+      serviceDate: form.transport.startAt || toStringValue(selectedDay?.date) || null,
+      vehicleCategoryId: vehicleCategoryId || null,
+      vehicleTypeId: vehicleTypeId || null,
+      pax: Number(form.transport.pax || "1"),
+    })
+      .then((payload) => {
+        if (!active) return;
+        setTransportRates(payload.options);
+      })
+      .catch((error) => {
+        if (!active) return;
+        setTransportRates([]);
+        notify.error(error instanceof Error ? error.message : "Failed to resolve transport master rates.");
+      })
+      .finally(() => {
+        if (active) setLoadingTransportRates(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [
+    form.itemType,
+    form.transport.chargeMethod,
+    form.transport.fromLocationId,
+    form.transport.pax,
+    form.transport.startAt,
+    form.transport.toLocationId,
+    form.transport.vehicleCategoryId,
+    form.transport.vehicleTypeId,
+    open,
+    selectedDay?.date,
+    transportRateBasis,
+  ]);
+
   const isLegacyGuideItem = form.itemType === "GUIDE";
   const tabValue = form.itemType === "MISC" ? "SUPPLEMENT" : form.itemType;
   const selectedAccommodationRate = useMemo(
     () => accommodationRates.find((rate) => rate.sourceRateId === form.selectedRateId) ?? null,
     [accommodationRates, form.selectedRateId]
+  );
+  const selectedTransportRate = useMemo(
+    () => transportRates.find((rate) => rate.sourceRateId === form.selectedRateId) ?? null,
+    [form.selectedRateId, transportRates]
   );
 
   useEffect(() => {
@@ -396,6 +519,28 @@ export function PreTourItemAllocationDialog({
     });
   }, [form.overrideSourceRate, selectedAccommodationRate]);
 
+  useEffect(() => {
+    if (!selectedTransportRate || form.overrideSourceRate) return;
+    setForm((current) => {
+      const nextCurrency = selectedTransportRate.currencyCode;
+      const nextBase = String(selectedTransportRate.buyBaseAmount);
+      const nextTax = String(selectedTransportRate.buyTaxAmount);
+      if (
+        current.currencyCode === nextCurrency &&
+        current.buyBaseAmount === nextBase &&
+        current.buyTaxAmount === nextTax
+      ) {
+        return current;
+      }
+      return {
+        ...current,
+        currencyCode: nextCurrency,
+        buyBaseAmount: nextBase,
+        buyTaxAmount: nextTax,
+      };
+    });
+  }, [form.overrideSourceRate, selectedTransportRate]);
+
   const buyBaseAmount = toMoney(form.buyBaseAmount);
   const buyTaxAmount = toMoney(form.buyTaxAmount);
   const buyTotalAmount = toMoney(buyBaseAmount + buyTaxAmount);
@@ -426,16 +571,17 @@ export function PreTourItemAllocationDialog({
     () => new Map(hotelOptions.map((option) => [option.value, option.label])),
     [hotelOptions]
   );
-  const transportMap = useMemo(
-    () => new Map(transportOptions.map((option) => [option.value, option.label])),
-    [transportOptions]
-  );
   const locationMap = useMemo(
     () => new Map(locationOptions.map((option) => [option.value, option.label])),
     [locationOptions]
   );
 
-  const sourceRate: PreTourRateCard | null = selectedAccommodationRate;
+  const sourceRate: PreTourRateCard | null =
+    form.itemType === "ACCOMMODATION"
+      ? selectedAccommodationRate
+      : form.itemType === "TRANSPORT"
+        ? selectedTransportRate
+        : null;
   const buyFieldsLocked = Boolean(sourceRate?.locked) && !form.overrideSourceRate;
 
   const contextLine = useMemo(() => {
@@ -445,10 +591,11 @@ export function PreTourItemAllocationDialog({
     return `${dayLabel}${travelDate ? ` • ${travelDate}` : ""}`;
   }, [form.accommodation.stayDate, selectedDay?.date, selectedDay?.dayNumber]);
   const dayRouteSummary = useMemo(() => {
-    const start = locationMap.get(toStringValue(selectedDay?.startLocationId)) || "Route start not set";
-    const end = locationMap.get(toStringValue(selectedDay?.endLocationId)) || "Route end not set";
-    return `${start} -> ${end}`;
-  }, [locationMap, selectedDay?.endLocationId, selectedDay?.startLocationId]);
+    const start = locationMap.get(toStringValue(form.transport.fromLocationId));
+    const end = locationMap.get(toStringValue(form.transport.toLocationId));
+    if (start || end) return `${start || "Route start not set"} -> ${end || "Route end not set"}`;
+    return "Set the route here for this transport allocation.";
+  }, [form.transport.fromLocationId, form.transport.toLocationId, locationMap]);
 
   const handleSave = async () => {
     try {
@@ -467,9 +614,17 @@ export function PreTourItemAllocationDialog({
         throw new Error("Select an activity.");
       }
       if (form.itemType === "TRANSPORT") {
-        if (!form.transport.vehicleTypeId) throw new Error("Select a transport service.");
         if (!form.transport.fromLocationId || !form.transport.toLocationId) {
           throw new Error("Transport requires both a start point and an end point.");
+        }
+        if (transportRateBasis === "VEHICLE_CATEGORY" && !form.transport.vehicleCategoryId) {
+          throw new Error("Select a vehicle category for transport pricing.");
+        }
+        if (transportRateBasis === "VEHICLE_TYPE" && !form.transport.vehicleTypeId) {
+          throw new Error("Select a vehicle type for transport pricing.");
+        }
+        if (form.transport.chargeMethod === "PER_PAX" && Number(form.transport.pax || "0") <= 0) {
+          throw new Error("Quoted pax is required for per-pax transport pricing.");
         }
       }
       if (form.itemType === "GUIDE") {
@@ -513,10 +668,8 @@ export function PreTourItemAllocationDialog({
           : form.itemType === "ACTIVITY"
             ? form.activity.activityId
             : form.itemType === "TRANSPORT"
-              ? form.transport.vehicleTypeId
-              : form.itemType === "GUIDE"
-                ? form.guide.guideId
-                : null;
+              ? form.transport.vehicleTypeId || null
+              : null;
 
       const defaultTitle =
         (row?.title && toStringValue(row.title)) ||
@@ -525,9 +678,9 @@ export function PreTourItemAllocationDialog({
           : form.itemType === "ACTIVITY"
             ? `${activityMap.get(form.activity.activityId) || "Activity"}${form.activity.scheduledAt ? ` • ${form.activity.scheduledAt.slice(11, 16)}` : ""}`
             : form.itemType === "TRANSPORT"
-              ? `${transportMap.get(form.transport.vehicleTypeId) || "Transport"} • ${
-                  locationMap.get(form.transport.fromLocationId) || "Start"
-                } → ${locationMap.get(form.transport.toLocationId) || "End"}`
+              ? `Transport • ${locationMap.get(form.transport.fromLocationId) || "Start"} → ${
+                  locationMap.get(form.transport.toLocationId) || "End"
+                }${form.transport.chargeMethod ? ` • ${form.transport.chargeMethod}` : ""}`
               : form.supplement.serviceLabel.trim() || "Supplement");
 
       const payload: Record<string, unknown> = {
@@ -553,18 +706,16 @@ export function PreTourItemAllocationDialog({
         sortOrder: Number(row?.sortOrder ?? 0),
         pax:
           form.itemType === "TRANSPORT"
-            ? Number(form.transport.pax || "0")
-            : Number(form.pax || selectedPlan?.adults || 0),
+            ? Number(form.transport.pax || "1")
+            : Number(form.pax || "1"),
         units:
           form.itemType === "ACTIVITY"
             ? Number(form.activity.quantity || "1")
             : form.itemType === "TRANSPORT"
               ? Number(form.transport.quantity || "1")
-              : form.itemType === "GUIDE"
-                ? Number(form.guide.quantity || "1")
-                : form.itemType === "SUPPLEMENT" || form.itemType === "MISC"
-                  ? Number(form.supplement.quantity || "1")
-                  : Number(form.units || "1"),
+              : form.itemType === "SUPPLEMENT" || form.itemType === "MISC"
+                ? Number(form.supplement.quantity || "1")
+                : Number(form.units || "1"),
         nights:
           form.itemType === "ACCOMMODATION"
             ? Number(form.accommodation.nights || "1")
@@ -578,8 +729,8 @@ export function PreTourItemAllocationDialog({
                     form.accommodation.occupancy ||
                     "ROOM",
                   count: Number(form.accommodation.roomCount || "1"),
-                  adults: Number(selectedPlan?.adults ?? 0),
-                  children: Number(selectedPlan?.children ?? 0),
+                  adults: SAMPLE_PRE_TOUR_ADULTS,
+                  children: SAMPLE_PRE_TOUR_CHILDREN,
                 },
               ]
             : null,
@@ -620,7 +771,7 @@ export function PreTourItemAllocationDialog({
         <DialogHeader>
           <DialogTitle>{mode === "create" ? "Add" : "Edit"} Pre-Tour Item Allocation</DialogTitle>
           <DialogDescription>
-            Build the operational allocation, resolve source buying, and review commercial pricing in one workspace.
+            Build the draft allocation, resolve sample buying on a 1-adult quote basis, and review commercial pricing in one workspace.
           </DialogDescription>
         </DialogHeader>
 
@@ -645,8 +796,8 @@ export function PreTourItemAllocationDialog({
                 <CardTitle className="text-base">Allocation Flow</CardTitle>
               </CardHeader>
               <CardContent className="space-y-1 text-sm text-muted-foreground">
-                <p>Select the operational item type first, then complete the service context, buying basis, and commercial markup.</p>
-                <p>System fields such as code, title, and workflow status are generated internally and are no longer part of manual entry.</p>
+                <p>Select the draft service type first, then complete route or service context, source buying, and commercial markup.</p>
+                <p>Pre-tour costing is treated as quotation-stage planning. Route, room, and pax-sensitive master rates should be resolved here before operational conversion.</p>
               </CardContent>
             </Card>
 
@@ -675,9 +826,9 @@ export function PreTourItemAllocationDialog({
               }
             >
               <TabsList className="grid w-full grid-cols-2 gap-2 md:grid-cols-4">
+                <TabsTrigger value="TRANSPORT">Transport</TabsTrigger>
                 <TabsTrigger value="ACCOMMODATION">Accommodation</TabsTrigger>
                 <TabsTrigger value="ACTIVITY">Activity</TabsTrigger>
-                <TabsTrigger value="TRANSPORT">Transport</TabsTrigger>
                 <TabsTrigger value="SUPPLEMENT">Supplement / Misc</TabsTrigger>
               </TabsList>
 
@@ -742,15 +893,38 @@ export function PreTourItemAllocationDialog({
                   <TabsContent value="TRANSPORT">
                     <TransportAllocationTab
                       value={form.transport}
-                      vehicleOptions={transportOptions}
                       locationOptions={locationOptions}
+                      vehicleCategoryOptions={vehicleCategoryOptions}
+                      vehicleTypeOptions={vehicleTypeOptions}
+                      transportRateBasis={transportRateBasis}
                       dayRouteSummary={dayRouteSummary}
+                      rateOptions={transportRates}
+                      selectedRateId={form.selectedRateId}
+                      loadingRates={loadingTransportRates}
                       disabled={isReadOnly}
                       onChange={(patch) =>
                         setForm((current) => ({
                           ...current,
                           itemType: "TRANSPORT",
-                          transport: { ...current.transport, ...patch },
+                          transport: {
+                            ...current.transport,
+                            ...patch,
+                          },
+                          selectedRateId:
+                            Object.prototype.hasOwnProperty.call(patch, "chargeMethod") ||
+                            Object.prototype.hasOwnProperty.call(patch, "fromLocationId") ||
+                            Object.prototype.hasOwnProperty.call(patch, "toLocationId") ||
+                            Object.prototype.hasOwnProperty.call(patch, "vehicleCategoryId") ||
+                            Object.prototype.hasOwnProperty.call(patch, "vehicleTypeId") ||
+                            Object.prototype.hasOwnProperty.call(patch, "pax")
+                              ? ""
+                              : current.selectedRateId,
+                        }))
+                      }
+                      onSelectRate={(rateId) =>
+                        setForm((current) => ({
+                          ...current,
+                          selectedRateId: rateId,
                         }))
                       }
                     />

@@ -1,12 +1,45 @@
 "use client";
 
-import { memo, useCallback } from "react";
+import dynamic from "next/dynamic";
+import { memo, useCallback, useMemo, useState } from "react";
+import { hotelRoomTypeImportConfig } from "@/components/batch-import/master-batch-import-config";
+import { createRoomType } from "@/modules/accommodation/lib/accommodation-api";
 import { useAccommodationHotelDetail } from "@/modules/accommodation/lib/use-accommodation-hotel-detail";
-import type { AccommodationHotelDetailData } from "@/modules/accommodation/shared/accommodation-detail-types";
+import type {
+  AccommodationHotelDetailData,
+  AccommodationHotelDetailTab,
+} from "@/modules/accommodation/shared/accommodation-detail-types";
 import { AccommodationHotelDetailCard } from "@/modules/accommodation/ui/components/accommodation-hotel-detail-card";
-import { AccommodationAvailabilityDialog } from "@/modules/accommodation/ui/components/dialogs/accommodation-availability-dialog";
-import { AccommodationRoomTypeDialog } from "@/modules/accommodation/ui/components/dialogs/accommodation-room-type-dialog";
-import { AccommodationSeasonDialog } from "@/modules/accommodation/ui/components/dialogs/accommodation-season-dialog";
+
+const AccommodationAvailabilityDialog = dynamic(
+  () =>
+    import("@/modules/accommodation/ui/components/dialogs/accommodation-availability-dialog").then(
+      (module) => module.AccommodationAvailabilityDialog
+    ),
+  { ssr: false }
+);
+const AccommodationRoomTypeDialog = dynamic(
+  () =>
+    import("@/modules/accommodation/ui/components/dialogs/accommodation-room-type-dialog").then(
+      (module) => module.AccommodationRoomTypeDialog
+    ),
+  { ssr: false }
+);
+const AccommodationSeasonDialog = dynamic(
+  () =>
+    import("@/modules/accommodation/ui/components/dialogs/accommodation-season-dialog").then(
+      (module) => module.AccommodationSeasonDialog
+    ),
+  { ssr: false }
+);
+
+const MasterBatchImportDialog = dynamic(
+  () =>
+    import("@/components/batch-import/master-batch-import-dialog").then(
+      (module) => module.MasterBatchImportDialog
+    ),
+  { ssr: false }
+);
 
 type AccommodationHotelDetailSectionProps = {
   hotelId?: string;
@@ -21,7 +54,14 @@ function AccommodationHotelDetailSectionComponent({
   isReadOnly,
   initialData = null,
 }: AccommodationHotelDetailSectionProps) {
-  const detail = useAccommodationHotelDetail({ hotelId, isReadOnly, initialData });
+  const [activeTab, setActiveTab] = useState<AccommodationHotelDetailTab>("room-types");
+  const detail = useAccommodationHotelDetail({
+    hotelId,
+    isReadOnly,
+    initialData,
+    activeTab,
+  });
+  const [roomTypeBatchOpen, setRoomTypeBatchOpen] = useState(false);
   const {
     openRoomTypeDialog,
     openAvailabilityDialog,
@@ -29,6 +69,7 @@ function AccommodationHotelDetailSectionComponent({
     deleteAvailabilityRecord,
   } = detail;
   const handleAddRoomType = useCallback(() => openRoomTypeDialog("create"), [openRoomTypeDialog]);
+  const handleOpenRoomTypeBatchUpload = useCallback(() => setRoomTypeBatchOpen(true), []);
   const handleEditRoomType = useCallback(
     (row: Parameters<typeof deleteRoomTypeRecord>[0]) => openRoomTypeDialog("edit", row),
     [openRoomTypeDialog]
@@ -50,18 +91,22 @@ function AccommodationHotelDetailSectionComponent({
     },
     [deleteAvailabilityRecord]
   );
+  const roomTypeCodes = useMemo(() => detail.roomTypeExistingCodes(), [detail]);
 
   return (
     <>
       <AccommodationHotelDetailCard
         selectedHotel={detail.selectedHotel}
         showHotelList={showHotelList}
+        activeTab={activeTab}
+        onActiveTabChange={setActiveTab}
         loadingDetails={detail.loadingDetails}
         roomTypes={detail.roomTypes}
         availability={detail.availability}
-        contracting={detail.contracting}
+        initialContracting={initialData?.contracting ?? null}
         isReadOnly={isReadOnly}
         onAddRoomType={handleAddRoomType}
+        onOpenRoomTypeBatchUpload={handleOpenRoomTypeBatchUpload}
         onEditRoomType={handleEditRoomType}
         onDeleteRoomType={handleDeleteRoomType}
         onAddAvailability={handleAddAvailability}
@@ -115,6 +160,30 @@ function AccommodationHotelDetailSectionComponent({
           onSubmit={() => void detail.submitSeason()}
           onEditSeason={(season) => detail.openSeasonDialog("edit", season)}
           onDeleteSeason={(season) => void detail.deleteSeasonRecord(season)}
+        />
+      ) : null}
+
+      {hotelId ? (
+        <MasterBatchImportDialog
+          open={roomTypeBatchOpen}
+          onOpenChange={setRoomTypeBatchOpen}
+          config={hotelRoomTypeImportConfig}
+          readOnly={isReadOnly}
+          context={{
+            locationByCode: new Map(),
+            currencyByCode: new Map(),
+            vehicleCategoryByCode: new Map(),
+            vehicleTypeByCode: new Map(),
+            vehicleTypeCategoryCodeByCode: new Map(),
+          }}
+          existingCodes={roomTypeCodes}
+          onRefreshExistingCodes={detail.refreshRoomTypeExistingCodes}
+          onUploadRow={async (payload) => {
+            await createRoomType(hotelId, payload);
+          }}
+          onCompleted={async () => {
+            await detail.refreshRoomTypeData();
+          }}
         />
       ) : null}
     </>

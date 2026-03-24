@@ -15,10 +15,19 @@ export const preTourResourceSchema = z.enum([
 export const preTourListQuerySchema = z.object({
   q: z.string().trim().max(160).optional(),
   limit: z.coerce.number().int().min(1).max(500).default(200),
+  offset: z.coerce.number().int().min(0).default(0),
+  cursor: z.string().optional(),
+  paginated: z.coerce.boolean().default(false),
   planId: z.string().trim().min(1).optional(),
   dayId: z.string().trim().min(1).optional(),
   itemId: z.string().trim().min(1).optional(),
   visitId: z.string().trim().min(1).optional(),
+  itemType: z.string().trim().toUpperCase().min(1).max(40).optional(),
+});
+
+export const preTourCursorSchema = z.object({
+  sortAt: z.string().datetime(),
+  id: z.string().min(1),
 });
 
 const baseCodeSchema = z.object({
@@ -67,6 +76,9 @@ export const createPreTourSchema = z.object({
         .array(
           z.enum(["ACTIVITY", "TRANSPORT", "ACCOMMODATION", "GUIDE", "CEREMONY", "MISC", "SUPPLEMENT"])
         )
+        .optional(),
+      transportChargeMethodDefault: z
+        .enum(["PER_TRANSFER", "PER_VEHICLE", "PER_PAX", "PER_HOUR", "PER_DAY", "PER_KM", "SLAB"])
         .optional(),
     })
     .optional()

@@ -131,11 +131,10 @@ export function ActivityManagementSection({
           selectedActivityLabel={state.selectedActivityLabel}
           query={state.query}
           loading={state.loading}
-          records={state.records}
           pagedRecords={state.pagedRecords}
           currentPage={state.currentPage}
           pageSize={state.pageSize}
-          totalItems={state.records.length}
+          totalItems={state.totalRecords}
           lookups={state.lookups}
           isReadOnly={isReadOnly}
           onResourceChange={state.setResource}
@@ -184,8 +183,8 @@ export function ActivityManagementSection({
                   <ActivityRatesTab
                     query={state.query}
                     loading={state.loading}
-                    records={state.records}
                     pagedRecords={state.pagedRecords}
+                    totalItems={state.totalRecords}
                     currentPage={state.currentPage}
                     pageSize={state.pageSize}
                     lookups={state.lookups}
@@ -204,8 +203,8 @@ export function ActivityManagementSection({
                   <ActivityAvailabilityTab
                     query={state.query}
                     loading={state.loading}
-                    records={state.records}
                     pagedRecords={state.pagedRecords}
+                    totalItems={state.totalRecords}
                     currentPage={state.currentPage}
                     pageSize={state.pageSize}
                     lookups={state.lookups}
@@ -224,8 +223,8 @@ export function ActivityManagementSection({
                   <ActivitySupplementsTab
                     query={state.query}
                     loading={state.loading}
-                    records={state.records}
                     pagedRecords={state.pagedRecords}
+                    totalItems={state.totalRecords}
                     currentPage={state.currentPage}
                     pageSize={state.pageSize}
                     lookups={state.lookups}

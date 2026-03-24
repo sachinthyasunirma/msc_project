@@ -1,7 +1,8 @@
-import { and, desc, eq, gte, ilike, isNull, lte, ne, or } from "drizzle-orm";
+import { and, desc, eq, getTableColumns, gte, ilike, isNull, lt, lte, ne, or } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
 import * as schema from "@/db/schema";
+import { profileServerOperation } from "@/lib/logging/perf";
 import { AccessControlError, resolveAccess } from "@/lib/security/access-control";
 import type { AppPrivilegeCode } from "@/lib/security/privileges";
 import {
@@ -13,6 +14,7 @@ import {
   createPreTourSchema,
   createPreTourTechnicalVisitSchema,
   createPreTourTotalSchema,
+  preTourCursorSchema,
   preTourListQuerySchema,
   preTourResourceSchema,
   updatePreTourCategorySchema,
@@ -25,6 +27,8 @@ import {
   updatePreTourTotalSchema,
 } from "@/modules/pre-tour/shared/pre-tour-schemas";
 import type { PreTourDayInitializationResult } from "@/modules/pre-tour/shared/pre-tour-day-initialization-types";
+import { addDays, toDayCount } from "@/modules/pre-tour/lib/pre-tour-management-utils";
+import { buildPreTourCostingSheet } from "@/modules/pre-tour/lib/pricing/costing-sheet";
 
 class PreTourError extends Error {
   constructor(
@@ -38,13 +42,22 @@ class PreTourError extends Error {
 
 type PreTourResource = z.infer<typeof preTourResourceSchema>;
 
-function requiredPrivilegeForResource(resource: PreTourResource): AppPrivilegeCode {
-  if (resource === "pre-tour-totals") return "PRE_TOUR_COSTING";
+function requiredPrivilegeForResource(): AppPrivilegeCode {
   return "SCREEN_PRE_TOURS";
 }
 
 function normalizeZodError(error: z.ZodError) {
-  return error.issues[0]?.message || "Validation failed.";
+  const issue = error.issues[0];
+  if (!issue) return "Validation failed.";
+  const path = issue.path.at(-1);
+  if (path && issue.message) {
+    const label = String(path)
+      .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+      .replace(/_/g, " ")
+      .replace(/\b\w/g, (char) => char.toUpperCase());
+    return `${label}: ${issue.message}`;
+  }
+  return issue.message || "Validation failed.";
 }
 
 function toDecimal(value: number | string | null | undefined, scale = 2) {
@@ -58,6 +71,50 @@ function toDate(value: string | null | undefined) {
   return new Date(value);
 }
 
+function toStoredPricingPolicy(
+  pricingPolicy: z.infer<typeof createPreTourSchema>["pricingPolicy"]
+): PreTourPlanInsert["pricingPolicy"] {
+  if (pricingPolicy === undefined) return undefined;
+  if (pricingPolicy === null) return null;
+  return {
+    mode: pricingPolicy.mode,
+    value: pricingPolicy.value,
+    applyTo: pricingPolicy.applyTo
+      ?.map((entry) => (entry === "CEREMONY" ? "ACTIVITY" : entry))
+      .filter(
+        (
+          entry
+        ): entry is "ACTIVITY" | "TRANSPORT" | "ACCOMMODATION" | "GUIDE" | "MISC" | "SUPPLEMENT" =>
+          entry !== undefined
+      ),
+  };
+}
+
+function parsePreTourCursor(cursor?: string) {
+  if (!cursor) return null;
+  try {
+    const decoded = preTourCursorSchema.parse(
+      JSON.parse(Buffer.from(cursor, "base64url").toString("utf8"))
+    );
+    return {
+      sortAt: new Date(decoded.sortAt),
+      id: decoded.id,
+    };
+  } catch {
+    throw new PreTourError(400, "INVALID_CURSOR", "Invalid pagination cursor.");
+  }
+}
+
+function buildPreTourCursor(row: { id: string }, sortAt: Date) {
+  return Buffer.from(
+    JSON.stringify({
+      sortAt: sortAt.toISOString(),
+      id: row.id,
+    }),
+    "utf8"
+  ).toString("base64url");
+}
+
 function parseResource(input: string): PreTourResource {
   const parsed = preTourResourceSchema.safeParse(input);
   if (!parsed.success) {
@@ -66,10 +123,10 @@ function parseResource(input: string): PreTourResource {
   return parsed.data;
 }
 
-async function getAccess(headers: Headers, resource: PreTourResource) {
+async function getAccess(headers: Headers) {
   try {
     const access = await resolveAccess(headers, {
-      requiredPrivilege: requiredPrivilegeForResource(resource),
+      requiredPrivilege: requiredPrivilegeForResource(),
     });
     return {
       ...access,
@@ -85,8 +142,8 @@ async function getAccess(headers: Headers, resource: PreTourResource) {
   }
 }
 
-async function ensureWritable(headers: Headers, resource: PreTourResource) {
-  const access = await getAccess(headers, resource);
+async function ensureWritable(headers: Headers) {
+  const access = await getAccess(headers);
   if (access.readOnly) {
     throw new PreTourError(
       403,
@@ -119,7 +176,11 @@ async function ensurePlan(companyId: string, id: string) {
 
 async function ensureDay(companyId: string, id: string) {
   const [record] = await db
-    .select({ id: schema.preTourPlanDay.id, planId: schema.preTourPlanDay.planId })
+    .select({
+      id: schema.preTourPlanDay.id,
+      planId: schema.preTourPlanDay.planId,
+      dayNumber: schema.preTourPlanDay.dayNumber,
+    })
     .from(schema.preTourPlanDay)
     .where(and(eq(schema.preTourPlanDay.id, id), eq(schema.preTourPlanDay.companyId, companyId)))
     .limit(1);
@@ -179,20 +240,7 @@ async function ensureGuideCoverageRange(
     );
   }
 
-  const [startBounds] = await db
-    .select({ dayNumber: schema.preTourPlanDay.dayNumber })
-    .from(schema.preTourPlanDay)
-    .where(eq(schema.preTourPlanDay.id, input.startDayId))
-    .limit(1);
-
-  const [endBounds] = await db
-    .select({ dayNumber: schema.preTourPlanDay.dayNumber })
-    .from(schema.preTourPlanDay)
-    .where(eq(schema.preTourPlanDay.id, input.endDayId))
-    .limit(1);
-
-  if (!startBounds || !endBounds) return;
-  if (Number(startBounds.dayNumber) > Number(endBounds.dayNumber)) {
+  if (Number(startDay.dayNumber) > Number(endDay.dayNumber)) {
     throw new PreTourError(
       400,
       "VALIDATION_ERROR",
@@ -498,7 +546,7 @@ async function validatePlanStructureAgainstCategoryRule(input: {
     throw new PreTourError(
       400,
       "VALIDATION_ERROR",
-      "Selected category requires itinerary/day records before this status."
+      "Selected category requires planned day records before this status."
     );
   }
   if (rule.minDays !== null && dayCount < Number(rule.minDays)) {
@@ -836,6 +884,12 @@ const clonePreTourVersionSchema = z.object({
   sourcePlanId: z.string().trim().min(1),
 });
 
+const copyPreTourChildrenSchema = z.object({
+  sourcePlanId: z.string().trim().min(1),
+  targetPlanId: z.string().trim().min(1),
+  codePrefix: z.string().trim().min(1).max(80),
+});
+
 function normalizeCloneCode(value: string) {
   return value.trim().toUpperCase().slice(0, 80);
 }
@@ -852,6 +906,243 @@ type PreTourPlanItemAddonInsert = typeof schema.preTourPlanItemAddon.$inferInser
 type PreTourPlanTotalInsert = typeof schema.preTourPlanTotal.$inferInsert;
 type PreTourPlanCategoryInsert = typeof schema.preTourPlanCategory.$inferInsert;
 type PreTourPlanTechnicalVisitInsert = typeof schema.preTourPlanTechnicalVisit.$inferInsert;
+type PreTourPlanBinInsert = typeof schema.preTourPlanBin.$inferInsert;
+type PreTourPlanUpdate = Partial<PreTourPlanInsert>;
+type PreTourPlanDayUpdate = Partial<PreTourPlanDayInsert>;
+type PreTourPlanItemUpdate = Partial<PreTourPlanItemInsert>;
+type PreTourPlanGuideAllocationUpdate = Partial<PreTourPlanGuideAllocationInsert>;
+type PreTourPlanItemAddonUpdate = Partial<PreTourPlanItemAddonInsert>;
+type PreTourPlanTotalUpdate = Partial<PreTourPlanTotalInsert>;
+type PreTourPlanCategoryUpdate = Partial<PreTourPlanCategoryInsert>;
+type PreTourPlanTechnicalVisitUpdate = Partial<PreTourPlanTechnicalVisitInsert>;
+type PreTourTotalsByType = NonNullable<PreTourPlanTotalInsert["totalsByType"]>;
+type DbTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+const PRE_TOUR_TOTAL_BUCKETS = [
+  "TRANSPORT",
+  "ACTIVITY",
+  "ACCOMMODATION",
+  "GUIDE",
+  "SUPPLEMENT",
+  "MISC",
+] as const;
+
+type PreTourTotalBucketKey = (typeof PRE_TOUR_TOTAL_BUCKETS)[number];
+
+function toNumberValue(value: unknown) {
+  const numeric = Number(value ?? 0);
+  return Number.isFinite(numeric) ? numeric : 0;
+}
+
+function normalizePreTourTotalBucket(value: unknown): PreTourTotalBucketKey | null {
+  const normalized = String(value ?? "").trim().toUpperCase();
+  if (!normalized) return null;
+  if (normalized === "CEREMONY") return "ACTIVITY";
+  return PRE_TOUR_TOTAL_BUCKETS.includes(normalized as PreTourTotalBucketKey)
+    ? (normalized as PreTourTotalBucketKey)
+    : null;
+}
+
+async function recomputePreTourPlanTotals(
+  companyId: string,
+  planId: string,
+  updatedBy?: { userId?: string | null; userName?: string | null }
+) {
+  const [plan] = await db
+    .select({
+      id: schema.preTourPlan.id,
+      currencyCode: schema.preTourPlan.currencyCode,
+      exchangeRate: schema.preTourPlan.exchangeRate,
+    })
+    .from(schema.preTourPlan)
+    .where(and(eq(schema.preTourPlan.id, planId), eq(schema.preTourPlan.companyId, companyId)))
+    .limit(1);
+
+  if (!plan) return;
+
+  const [itemRows, addonRows, guideRows, existingTotal] = await Promise.all([
+    db
+      .select({
+        itemType: schema.preTourPlanItem.itemType,
+        title: schema.preTourPlanItem.title,
+        description: schema.preTourPlanItem.description,
+        baseAmount: schema.preTourPlanItem.baseAmount,
+        taxAmount: schema.preTourPlanItem.taxAmount,
+        totalAmount: schema.preTourPlanItem.totalAmount,
+        pricingSnapshot: schema.preTourPlanItem.pricingSnapshot,
+      })
+      .from(schema.preTourPlanItem)
+      .where(
+        and(
+          eq(schema.preTourPlanItem.companyId, companyId),
+          eq(schema.preTourPlanItem.planId, planId)
+        )
+      ),
+    db
+      .select({
+        addonType: schema.preTourPlanItemAddon.addonType,
+        title: schema.preTourPlanItemAddon.title,
+        parentItemType: schema.preTourPlanItem.itemType,
+        baseAmount: schema.preTourPlanItemAddon.baseAmount,
+        taxAmount: schema.preTourPlanItemAddon.taxAmount,
+        totalAmount: schema.preTourPlanItemAddon.totalAmount,
+        snapshot: schema.preTourPlanItemAddon.snapshot,
+      })
+      .from(schema.preTourPlanItemAddon)
+      .leftJoin(
+        schema.preTourPlanItem,
+        eq(schema.preTourPlanItemAddon.planItemId, schema.preTourPlanItem.id)
+      )
+      .where(
+        and(
+          eq(schema.preTourPlanItemAddon.companyId, companyId),
+          eq(schema.preTourPlanItemAddon.planId, planId)
+        )
+      ),
+    db
+      .select({
+        title: schema.preTourPlanGuideAllocation.title,
+        baseAmount: schema.preTourPlanGuideAllocation.baseAmount,
+        taxAmount: schema.preTourPlanGuideAllocation.taxAmount,
+        totalAmount: schema.preTourPlanGuideAllocation.totalAmount,
+        pricingSnapshot: schema.preTourPlanGuideAllocation.pricingSnapshot,
+      })
+      .from(schema.preTourPlanGuideAllocation)
+      .where(
+        and(
+          eq(schema.preTourPlanGuideAllocation.companyId, companyId),
+          eq(schema.preTourPlanGuideAllocation.planId, planId)
+        )
+      ),
+    db
+      .select({ id: schema.preTourPlanTotal.id })
+      .from(schema.preTourPlanTotal)
+      .where(
+        and(
+          eq(schema.preTourPlanTotal.companyId, companyId),
+          eq(schema.preTourPlanTotal.planId, planId)
+        )
+      )
+      .limit(1)
+      .then((rows) => rows[0] ?? null),
+  ]);
+
+  const totalsByType: Partial<PreTourTotalsByType> = {};
+  const addBucketTotals = (bucket: PreTourTotalBucketKey | null, input: {
+    baseAmount: unknown;
+    taxAmount: unknown;
+    totalAmount: unknown;
+  }) => {
+    if (!bucket) return;
+    const current = totalsByType[bucket] ?? { base: 0, tax: 0, total: 0 };
+    totalsByType[bucket] = {
+      base: current.base + toNumberValue(input.baseAmount),
+      tax: current.tax + toNumberValue(input.taxAmount),
+      total: current.total + toNumberValue(input.totalAmount),
+    };
+  };
+
+  itemRows.forEach((row) => {
+    addBucketTotals(normalizePreTourTotalBucket(row.itemType), row);
+  });
+  addonRows.forEach((row) => {
+    addBucketTotals(
+      normalizePreTourTotalBucket(row.addonType) ??
+        normalizePreTourTotalBucket(row.parentItemType) ??
+        "SUPPLEMENT",
+      row
+    );
+  });
+  guideRows.forEach((row) => {
+    addBucketTotals("GUIDE", row);
+  });
+
+  const normalizedTotalsByType =
+    Object.keys(totalsByType).length > 0 ? (totalsByType as PreTourTotalsByType) : null;
+  const baseTotal = Object.values(totalsByType).reduce((sum, bucket) => sum + toNumberValue(bucket?.base), 0);
+  const taxTotal = Object.values(totalsByType).reduce((sum, bucket) => sum + toNumberValue(bucket?.tax), 0);
+  const grandTotal = Object.values(totalsByType).reduce((sum, bucket) => sum + toNumberValue(bucket?.total), 0);
+  const costingSheet = buildPreTourCostingSheet({
+    quotationCurrency: String(plan.currencyCode || "USD"),
+    exchangeRate: plan.exchangeRate,
+    items: itemRows.map((row) => ({
+      itemType: String(row.itemType || ""),
+      title: row.title ? String(row.title) : null,
+      description: row.description ? String(row.description) : null,
+      baseAmount: row.baseAmount,
+      taxAmount: row.taxAmount,
+      totalAmount: row.totalAmount,
+      pricingSnapshot: row.pricingSnapshot,
+    })),
+    addons: addonRows.map((row) => ({
+      itemType: String(row.addonType || row.parentItemType || "SUPPLEMENT"),
+      title: row.title ? String(row.title) : null,
+      description: null,
+      baseAmount: row.baseAmount,
+      taxAmount: row.taxAmount,
+      totalAmount: row.totalAmount,
+      pricingSnapshot: row.snapshot,
+    })),
+    guides: guideRows.map((row) => ({
+      itemType: "GUIDE",
+      title: row.title ? String(row.title) : null,
+      description: null,
+      baseAmount: row.baseAmount,
+      taxAmount: row.taxAmount,
+      totalAmount: row.totalAmount,
+      pricingSnapshot: row.pricingSnapshot,
+    })),
+  });
+  const nextTotalsPayload = {
+    currencyCode: String(plan.currencyCode || "USD"),
+    totalsByType: normalizedTotalsByType,
+    baseTotal: toDecimal(baseTotal) ?? "0.00",
+    taxTotal: toDecimal(taxTotal) ?? "0.00",
+    grandTotal: toDecimal(grandTotal) ?? "0.00",
+    snapshot: costingSheet,
+    isActive: true,
+    updatedAt: new Date(),
+  } satisfies Partial<PreTourPlanTotalInsert>;
+
+  if (existingTotal) {
+    await db
+      .update(schema.preTourPlanTotal)
+      .set(nextTotalsPayload)
+      .where(
+        and(
+          eq(schema.preTourPlanTotal.id, existingTotal.id),
+          eq(schema.preTourPlanTotal.companyId, companyId)
+        )
+      );
+  } else {
+    await db.insert(schema.preTourPlanTotal).values({
+      companyId,
+      planId,
+      code: normalizeCloneCode(`PT_TOTAL_${planId}`),
+      currencyCode: String(plan.currencyCode || "USD"),
+      totalsByType: normalizedTotalsByType,
+      baseTotal: toDecimal(baseTotal) ?? "0.00",
+      taxTotal: toDecimal(taxTotal) ?? "0.00",
+      grandTotal: toDecimal(grandTotal) ?? "0.00",
+      snapshot: costingSheet,
+      isActive: true,
+    } as PreTourPlanTotalInsert);
+  }
+
+  const nextPlanTotalsPayload = {
+    baseTotal: toDecimal(baseTotal) ?? "0.00",
+    taxTotal: toDecimal(taxTotal) ?? "0.00",
+    grandTotal: toDecimal(grandTotal) ?? "0.00",
+    updatedByUserId: updatedBy?.userId ?? undefined,
+    updatedByName: updatedBy?.userName ?? undefined,
+    updatedAt: new Date(),
+  } satisfies PreTourPlanUpdate;
+
+  await db
+    .update(schema.preTourPlan)
+    .set(nextPlanTotalsPayload)
+    .where(and(eq(schema.preTourPlan.id, planId), eq(schema.preTourPlan.companyId, companyId)));
+}
 
 async function generatePreTourReferenceNo(companyId: string) {
   const now = new Date();
@@ -971,7 +1262,7 @@ export async function initializePreTourDays(
     throw new PreTourError(400, "VALIDATION_ERROR", normalizeZodError(parsed.error));
   }
 
-  const access = await ensureWritable(headers, "pre-tour-days");
+  const access = await ensureWritable(headers);
   const companyId = access.companyId;
 
   const [plan] = await db
@@ -1027,26 +1318,29 @@ export async function initializePreTourDays(
     .replace(/^_|_$/g, "");
   const planStartDate = plan.startDate instanceof Date ? plan.startDate : new Date(String(plan.startDate));
 
-  await db.transaction(async (tx) => {
-    for (let dayNumber = 1; dayNumber <= expectedDayCount; dayNumber += 1) {
-      if (existingDayNumbers.has(dayNumber)) continue;
+  for (let dayNumber = 1; dayNumber <= expectedDayCount; dayNumber += 1) {
+    if (existingDayNumbers.has(dayNumber)) continue;
+
+    const inserted = await db
+      .insert(schema.preTourPlanDay)
+      .values({
+        companyId,
+        planId: parsed.data.planId,
+        code: `${baseCode}_DAY_${String(dayNumber).padStart(2, "0")}`.slice(0, 80),
+        dayNumber,
+        date: addDays(planStartDate.toISOString(), dayNumber - 1),
+        title: `Day ${dayNumber}`,
+        isActive: true,
+      } satisfies PreTourPlanDayInsert)
+      .onConflictDoNothing({
+        target: [schema.preTourPlanDay.planId, schema.preTourPlanDay.dayNumber],
+      })
+      .returning({ id: schema.preTourPlanDay.id });
+
+    if (inserted.length > 0) {
       createdDayNumbers.push(dayNumber);
-      await tx
-        .insert(schema.preTourPlanDay)
-        .values({
-          companyId,
-          planId: parsed.data.planId,
-          code: `${baseCode}_DAY_${String(dayNumber).padStart(2, "0")}`.slice(0, 80),
-          dayNumber,
-          date: addDays(planStartDate.toISOString(), dayNumber - 1),
-          title: `Day ${dayNumber}`,
-          isActive: true,
-        } as any)
-        .onConflictDoNothing({
-          target: [schema.preTourPlanDay.planId, schema.preTourPlanDay.dayNumber],
-        });
     }
-  });
+  }
 
   const days = await db
     .select()
@@ -1069,6 +1363,50 @@ export async function initializePreTourDays(
   };
 }
 
+export async function generatePreTourCosting(
+  payload: unknown,
+  headers: Headers
+): Promise<Record<string, unknown>> {
+  const parsed = z
+    .object({
+      planId: z.string().trim().min(1),
+    })
+    .safeParse(payload);
+  if (!parsed.success) {
+    throw new PreTourError(400, "VALIDATION_ERROR", normalizeZodError(parsed.error));
+  }
+
+  const access = await ensureWritable(headers);
+  const companyId = access.companyId;
+  await ensurePlan(companyId, parsed.data.planId);
+  await recomputePreTourPlanTotals(companyId, parsed.data.planId, {
+    userId: access.userId,
+    userName: access.userName,
+  });
+
+  const [total] = await db
+    .select()
+    .from(schema.preTourPlanTotal)
+    .where(
+      and(
+        eq(schema.preTourPlanTotal.companyId, companyId),
+        eq(schema.preTourPlanTotal.planId, parsed.data.planId)
+      )
+    )
+    .orderBy(desc(schema.preTourPlanTotal.updatedAt))
+    .limit(1);
+
+  if (!total) {
+    throw new PreTourError(
+      500,
+      "COSTING_NOT_GENERATED",
+      "Failed to generate pre-tour costing."
+    );
+  }
+
+  return total as unknown as Record<string, unknown>;
+}
+
 export async function runPreTourBinCleanupForAllCompanies() {
   const companies = await db.select({ id: schema.company.id }).from(schema.company);
   let totalDeleted = 0;
@@ -1089,205 +1427,715 @@ export async function listPreTourRecords(
     throw new PreTourError(400, "VALIDATION_ERROR", normalizeZodError(parsed.error));
   }
 
-  const { companyId } = await getAccess(headers, resource);
-  const q = parsed.data.q ? `%${parsed.data.q}%` : null;
-  const limit = parsed.data.limit;
-  const planId = parsed.data.planId;
-  const dayId = parsed.data.dayId;
-  const itemId = parsed.data.itemId;
-  const visitId = parsed.data.visitId;
+  return profileServerOperation(
+    {
+      feature: "pre-tour",
+      operation: "list_pre_tour_records",
+      warnThresholdMs: 250,
+      metadata: {
+        resource,
+        limit: parsed.data.limit,
+        paginated: parsed.data.paginated,
+        hasSearch: Boolean(parsed.data.q),
+        hasPlanId: Boolean(parsed.data.planId),
+        hasDayId: Boolean(parsed.data.dayId),
+        hasItemId: Boolean(parsed.data.itemId),
+        hasVisitId: Boolean(parsed.data.visitId),
+      },
+      getMetadata: (result) =>
+        Array.isArray(result)
+          ? { resultCount: result.length }
+          : { resultCount: result.items.length, hasNext: result.hasNext },
+    },
+    async () => {
+      const { companyId } = await getAccess(headers);
+      const q = parsed.data.q ? `%${parsed.data.q}%` : null;
+      const limit = parsed.data.limit;
+      const offset = parsed.data.offset;
+      const cursor = parsePreTourCursor(parsed.data.cursor);
+      const paginated = parsed.data.paginated;
+      const planId = parsed.data.planId;
+      const dayId = parsed.data.dayId;
+      const itemId = parsed.data.itemId;
+      const visitId = parsed.data.visitId;
+      const itemType = parsed.data.itemType;
+
+      switch (resource) {
+        case "pre-tours": {
+          const rows = await db
+            .select()
+            .from(schema.preTourPlan)
+            .where(
+              and(
+                eq(schema.preTourPlan.companyId, companyId),
+                isNull(schema.preTourPlan.deletedAt),
+                q
+                  ? or(
+                      ilike(schema.preTourPlan.code, q),
+                      ilike(schema.preTourPlan.referenceNo, q),
+                      ilike(schema.preTourPlan.planCode, q),
+                      ilike(schema.preTourPlan.title, q),
+                      ilike(schema.preTourPlan.status, q),
+                      ilike(schema.preTourPlan.currencyCode, q)
+                    )
+                  : undefined,
+                paginated && cursor
+                  ? or(
+                      lt(schema.preTourPlan.createdAt, cursor.sortAt),
+                      and(
+                        eq(schema.preTourPlan.createdAt, cursor.sortAt),
+                        lt(schema.preTourPlan.id, cursor.id)
+                      )
+                    )
+                  : undefined
+              )
+            )
+            .orderBy(desc(schema.preTourPlan.createdAt), desc(schema.preTourPlan.id))
+            .limit(paginated ? limit + 1 : limit);
+
+          if (!paginated) {
+            return rows;
+          }
+
+          const hasNext = rows.length > limit;
+          const items = hasNext ? rows.slice(0, limit) : rows;
+          const last = items[items.length - 1];
+          return {
+            items,
+            nextCursor: hasNext && last ? buildPreTourCursor(last, last.createdAt) : null,
+            hasNext,
+            limit,
+          };
+        }
+
+        case "pre-tour-bins": {
+          await cleanupExpiredPreTourBins(companyId);
+          const rows = await db
+            .select()
+            .from(schema.preTourPlanBin)
+            .where(
+              and(
+                eq(schema.preTourPlanBin.companyId, companyId),
+                q
+                  ? or(
+                      ilike(schema.preTourPlanBin.code, q),
+                      ilike(schema.preTourPlanBin.referenceNo, q),
+                      ilike(schema.preTourPlanBin.planCode, q),
+                      ilike(schema.preTourPlanBin.title, q),
+                      ilike(schema.preTourPlanBin.deletedByName, q)
+                    )
+                  : undefined,
+                paginated && cursor
+                  ? or(
+                      lt(schema.preTourPlanBin.deletedAt, cursor.sortAt),
+                      and(
+                        eq(schema.preTourPlanBin.deletedAt, cursor.sortAt),
+                        lt(schema.preTourPlanBin.id, cursor.id)
+                      )
+                    )
+                  : undefined
+              )
+            )
+            .orderBy(desc(schema.preTourPlanBin.deletedAt), desc(schema.preTourPlanBin.id))
+            .limit(paginated ? limit + 1 : limit);
+
+          if (!paginated) {
+            return rows;
+          }
+
+          const hasNext = rows.length > limit;
+          const items = hasNext ? rows.slice(0, limit) : rows;
+          const last = items[items.length - 1];
+          return {
+            items,
+            nextCursor: hasNext && last ? buildPreTourCursor(last, last.deletedAt) : null,
+            hasNext,
+            limit,
+          };
+        }
+
+        case "pre-tour-days":
+          return db
+            .select()
+            .from(schema.preTourPlanDay)
+            .where(
+              and(
+                eq(schema.preTourPlanDay.companyId, companyId),
+                planId ? eq(schema.preTourPlanDay.planId, planId) : undefined,
+                q
+                  ? or(
+                      ilike(schema.preTourPlanDay.code, q),
+                      ilike(schema.preTourPlanDay.title, q)
+                    )
+                  : undefined
+              )
+            )
+            .orderBy(schema.preTourPlanDay.dayNumber)
+            .offset(offset)
+            .limit(limit);
+
+        case "pre-tour-items":
+          return db
+            .select()
+            .from(schema.preTourPlanItem)
+            .where(
+              and(
+                eq(schema.preTourPlanItem.companyId, companyId),
+                planId ? eq(schema.preTourPlanItem.planId, planId) : undefined,
+                dayId ? eq(schema.preTourPlanItem.dayId, dayId) : undefined,
+                itemType ? eq(schema.preTourPlanItem.itemType, itemType) : undefined,
+                q
+                  ? or(
+                      ilike(schema.preTourPlanItem.code, q),
+                      ilike(schema.preTourPlanItem.itemType, q),
+                      ilike(schema.preTourPlanItem.status, q),
+                      ilike(schema.preTourPlanItem.title, q)
+                    )
+                  : undefined
+              )
+            )
+            .orderBy(schema.preTourPlanItem.sortOrder, desc(schema.preTourPlanItem.createdAt))
+            .offset(offset)
+            .limit(limit);
+
+        case "pre-tour-guide-allocations":
+          return db
+            .select()
+            .from(schema.preTourPlanGuideAllocation)
+            .where(
+              and(
+                eq(schema.preTourPlanGuideAllocation.companyId, companyId),
+                planId ? eq(schema.preTourPlanGuideAllocation.planId, planId) : undefined,
+                q
+                  ? or(
+                      ilike(schema.preTourPlanGuideAllocation.code, q),
+                      ilike(schema.preTourPlanGuideAllocation.coverageMode, q),
+                      ilike(schema.preTourPlanGuideAllocation.language, q),
+                      ilike(schema.preTourPlanGuideAllocation.guideBasis, q),
+                      ilike(schema.preTourPlanGuideAllocation.title, q)
+                    )
+                  : undefined
+              )
+            )
+            .orderBy(desc(schema.preTourPlanGuideAllocation.createdAt))
+            .offset(offset)
+            .limit(limit);
+
+        case "pre-tour-item-addons":
+          if (dayId) {
+            return db
+              .select(getTableColumns(schema.preTourPlanItemAddon))
+              .from(schema.preTourPlanItemAddon)
+              .innerJoin(
+                schema.preTourPlanItem,
+                eq(schema.preTourPlanItemAddon.planItemId, schema.preTourPlanItem.id)
+              )
+              .where(
+                and(
+                  eq(schema.preTourPlanItemAddon.companyId, companyId),
+                  planId ? eq(schema.preTourPlanItemAddon.planId, planId) : undefined,
+                  eq(schema.preTourPlanItem.companyId, companyId),
+                  eq(schema.preTourPlanItem.dayId, dayId),
+                  q
+                    ? or(
+                        ilike(schema.preTourPlanItemAddon.code, q),
+                        ilike(schema.preTourPlanItemAddon.addonType, q),
+                        ilike(schema.preTourPlanItemAddon.title, q)
+                      )
+                    : undefined
+                )
+              )
+              .orderBy(desc(schema.preTourPlanItemAddon.createdAt))
+              .offset(offset)
+              .limit(limit);
+          }
+
+          return db
+            .select()
+            .from(schema.preTourPlanItemAddon)
+            .where(
+              and(
+                eq(schema.preTourPlanItemAddon.companyId, companyId),
+                planId ? eq(schema.preTourPlanItemAddon.planId, planId) : undefined,
+                itemId ? eq(schema.preTourPlanItemAddon.planItemId, itemId) : undefined,
+                q
+                  ? or(
+                      ilike(schema.preTourPlanItemAddon.code, q),
+                      ilike(schema.preTourPlanItemAddon.addonType, q),
+                      ilike(schema.preTourPlanItemAddon.title, q)
+                    )
+                  : undefined
+              )
+            )
+            .orderBy(desc(schema.preTourPlanItemAddon.createdAt))
+            .offset(offset)
+            .limit(limit);
+
+        case "pre-tour-totals":
+          return db
+            .select()
+            .from(schema.preTourPlanTotal)
+            .where(
+              and(
+                eq(schema.preTourPlanTotal.companyId, companyId),
+                planId ? eq(schema.preTourPlanTotal.planId, planId) : undefined,
+                q
+                  ? or(
+                      ilike(schema.preTourPlanTotal.code, q),
+                      ilike(schema.preTourPlanTotal.currencyCode, q)
+                    )
+                  : undefined
+              )
+            )
+            .orderBy(desc(schema.preTourPlanTotal.createdAt))
+            .offset(offset)
+            .limit(limit);
+
+        case "pre-tour-categories":
+          return db
+            .select()
+            .from(schema.preTourPlanCategory)
+            .where(
+              and(
+                eq(schema.preTourPlanCategory.companyId, companyId),
+                planId ? eq(schema.preTourPlanCategory.planId, planId) : undefined,
+                q
+                  ? or(
+                      ilike(schema.preTourPlanCategory.code, q),
+                      ilike(schema.preTourPlanCategory.notes, q)
+                    )
+                  : undefined
+              )
+            )
+            .orderBy(desc(schema.preTourPlanCategory.createdAt))
+            .offset(offset)
+            .limit(limit);
+
+        case "pre-tour-technical-visits":
+          return db
+            .select()
+            .from(schema.preTourPlanTechnicalVisit)
+            .where(
+              and(
+                eq(schema.preTourPlanTechnicalVisit.companyId, companyId),
+                planId ? eq(schema.preTourPlanTechnicalVisit.planId, planId) : undefined,
+                dayId ? eq(schema.preTourPlanTechnicalVisit.dayId, dayId) : undefined,
+                visitId ? eq(schema.preTourPlanTechnicalVisit.technicalVisitId, visitId) : undefined,
+                q
+                  ? or(
+                      ilike(schema.preTourPlanTechnicalVisit.code, q),
+                      ilike(schema.preTourPlanTechnicalVisit.notes, q)
+                    )
+                  : undefined
+              )
+            )
+            .orderBy(desc(schema.preTourPlanTechnicalVisit.createdAt))
+            .offset(offset)
+            .limit(limit);
+
+        default:
+          throw new PreTourError(404, "RESOURCE_NOT_FOUND", "Pre-tour resource not found.");
+      }
+    }
+  );
+}
+
+export async function getPreTourRecord(resourceInput: string, id: string, headers: Headers) {
+  const resource = parseResource(resourceInput);
+  const { companyId } = await getAccess(headers);
 
   switch (resource) {
-    case "pre-tours":
-      return db
+    case "pre-tours": {
+      const [record] = await db
         .select()
         .from(schema.preTourPlan)
         .where(
           and(
+            eq(schema.preTourPlan.id, id),
             eq(schema.preTourPlan.companyId, companyId),
-            isNull(schema.preTourPlan.deletedAt),
-            q
-                ? or(
-                    ilike(schema.preTourPlan.code, q),
-                    ilike(schema.preTourPlan.referenceNo, q),
-                    ilike(schema.preTourPlan.planCode, q),
-                    ilike(schema.preTourPlan.title, q),
-                  ilike(schema.preTourPlan.status, q),
-                  ilike(schema.preTourPlan.currencyCode, q)
-                )
-              : undefined
+            isNull(schema.preTourPlan.deletedAt)
           )
         )
-        .orderBy(desc(schema.preTourPlan.createdAt))
-        .limit(limit);
+        .limit(1);
+      if (!record) {
+        throw new PreTourError(404, "NOT_FOUND", "Pre-tour plan not found.");
+      }
+      return record;
+    }
 
-    case "pre-tour-bins":
-      await cleanupExpiredPreTourBins(companyId);
-      return db
+    case "pre-tour-bins": {
+      const [record] = await db
         .select()
         .from(schema.preTourPlanBin)
         .where(
-          and(
-            eq(schema.preTourPlanBin.companyId, companyId),
-            q
-              ? or(
-                  ilike(schema.preTourPlanBin.code, q),
-                  ilike(schema.preTourPlanBin.referenceNo, q),
-                  ilike(schema.preTourPlanBin.planCode, q),
-                  ilike(schema.preTourPlanBin.title, q),
-                  ilike(schema.preTourPlanBin.deletedByName, q)
-                )
-              : undefined
-          )
+          and(eq(schema.preTourPlanBin.id, id), eq(schema.preTourPlanBin.companyId, companyId))
         )
-        .orderBy(desc(schema.preTourPlanBin.deletedAt))
-        .limit(limit);
+        .limit(1);
+      if (!record) {
+        throw new PreTourError(404, "NOT_FOUND", "Pre-tour bin record not found.");
+      }
+      return record;
+    }
 
-    case "pre-tour-days":
-      return db
+    case "pre-tour-days": {
+      const [record] = await db
         .select()
         .from(schema.preTourPlanDay)
-        .where(
-          and(
-            eq(schema.preTourPlanDay.companyId, companyId),
-            planId ? eq(schema.preTourPlanDay.planId, planId) : undefined,
-            q
-              ? or(
-                  ilike(schema.preTourPlanDay.code, q),
-                  ilike(schema.preTourPlanDay.title, q)
-                )
-              : undefined
-          )
-        )
-        .orderBy(schema.preTourPlanDay.dayNumber)
-        .limit(limit);
+        .where(and(eq(schema.preTourPlanDay.id, id), eq(schema.preTourPlanDay.companyId, companyId)))
+        .limit(1);
+      if (!record) {
+        throw new PreTourError(404, "NOT_FOUND", "Pre-tour day not found.");
+      }
+      return record;
+    }
 
-    case "pre-tour-items":
-      return db
+    case "pre-tour-items": {
+      const [record] = await db
         .select()
         .from(schema.preTourPlanItem)
-        .where(
-          and(
-            eq(schema.preTourPlanItem.companyId, companyId),
-            planId ? eq(schema.preTourPlanItem.planId, planId) : undefined,
-            dayId ? eq(schema.preTourPlanItem.dayId, dayId) : undefined,
-            q
-              ? or(
-                  ilike(schema.preTourPlanItem.code, q),
-                  ilike(schema.preTourPlanItem.itemType, q),
-                  ilike(schema.preTourPlanItem.status, q),
-                  ilike(schema.preTourPlanItem.title, q)
-                )
-              : undefined
-          )
-        )
-        .orderBy(schema.preTourPlanItem.sortOrder, desc(schema.preTourPlanItem.createdAt))
-        .limit(limit);
+        .where(and(eq(schema.preTourPlanItem.id, id), eq(schema.preTourPlanItem.companyId, companyId)))
+        .limit(1);
+      if (!record) {
+        throw new PreTourError(404, "NOT_FOUND", "Pre-tour item not found.");
+      }
+      return record;
+    }
 
-    case "pre-tour-guide-allocations":
-      return db
+    case "pre-tour-guide-allocations": {
+      const [record] = await db
         .select()
         .from(schema.preTourPlanGuideAllocation)
         .where(
           and(
-            eq(schema.preTourPlanGuideAllocation.companyId, companyId),
-            planId ? eq(schema.preTourPlanGuideAllocation.planId, planId) : undefined,
-            q
-              ? or(
-                  ilike(schema.preTourPlanGuideAllocation.code, q),
-                  ilike(schema.preTourPlanGuideAllocation.coverageMode, q),
-                  ilike(schema.preTourPlanGuideAllocation.language, q),
-                  ilike(schema.preTourPlanGuideAllocation.guideBasis, q),
-                  ilike(schema.preTourPlanGuideAllocation.title, q)
-                )
-              : undefined
+            eq(schema.preTourPlanGuideAllocation.id, id),
+            eq(schema.preTourPlanGuideAllocation.companyId, companyId)
           )
         )
-        .orderBy(desc(schema.preTourPlanGuideAllocation.createdAt))
-        .limit(limit);
+        .limit(1);
+      if (!record) {
+        throw new PreTourError(404, "NOT_FOUND", "Pre-tour guide allocation not found.");
+      }
+      return record;
+    }
 
-    case "pre-tour-item-addons":
-      return db
+    case "pre-tour-item-addons": {
+      const [record] = await db
         .select()
         .from(schema.preTourPlanItemAddon)
         .where(
           and(
-            eq(schema.preTourPlanItemAddon.companyId, companyId),
-            planId ? eq(schema.preTourPlanItemAddon.planId, planId) : undefined,
-            itemId ? eq(schema.preTourPlanItemAddon.planItemId, itemId) : undefined,
-            q
-              ? or(
-                  ilike(schema.preTourPlanItemAddon.code, q),
-                  ilike(schema.preTourPlanItemAddon.addonType, q),
-                  ilike(schema.preTourPlanItemAddon.title, q)
-                )
-              : undefined
+            eq(schema.preTourPlanItemAddon.id, id),
+            eq(schema.preTourPlanItemAddon.companyId, companyId)
           )
         )
-        .orderBy(desc(schema.preTourPlanItemAddon.createdAt))
-        .limit(limit);
+        .limit(1);
+      if (!record) {
+        throw new PreTourError(404, "NOT_FOUND", "Pre-tour addon not found.");
+      }
+      return record;
+    }
 
-    case "pre-tour-totals":
-      return db
+    case "pre-tour-totals": {
+      const [record] = await db
         .select()
         .from(schema.preTourPlanTotal)
-        .where(
-          and(
-            eq(schema.preTourPlanTotal.companyId, companyId),
-            planId ? eq(schema.preTourPlanTotal.planId, planId) : undefined,
-            q
-              ? or(
-                  ilike(schema.preTourPlanTotal.code, q),
-                  ilike(schema.preTourPlanTotal.currencyCode, q)
-                )
-              : undefined
-          )
-        )
-        .orderBy(desc(schema.preTourPlanTotal.createdAt))
-        .limit(limit);
+        .where(and(eq(schema.preTourPlanTotal.id, id), eq(schema.preTourPlanTotal.companyId, companyId)))
+        .limit(1);
+      if (!record) {
+        throw new PreTourError(404, "NOT_FOUND", "Pre-tour total not found.");
+      }
+      return record;
+    }
 
-    case "pre-tour-categories":
-      return db
+    case "pre-tour-categories": {
+      const [record] = await db
         .select()
         .from(schema.preTourPlanCategory)
         .where(
           and(
-            eq(schema.preTourPlanCategory.companyId, companyId),
-            planId ? eq(schema.preTourPlanCategory.planId, planId) : undefined,
-            q
-              ? or(
-                  ilike(schema.preTourPlanCategory.code, q),
-                  ilike(schema.preTourPlanCategory.notes, q)
-                )
-              : undefined
+            eq(schema.preTourPlanCategory.id, id),
+            eq(schema.preTourPlanCategory.companyId, companyId)
           )
         )
-        .orderBy(desc(schema.preTourPlanCategory.createdAt))
-        .limit(limit);
+        .limit(1);
+      if (!record) {
+        throw new PreTourError(404, "NOT_FOUND", "Pre-tour category link not found.");
+      }
+      return record;
+    }
 
-    case "pre-tour-technical-visits":
-      return db
+    case "pre-tour-technical-visits": {
+      const [record] = await db
         .select()
         .from(schema.preTourPlanTechnicalVisit)
         .where(
           and(
-            eq(schema.preTourPlanTechnicalVisit.companyId, companyId),
-            planId ? eq(schema.preTourPlanTechnicalVisit.planId, planId) : undefined,
-            dayId ? eq(schema.preTourPlanTechnicalVisit.dayId, dayId) : undefined,
-            visitId ? eq(schema.preTourPlanTechnicalVisit.technicalVisitId, visitId) : undefined,
-            q
-              ? or(
-                  ilike(schema.preTourPlanTechnicalVisit.code, q),
-                  ilike(schema.preTourPlanTechnicalVisit.notes, q)
-                )
-              : undefined
+            eq(schema.preTourPlanTechnicalVisit.id, id),
+            eq(schema.preTourPlanTechnicalVisit.companyId, companyId)
           )
         )
-        .orderBy(desc(schema.preTourPlanTechnicalVisit.createdAt))
-        .limit(limit);
+        .limit(1);
+      if (!record) {
+        throw new PreTourError(404, "NOT_FOUND", "Pre-tour technical visit link not found.");
+      }
+      return record;
+    }
 
     default:
       throw new PreTourError(404, "RESOURCE_NOT_FOUND", "Pre-tour resource not found.");
+  }
+}
+
+async function clonePreTourPlanChildrenTx(
+  tx: DbTransaction,
+  {
+    companyId,
+    sourcePlanId,
+    targetPlanId,
+    codePrefix,
+    canCloneTotals,
+  }: {
+    companyId: string;
+    sourcePlanId: string;
+    targetPlanId: string;
+    codePrefix: string;
+    canCloneTotals: boolean;
+  }
+) {
+  const sourceDays = await tx
+    .select()
+    .from(schema.preTourPlanDay)
+    .where(
+      and(
+        eq(schema.preTourPlanDay.companyId, companyId),
+        eq(schema.preTourPlanDay.planId, sourcePlanId)
+      )
+    )
+    .orderBy(schema.preTourPlanDay.dayNumber, schema.preTourPlanDay.createdAt);
+
+  const dayIdMap = new Map<string, string>();
+  for (const sourceDay of sourceDays) {
+    const [createdDay] = await tx
+      .insert(schema.preTourPlanDay)
+      .values({
+        companyId,
+        code: buildCloneCode(codePrefix, `DAY_${String(sourceDay.dayNumber).padStart(2, "0")}`),
+        planId: targetPlanId,
+        dayNumber: sourceDay.dayNumber,
+        date: sourceDay.date,
+        title: sourceDay.title,
+        notes: sourceDay.notes,
+        startLocationId: sourceDay.startLocationId,
+        endLocationId: sourceDay.endLocationId,
+        isActive: Boolean(sourceDay.isActive ?? true),
+      } satisfies PreTourPlanDayInsert)
+      .returning({ id: schema.preTourPlanDay.id });
+    dayIdMap.set(sourceDay.id, createdDay.id);
+  }
+
+  const sourceItems = await tx
+    .select()
+    .from(schema.preTourPlanItem)
+    .where(
+      and(
+        eq(schema.preTourPlanItem.companyId, companyId),
+        eq(schema.preTourPlanItem.planId, sourcePlanId)
+      )
+    )
+    .orderBy(
+      schema.preTourPlanItem.dayId,
+      schema.preTourPlanItem.sortOrder,
+      schema.preTourPlanItem.createdAt
+    );
+
+  const itemIdMap = new Map<string, string>();
+  for (const sourceItem of sourceItems) {
+    const mappedDayId = dayIdMap.get(sourceItem.dayId);
+    if (!mappedDayId) continue;
+    const [createdItem] = await tx
+      .insert(schema.preTourPlanItem)
+      .values({
+        companyId,
+        code: buildCloneCode(codePrefix, `ITEM_${sourceItem.id.slice(-6)}`),
+        planId: targetPlanId,
+        dayId: mappedDayId,
+        itemType: sourceItem.itemType,
+        serviceId: sourceItem.serviceId,
+        startAt: sourceItem.startAt,
+        endAt: sourceItem.endAt,
+        sortOrder: sourceItem.sortOrder,
+        pax: sourceItem.pax,
+        units: sourceItem.units,
+        nights: sourceItem.nights,
+        rooms: sourceItem.rooms,
+        fromLocationId: sourceItem.fromLocationId,
+        toLocationId: sourceItem.toLocationId,
+        locationId: sourceItem.locationId,
+        rateId: sourceItem.rateId,
+        currencyCode: sourceItem.currencyCode,
+        priceMode: sourceItem.priceMode,
+        baseAmount: sourceItem.baseAmount,
+        taxAmount: sourceItem.taxAmount,
+        totalAmount: sourceItem.totalAmount,
+        pricingSnapshot: sourceItem.pricingSnapshot,
+        title: sourceItem.title,
+        description: sourceItem.description,
+        notes: sourceItem.notes,
+        status: sourceItem.status,
+        isActive: Boolean(sourceItem.isActive ?? true),
+      } satisfies PreTourPlanItemInsert)
+      .returning({ id: schema.preTourPlanItem.id });
+    itemIdMap.set(sourceItem.id, createdItem.id);
+  }
+
+  const sourceGuideAllocations = await tx
+    .select()
+    .from(schema.preTourPlanGuideAllocation)
+    .where(
+      and(
+        eq(schema.preTourPlanGuideAllocation.companyId, companyId),
+        eq(schema.preTourPlanGuideAllocation.planId, sourcePlanId)
+      )
+    )
+    .orderBy(schema.preTourPlanGuideAllocation.createdAt);
+
+  for (const sourceGuideAllocation of sourceGuideAllocations) {
+    await tx.insert(schema.preTourPlanGuideAllocation).values({
+      companyId,
+      code: buildCloneCode(codePrefix, `GUIDE_${sourceGuideAllocation.id.slice(-6)}`),
+      planId: targetPlanId,
+      serviceId: sourceGuideAllocation.serviceId,
+      coverageMode: sourceGuideAllocation.coverageMode,
+      startDayId: sourceGuideAllocation.startDayId
+        ? (dayIdMap.get(sourceGuideAllocation.startDayId) ?? null)
+        : null,
+      endDayId: sourceGuideAllocation.endDayId
+        ? (dayIdMap.get(sourceGuideAllocation.endDayId) ?? null)
+        : null,
+      language: sourceGuideAllocation.language,
+      guideBasis: sourceGuideAllocation.guideBasis,
+      pax: sourceGuideAllocation.pax,
+      units: sourceGuideAllocation.units,
+      rateId: sourceGuideAllocation.rateId,
+      currencyCode: sourceGuideAllocation.currencyCode,
+      priceMode: sourceGuideAllocation.priceMode,
+      baseAmount: sourceGuideAllocation.baseAmount,
+      taxAmount: sourceGuideAllocation.taxAmount,
+      totalAmount: sourceGuideAllocation.totalAmount,
+      pricingSnapshot: sourceGuideAllocation.pricingSnapshot,
+      title: sourceGuideAllocation.title,
+      notes: sourceGuideAllocation.notes,
+      status: sourceGuideAllocation.status,
+      isActive: Boolean(sourceGuideAllocation.isActive ?? true),
+    } satisfies PreTourPlanGuideAllocationInsert);
+  }
+
+  const sourceAddons = await tx
+    .select()
+    .from(schema.preTourPlanItemAddon)
+    .where(
+      and(
+        eq(schema.preTourPlanItemAddon.companyId, companyId),
+        eq(schema.preTourPlanItemAddon.planId, sourcePlanId)
+      )
+    )
+    .orderBy(schema.preTourPlanItemAddon.createdAt);
+
+  for (const sourceAddon of sourceAddons) {
+    const mappedItemId = itemIdMap.get(sourceAddon.planItemId);
+    if (!mappedItemId) continue;
+    await tx.insert(schema.preTourPlanItemAddon).values({
+      companyId,
+      code: buildCloneCode(codePrefix, `ADDON_${sourceAddon.id.slice(-6)}`),
+      planId: targetPlanId,
+      planItemId: mappedItemId,
+      addonType: sourceAddon.addonType,
+      addonServiceId: sourceAddon.addonServiceId,
+      title: sourceAddon.title,
+      qty: sourceAddon.qty,
+      currencyCode: sourceAddon.currencyCode,
+      baseAmount: sourceAddon.baseAmount,
+      taxAmount: sourceAddon.taxAmount,
+      totalAmount: sourceAddon.totalAmount,
+      snapshot: sourceAddon.snapshot,
+      isActive: Boolean(sourceAddon.isActive ?? true),
+    } satisfies PreTourPlanItemAddonInsert);
+  }
+
+  if (canCloneTotals) {
+    const sourceTotals = await tx
+      .select()
+      .from(schema.preTourPlanTotal)
+      .where(
+        and(
+          eq(schema.preTourPlanTotal.companyId, companyId),
+          eq(schema.preTourPlanTotal.planId, sourcePlanId)
+        )
+      )
+      .limit(1);
+
+    for (const sourceTotal of sourceTotals) {
+      await tx.insert(schema.preTourPlanTotal).values({
+        companyId,
+        code: buildCloneCode(codePrefix, "TOTAL"),
+        planId: targetPlanId,
+        currencyCode: sourceTotal.currencyCode,
+        totalsByType: sourceTotal.totalsByType,
+        baseTotal: sourceTotal.baseTotal,
+        taxTotal: sourceTotal.taxTotal,
+        grandTotal: sourceTotal.grandTotal,
+        snapshot: sourceTotal.snapshot,
+        isActive: Boolean(sourceTotal.isActive ?? true),
+      } satisfies PreTourPlanTotalInsert);
+    }
+  }
+
+  const sourceCategories = await tx
+    .select()
+    .from(schema.preTourPlanCategory)
+    .where(
+      and(
+        eq(schema.preTourPlanCategory.companyId, companyId),
+        eq(schema.preTourPlanCategory.planId, sourcePlanId)
+      )
+    )
+    .orderBy(schema.preTourPlanCategory.createdAt);
+
+  for (const sourceCategory of sourceCategories) {
+    await tx.insert(schema.preTourPlanCategory).values({
+      companyId,
+      code: buildCloneCode(codePrefix, `CAT_${sourceCategory.id.slice(-6)}`),
+      planId: targetPlanId,
+      typeId: sourceCategory.typeId,
+      categoryId: sourceCategory.categoryId,
+      notes: sourceCategory.notes,
+      isActive: Boolean(sourceCategory.isActive ?? true),
+    } satisfies PreTourPlanCategoryInsert);
+  }
+
+  const sourceTechnicalVisits = await tx
+    .select()
+    .from(schema.preTourPlanTechnicalVisit)
+    .where(
+      and(
+        eq(schema.preTourPlanTechnicalVisit.companyId, companyId),
+        eq(schema.preTourPlanTechnicalVisit.planId, sourcePlanId)
+      )
+    )
+    .orderBy(schema.preTourPlanTechnicalVisit.createdAt);
+
+  for (const sourceTechnicalVisit of sourceTechnicalVisits) {
+    await tx.insert(schema.preTourPlanTechnicalVisit).values({
+      companyId,
+      code: buildCloneCode(codePrefix, `TV_${sourceTechnicalVisit.id.slice(-6)}`),
+      planId: targetPlanId,
+      dayId: sourceTechnicalVisit.dayId
+        ? (dayIdMap.get(sourceTechnicalVisit.dayId) ?? null)
+        : null,
+      technicalVisitId: sourceTechnicalVisit.technicalVisitId,
+      notes: sourceTechnicalVisit.notes,
+      isActive: Boolean(sourceTechnicalVisit.isActive ?? true),
+    } satisfies PreTourPlanTechnicalVisitInsert);
   }
 }
 
@@ -1297,7 +2145,7 @@ export async function createPreTourRecord(
   headers: Headers
 ) {
   const resource = parseResource(resourceInput);
-  const { companyId, userId, userName } = await ensureWritable(headers, resource);
+  const { companyId, userId, userName } = await ensureWritable(headers);
 
   switch (resource) {
     case "pre-tours": {
@@ -1362,18 +2210,20 @@ export async function createPreTourRecord(
           updatedByUserId: userId,
           updatedByName: userName,
           referenceNo,
+          pricingPolicy: toStoredPricingPolicy(parsed.data.pricingPolicy),
           startDate: toDate(parsed.data.startDate)!,
           endDate: toDate(parsed.data.endDate)!,
           baseCurrencyCode: currencyContext.baseCurrencyCode,
           exchangeRateMode: currencyContext.exchangeRateMode,
           exchangeRate: toDecimal(currencyContext.exchangeRate, 8) ?? "0",
           exchangeRateDate: currencyContext.exchangeRateDate,
-          baseTotal: toDecimal(parsed.data.baseTotal),
-          taxTotal: toDecimal(parsed.data.taxTotal),
-          grandTotal: toDecimal(parsed.data.grandTotal),
-        } as any)
+          baseTotal: toDecimal(parsed.data.baseTotal) ?? "0.00",
+          taxTotal: toDecimal(parsed.data.taxTotal) ?? "0.00",
+          grandTotal: toDecimal(parsed.data.grandTotal) ?? "0.00",
+        } satisfies PreTourPlanInsert)
         .returning();
 
+      await recomputePreTourPlanTotals(companyId, String(created.id), { userId, userName });
       return created;
     }
 
@@ -1438,7 +2288,7 @@ export async function createPreTourRecord(
           code: uniqueCode,
           companyId,
           date: toDate(parsed.data.date)!,
-        } as any)
+        } satisfies PreTourPlanDayInsert)
         .returning();
 
       return created;
@@ -1514,10 +2364,10 @@ export async function createPreTourRecord(
           startAt: toDate(parsed.data.startAt),
           endAt: toDate(parsed.data.endAt),
           units: toDecimal(parsed.data.units),
-          baseAmount: toDecimal(parsed.data.baseAmount),
-          taxAmount: toDecimal(parsed.data.taxAmount),
-          totalAmount: toDecimal(parsed.data.totalAmount),
-        } as any)
+          baseAmount: toDecimal(parsed.data.baseAmount) ?? "0.00",
+          taxAmount: toDecimal(parsed.data.taxAmount) ?? "0.00",
+          totalAmount: toDecimal(parsed.data.totalAmount) ?? "0.00",
+        } satisfies PreTourPlanItemInsert)
         .returning();
 
       await validatePlanStructureAgainstCategoryRule({
@@ -1527,6 +2377,7 @@ export async function createPreTourRecord(
         requireComplete: isStrictPreTourStatus(plan.status),
       });
 
+      await recomputePreTourPlanTotals(companyId, parsed.data.planId, { userId, userName });
       return created;
     }
 
@@ -1551,13 +2402,14 @@ export async function createPreTourRecord(
         .values({
           ...parsed.data,
           companyId,
-          qty: toDecimal(parsed.data.qty),
-          baseAmount: toDecimal(parsed.data.baseAmount),
-          taxAmount: toDecimal(parsed.data.taxAmount),
-          totalAmount: toDecimal(parsed.data.totalAmount),
-        } as any)
+          qty: toDecimal(parsed.data.qty) ?? "1.00",
+          baseAmount: toDecimal(parsed.data.baseAmount) ?? "0.00",
+          taxAmount: toDecimal(parsed.data.taxAmount) ?? "0.00",
+          totalAmount: toDecimal(parsed.data.totalAmount) ?? "0.00",
+        } satisfies PreTourPlanItemAddonInsert)
         .returning();
 
+      await recomputePreTourPlanTotals(companyId, parsed.data.planId, { userId, userName });
       return created;
     }
 
@@ -1581,12 +2433,13 @@ export async function createPreTourRecord(
           ...parsed.data,
           companyId,
           units: toDecimal(parsed.data.units),
-          baseAmount: toDecimal(parsed.data.baseAmount),
-          taxAmount: toDecimal(parsed.data.taxAmount),
-          totalAmount: toDecimal(parsed.data.totalAmount),
-        } as any)
+          baseAmount: toDecimal(parsed.data.baseAmount) ?? "0.00",
+          taxAmount: toDecimal(parsed.data.taxAmount) ?? "0.00",
+          totalAmount: toDecimal(parsed.data.totalAmount) ?? "0.00",
+        } satisfies PreTourPlanGuideAllocationInsert)
         .returning();
 
+      await recomputePreTourPlanTotals(companyId, parsed.data.planId, { userId, userName });
       return created;
     }
 
@@ -1603,10 +2456,10 @@ export async function createPreTourRecord(
         .values({
           ...parsed.data,
           companyId,
-          baseTotal: toDecimal(parsed.data.baseTotal),
-          taxTotal: toDecimal(parsed.data.taxTotal),
-          grandTotal: toDecimal(parsed.data.grandTotal),
-        } as any)
+          baseTotal: toDecimal(parsed.data.baseTotal) ?? "0.00",
+          taxTotal: toDecimal(parsed.data.taxTotal) ?? "0.00",
+          grandTotal: toDecimal(parsed.data.grandTotal) ?? "0.00",
+        } satisfies PreTourPlanTotalInsert)
         .returning();
 
       return created;
@@ -1630,7 +2483,7 @@ export async function createPreTourRecord(
         .values({
           ...parsed.data,
           companyId,
-        } as any)
+        } satisfies PreTourPlanCategoryInsert)
         .returning();
 
       return created;
@@ -1659,7 +2512,7 @@ export async function createPreTourRecord(
         .values({
           ...parsed.data,
           companyId,
-        } as any)
+        } satisfies PreTourPlanTechnicalVisitInsert)
         .returning();
       return created;
     }
@@ -1675,7 +2528,7 @@ export async function createPreTourVersionFromPlan(payload: unknown, headers: He
     throw new PreTourError(400, "VALIDATION_ERROR", normalizeZodError(parsed.error));
   }
 
-  const access = await ensureWritable(headers, "pre-tours");
+  const access = await ensureWritable(headers);
   const { companyId, userId, userName } = access;
 
   const [sourcePlan] = await db
@@ -1786,7 +2639,7 @@ export async function createPreTourVersionFromPlan(payload: unknown, headers: He
   const canCloneTotals =
     access.role === "ADMIN" ||
     access.role === "MANAGER" ||
-    access.privileges.includes("PRE_TOUR_COSTING");
+    access.canWritePreTour;
 
   return db.transaction(async (tx) => {
     const [createdPlan] = await tx
@@ -1821,9 +2674,9 @@ export async function createPreTourVersionFromPlan(payload: unknown, headers: He
         exchangeRateDate: currencyContext.exchangeRateDate,
         priceMode: sourcePlan.priceMode,
         pricingPolicy: sourcePlan.pricingPolicy,
-        baseTotal: toDecimal(sourcePlan.baseTotal),
-        taxTotal: toDecimal(sourcePlan.taxTotal),
-        grandTotal: toDecimal(sourcePlan.grandTotal),
+        baseTotal: toDecimal(sourcePlan.baseTotal) ?? "0.00",
+        taxTotal: toDecimal(sourcePlan.taxTotal) ?? "0.00",
+        grandTotal: toDecimal(sourcePlan.grandTotal) ?? "0.00",
         version: nextVersion,
         isLocked: false,
         isActive: Boolean(sourcePlan.isActive ?? true),
@@ -1834,248 +2687,77 @@ export async function createPreTourVersionFromPlan(payload: unknown, headers: He
         deletedByName: null,
       } satisfies PreTourPlanInsert)
       .returning();
-
-    const sourceDays = await tx
-      .select()
-      .from(schema.preTourPlanDay)
-      .where(
-        and(
-          eq(schema.preTourPlanDay.companyId, companyId),
-          eq(schema.preTourPlanDay.planId, sourcePlan.id)
-        )
-      )
-      .orderBy(schema.preTourPlanDay.dayNumber, schema.preTourPlanDay.createdAt);
-
-    const dayIdMap = new Map<string, string>();
-    for (const sourceDay of sourceDays) {
-      const [createdDay] = await tx
-        .insert(schema.preTourPlanDay)
-        .values({
-          companyId,
-          code: buildCloneCode(
-            codePrefix,
-            `DAY_${String(sourceDay.dayNumber).padStart(2, "0")}`
-          ),
-          planId: createdPlan.id,
-          dayNumber: sourceDay.dayNumber,
-          date: sourceDay.date,
-          title: sourceDay.title,
-          notes: sourceDay.notes,
-          startLocationId: sourceDay.startLocationId,
-          endLocationId: sourceDay.endLocationId,
-          isActive: Boolean(sourceDay.isActive ?? true),
-        } satisfies PreTourPlanDayInsert)
-        .returning({ id: schema.preTourPlanDay.id });
-      dayIdMap.set(sourceDay.id, createdDay.id);
-    }
-
-    const sourceItems = await tx
-      .select()
-      .from(schema.preTourPlanItem)
-      .where(
-        and(
-          eq(schema.preTourPlanItem.companyId, companyId),
-          eq(schema.preTourPlanItem.planId, sourcePlan.id)
-        )
-      )
-      .orderBy(
-        schema.preTourPlanItem.dayId,
-        schema.preTourPlanItem.sortOrder,
-        schema.preTourPlanItem.createdAt
-      );
-
-    const itemIdMap = new Map<string, string>();
-    for (const sourceItem of sourceItems) {
-      const mappedDayId = dayIdMap.get(sourceItem.dayId);
-      if (!mappedDayId) continue;
-      const [createdItem] = await tx
-        .insert(schema.preTourPlanItem)
-        .values({
-          companyId,
-          code: buildCloneCode(codePrefix, `ITEM_${sourceItem.id.slice(-6)}`),
-          planId: createdPlan.id,
-          dayId: mappedDayId,
-          itemType: sourceItem.itemType,
-          serviceId: sourceItem.serviceId,
-          startAt: sourceItem.startAt,
-          endAt: sourceItem.endAt,
-          sortOrder: sourceItem.sortOrder,
-          pax: sourceItem.pax,
-          units: sourceItem.units,
-          nights: sourceItem.nights,
-          rooms: sourceItem.rooms,
-          fromLocationId: sourceItem.fromLocationId,
-          toLocationId: sourceItem.toLocationId,
-          locationId: sourceItem.locationId,
-          rateId: sourceItem.rateId,
-          currencyCode: sourceItem.currencyCode,
-          priceMode: sourceItem.priceMode,
-          baseAmount: sourceItem.baseAmount,
-          taxAmount: sourceItem.taxAmount,
-          totalAmount: sourceItem.totalAmount,
-          pricingSnapshot: sourceItem.pricingSnapshot,
-          title: sourceItem.title,
-          description: sourceItem.description,
-          notes: sourceItem.notes,
-          status: sourceItem.status,
-          isActive: Boolean(sourceItem.isActive ?? true),
-        } satisfies PreTourPlanItemInsert)
-        .returning({ id: schema.preTourPlanItem.id });
-      itemIdMap.set(sourceItem.id, createdItem.id);
-    }
-
-    const sourceGuideAllocations = await tx
-      .select()
-      .from(schema.preTourPlanGuideAllocation)
-      .where(
-        and(
-          eq(schema.preTourPlanGuideAllocation.companyId, companyId),
-          eq(schema.preTourPlanGuideAllocation.planId, sourcePlan.id)
-        )
-      )
-      .orderBy(schema.preTourPlanGuideAllocation.createdAt);
-
-    for (const sourceGuideAllocation of sourceGuideAllocations) {
-      await tx.insert(schema.preTourPlanGuideAllocation).values({
-        companyId,
-        code: buildCloneCode(codePrefix, `GUIDE_${sourceGuideAllocation.id.slice(-6)}`),
-        planId: createdPlan.id,
-        serviceId: sourceGuideAllocation.serviceId,
-        coverageMode: sourceGuideAllocation.coverageMode,
-        startDayId: sourceGuideAllocation.startDayId
-          ? (dayIdMap.get(sourceGuideAllocation.startDayId) ?? null)
-          : null,
-        endDayId: sourceGuideAllocation.endDayId
-          ? (dayIdMap.get(sourceGuideAllocation.endDayId) ?? null)
-          : null,
-        language: sourceGuideAllocation.language,
-        guideBasis: sourceGuideAllocation.guideBasis,
-        pax: sourceGuideAllocation.pax,
-        units: sourceGuideAllocation.units,
-        rateId: sourceGuideAllocation.rateId,
-        currencyCode: sourceGuideAllocation.currencyCode,
-        priceMode: sourceGuideAllocation.priceMode,
-        baseAmount: sourceGuideAllocation.baseAmount,
-        taxAmount: sourceGuideAllocation.taxAmount,
-        totalAmount: sourceGuideAllocation.totalAmount,
-        pricingSnapshot: sourceGuideAllocation.pricingSnapshot,
-        title: sourceGuideAllocation.title,
-        notes: sourceGuideAllocation.notes,
-        status: sourceGuideAllocation.status,
-        isActive: Boolean(sourceGuideAllocation.isActive ?? true),
-      } satisfies PreTourPlanGuideAllocationInsert);
-    }
-
-    const sourceAddons = await tx
-      .select()
-      .from(schema.preTourPlanItemAddon)
-      .where(
-        and(
-          eq(schema.preTourPlanItemAddon.companyId, companyId),
-          eq(schema.preTourPlanItemAddon.planId, sourcePlan.id)
-        )
-      )
-      .orderBy(schema.preTourPlanItemAddon.createdAt);
-
-    for (const sourceAddon of sourceAddons) {
-      const mappedItemId = itemIdMap.get(sourceAddon.planItemId);
-      if (!mappedItemId) continue;
-      await tx.insert(schema.preTourPlanItemAddon).values({
-        companyId,
-        code: buildCloneCode(codePrefix, `ADDON_${sourceAddon.id.slice(-6)}`),
-        planId: createdPlan.id,
-        planItemId: mappedItemId,
-        addonType: sourceAddon.addonType,
-        addonServiceId: sourceAddon.addonServiceId,
-        title: sourceAddon.title,
-        qty: sourceAddon.qty,
-        currencyCode: sourceAddon.currencyCode,
-        baseAmount: sourceAddon.baseAmount,
-        taxAmount: sourceAddon.taxAmount,
-        totalAmount: sourceAddon.totalAmount,
-        snapshot: sourceAddon.snapshot,
-        isActive: Boolean(sourceAddon.isActive ?? true),
-      } satisfies PreTourPlanItemAddonInsert);
-    }
-
-    if (canCloneTotals) {
-      const sourceTotals = await tx
-        .select()
-        .from(schema.preTourPlanTotal)
-        .where(
-          and(
-            eq(schema.preTourPlanTotal.companyId, companyId),
-            eq(schema.preTourPlanTotal.planId, sourcePlan.id)
-          )
-        )
-        .limit(1);
-
-      for (const sourceTotal of sourceTotals) {
-        await tx.insert(schema.preTourPlanTotal).values({
-          companyId,
-          code: buildCloneCode(codePrefix, "TOTAL"),
-          planId: createdPlan.id,
-          currencyCode: sourceTotal.currencyCode,
-          totalsByType: sourceTotal.totalsByType,
-          baseTotal: sourceTotal.baseTotal,
-          taxTotal: sourceTotal.taxTotal,
-          grandTotal: sourceTotal.grandTotal,
-          snapshot: sourceTotal.snapshot,
-          isActive: Boolean(sourceTotal.isActive ?? true),
-        } satisfies PreTourPlanTotalInsert);
-      }
-    }
-
-    const sourceCategories = await tx
-      .select()
-      .from(schema.preTourPlanCategory)
-      .where(
-        and(
-          eq(schema.preTourPlanCategory.companyId, companyId),
-          eq(schema.preTourPlanCategory.planId, sourcePlan.id)
-        )
-      )
-      .orderBy(schema.preTourPlanCategory.createdAt);
-
-    for (const sourceCategory of sourceCategories) {
-      await tx.insert(schema.preTourPlanCategory).values({
-        companyId,
-        code: buildCloneCode(codePrefix, `CAT_${sourceCategory.id.slice(-6)}`),
-        planId: createdPlan.id,
-        typeId: sourceCategory.typeId,
-        categoryId: sourceCategory.categoryId,
-        notes: sourceCategory.notes,
-        isActive: Boolean(sourceCategory.isActive ?? true),
-      } satisfies PreTourPlanCategoryInsert);
-    }
-
-    const sourceTechnicalVisits = await tx
-      .select()
-      .from(schema.preTourPlanTechnicalVisit)
-      .where(
-        and(
-          eq(schema.preTourPlanTechnicalVisit.companyId, companyId),
-          eq(schema.preTourPlanTechnicalVisit.planId, sourcePlan.id)
-        )
-      )
-      .orderBy(schema.preTourPlanTechnicalVisit.createdAt);
-
-    for (const sourceTechnicalVisit of sourceTechnicalVisits) {
-      await tx.insert(schema.preTourPlanTechnicalVisit).values({
-        companyId,
-        code: buildCloneCode(codePrefix, `TV_${sourceTechnicalVisit.id.slice(-6)}`),
-        planId: createdPlan.id,
-        dayId: sourceTechnicalVisit.dayId
-          ? (dayIdMap.get(sourceTechnicalVisit.dayId) ?? null)
-          : null,
-        technicalVisitId: sourceTechnicalVisit.technicalVisitId,
-        notes: sourceTechnicalVisit.notes,
-        isActive: Boolean(sourceTechnicalVisit.isActive ?? true),
-      } satisfies PreTourPlanTechnicalVisitInsert);
-    }
+    await clonePreTourPlanChildrenTx(tx, {
+      companyId,
+      sourcePlanId: sourcePlan.id,
+      targetPlanId: createdPlan.id,
+      codePrefix,
+      canCloneTotals,
+    });
 
     return createdPlan;
   });
+}
+
+export async function copyPreTourPlanChildren(payload: unknown, headers: Headers) {
+  const parsed = copyPreTourChildrenSchema.safeParse(payload);
+  if (!parsed.success) {
+    throw new PreTourError(400, "VALIDATION_ERROR", normalizeZodError(parsed.error));
+  }
+
+  const access = await ensureWritable(headers);
+  const { companyId } = access;
+
+  const [sourcePlan, targetPlan] = await Promise.all([
+    db
+      .select({ id: schema.preTourPlan.id })
+      .from(schema.preTourPlan)
+      .where(
+        and(
+          eq(schema.preTourPlan.id, parsed.data.sourcePlanId),
+          eq(schema.preTourPlan.companyId, companyId),
+          isNull(schema.preTourPlan.deletedAt)
+        )
+      )
+      .limit(1)
+      .then((rows) => rows[0] ?? null),
+    db
+      .select({ id: schema.preTourPlan.id })
+      .from(schema.preTourPlan)
+      .where(
+        and(
+          eq(schema.preTourPlan.id, parsed.data.targetPlanId),
+          eq(schema.preTourPlan.companyId, companyId),
+          isNull(schema.preTourPlan.deletedAt)
+        )
+      )
+      .limit(1)
+      .then((rows) => rows[0] ?? null),
+  ]);
+
+  if (!sourcePlan) {
+    throw new PreTourError(404, "PLAN_NOT_FOUND", "Source pre-tour plan not found.");
+  }
+  if (!targetPlan) {
+    throw new PreTourError(404, "PLAN_NOT_FOUND", "Target pre-tour plan not found.");
+  }
+
+  const canCloneTotals =
+    access.role === "ADMIN" ||
+    access.role === "MANAGER" ||
+    access.canWritePreTour;
+
+  await db.transaction(async (tx) => {
+    await clonePreTourPlanChildrenTx(tx, {
+      companyId,
+      sourcePlanId: sourcePlan.id,
+      targetPlanId: targetPlan.id,
+      codePrefix: normalizeCloneCode(parsed.data.codePrefix),
+      canCloneTotals,
+    });
+  });
+
+  return { success: true };
 }
 
 export async function updatePreTourRecord(
@@ -2085,7 +2767,7 @@ export async function updatePreTourRecord(
   headers: Headers
 ) {
   const resource = parseResource(resourceInput);
-  const { companyId, userId, userName, role } = await ensureWritable(headers, resource);
+  const { companyId, userId, userName, role } = await ensureWritable(headers);
 
   switch (resource) {
     case "pre-tours": {
@@ -2217,19 +2899,28 @@ export async function updatePreTourRecord(
             : {}),
           updatedByUserId: userId,
           updatedByName: userName,
-          startDate: parsed.data.startDate ? toDate(parsed.data.startDate) : undefined,
-          endDate: parsed.data.endDate ? toDate(parsed.data.endDate) : undefined,
+          referenceNo: parsed.data.referenceNo ?? undefined,
+          pricingPolicy: toStoredPricingPolicy(parsed.data.pricingPolicy),
+          startDate: parsed.data.startDate ? toDate(parsed.data.startDate)! : undefined,
+          endDate: parsed.data.endDate ? toDate(parsed.data.endDate)! : undefined,
           baseCurrencyCode: currencyContext.baseCurrencyCode,
           exchangeRateMode: currencyContext.exchangeRateMode,
           exchangeRate: toDecimal(currencyContext.exchangeRate, 8) ?? "0",
-          exchangeRateDate: currencyContext.exchangeRateDate,
+          exchangeRateDate: currencyContext.exchangeRateDate ?? undefined,
           baseTotal:
-            parsed.data.baseTotal !== undefined ? toDecimal(parsed.data.baseTotal) : undefined,
-          taxTotal: parsed.data.taxTotal !== undefined ? toDecimal(parsed.data.taxTotal) : undefined,
+            parsed.data.baseTotal !== undefined
+              ? (toDecimal(parsed.data.baseTotal) ?? undefined)
+              : undefined,
+          taxTotal:
+            parsed.data.taxTotal !== undefined
+              ? (toDecimal(parsed.data.taxTotal) ?? undefined)
+              : undefined,
           grandTotal:
-            parsed.data.grandTotal !== undefined ? toDecimal(parsed.data.grandTotal) : undefined,
+            parsed.data.grandTotal !== undefined
+              ? (toDecimal(parsed.data.grandTotal) ?? undefined)
+              : undefined,
           updatedAt: new Date(),
-        } as any)
+        } satisfies PreTourPlanUpdate)
         .where(and(eq(schema.preTourPlan.id, id), eq(schema.preTourPlan.companyId, companyId)))
         .returning();
 
@@ -2237,6 +2928,7 @@ export async function updatePreTourRecord(
         throw new PreTourError(404, "NOT_FOUND", "Pre-tour plan not found.");
       }
 
+      await recomputePreTourPlanTotals(companyId, id, { userId, userName });
       return updated;
     }
 
@@ -2276,9 +2968,9 @@ export async function updatePreTourRecord(
         .update(schema.preTourPlanDay)
         .set({
           ...parsed.data,
-          date: parsed.data.date ? toDate(parsed.data.date) : undefined,
+          date: parsed.data.date ? toDate(parsed.data.date)! : undefined,
           updatedAt: new Date(),
-        } as any)
+        } satisfies PreTourPlanDayUpdate)
         .where(and(eq(schema.preTourPlanDay.id, id), eq(schema.preTourPlanDay.companyId, companyId)))
         .returning();
 
@@ -2371,12 +3063,19 @@ export async function updatePreTourRecord(
           endAt: parsed.data.endAt !== undefined ? toDate(parsed.data.endAt) : undefined,
           units: parsed.data.units !== undefined ? toDecimal(parsed.data.units) : undefined,
           baseAmount:
-            parsed.data.baseAmount !== undefined ? toDecimal(parsed.data.baseAmount) : undefined,
-          taxAmount: parsed.data.taxAmount !== undefined ? toDecimal(parsed.data.taxAmount) : undefined,
+            parsed.data.baseAmount !== undefined
+              ? (toDecimal(parsed.data.baseAmount) ?? undefined)
+              : undefined,
+          taxAmount:
+            parsed.data.taxAmount !== undefined
+              ? (toDecimal(parsed.data.taxAmount) ?? undefined)
+              : undefined,
           totalAmount:
-            parsed.data.totalAmount !== undefined ? toDecimal(parsed.data.totalAmount) : undefined,
+            parsed.data.totalAmount !== undefined
+              ? (toDecimal(parsed.data.totalAmount) ?? undefined)
+              : undefined,
           updatedAt: new Date(),
-        } as any)
+        } satisfies PreTourPlanItemUpdate)
         .where(and(eq(schema.preTourPlanItem.id, id), eq(schema.preTourPlanItem.companyId, companyId)))
         .returning();
 
@@ -2391,6 +3090,7 @@ export async function updatePreTourRecord(
         requireComplete: isStrictPreTourStatus(plan.status),
       });
 
+      await recomputePreTourPlanTotals(companyId, nextPlanId, { userId, userName });
       return updated;
     }
 
@@ -2412,14 +3112,22 @@ export async function updatePreTourRecord(
         .update(schema.preTourPlanItemAddon)
         .set({
           ...parsed.data,
-          qty: parsed.data.qty !== undefined ? toDecimal(parsed.data.qty) : undefined,
+          qty:
+            parsed.data.qty !== undefined ? (toDecimal(parsed.data.qty) ?? undefined) : undefined,
           baseAmount:
-            parsed.data.baseAmount !== undefined ? toDecimal(parsed.data.baseAmount) : undefined,
-          taxAmount: parsed.data.taxAmount !== undefined ? toDecimal(parsed.data.taxAmount) : undefined,
+            parsed.data.baseAmount !== undefined
+              ? (toDecimal(parsed.data.baseAmount) ?? undefined)
+              : undefined,
+          taxAmount:
+            parsed.data.taxAmount !== undefined
+              ? (toDecimal(parsed.data.taxAmount) ?? undefined)
+              : undefined,
           totalAmount:
-            parsed.data.totalAmount !== undefined ? toDecimal(parsed.data.totalAmount) : undefined,
+            parsed.data.totalAmount !== undefined
+              ? (toDecimal(parsed.data.totalAmount) ?? undefined)
+              : undefined,
           updatedAt: new Date(),
-        } as any)
+        } satisfies PreTourPlanItemAddonUpdate)
         .where(
           and(
             eq(schema.preTourPlanItemAddon.id, id),
@@ -2432,6 +3140,7 @@ export async function updatePreTourRecord(
         throw new PreTourError(404, "NOT_FOUND", "Pre-tour addon not found.");
       }
 
+      await recomputePreTourPlanTotals(companyId, String(updated.planId), { userId, userName });
       return updated;
     }
 
@@ -2460,12 +3169,19 @@ export async function updatePreTourRecord(
           ...parsed.data,
           units: parsed.data.units !== undefined ? toDecimal(parsed.data.units) : undefined,
           baseAmount:
-            parsed.data.baseAmount !== undefined ? toDecimal(parsed.data.baseAmount) : undefined,
-          taxAmount: parsed.data.taxAmount !== undefined ? toDecimal(parsed.data.taxAmount) : undefined,
+            parsed.data.baseAmount !== undefined
+              ? (toDecimal(parsed.data.baseAmount) ?? undefined)
+              : undefined,
+          taxAmount:
+            parsed.data.taxAmount !== undefined
+              ? (toDecimal(parsed.data.taxAmount) ?? undefined)
+              : undefined,
           totalAmount:
-            parsed.data.totalAmount !== undefined ? toDecimal(parsed.data.totalAmount) : undefined,
+            parsed.data.totalAmount !== undefined
+              ? (toDecimal(parsed.data.totalAmount) ?? undefined)
+              : undefined,
           updatedAt: new Date(),
-        } as any)
+        } satisfies PreTourPlanGuideAllocationUpdate)
         .where(
           and(
             eq(schema.preTourPlanGuideAllocation.id, id),
@@ -2478,6 +3194,7 @@ export async function updatePreTourRecord(
         throw new PreTourError(404, "NOT_FOUND", "Pre-tour guide allocation not found.");
       }
 
+      await recomputePreTourPlanTotals(companyId, nextPlanId, { userId, userName });
       return updated;
     }
 
@@ -2496,12 +3213,19 @@ export async function updatePreTourRecord(
         .set({
           ...parsed.data,
           baseTotal:
-            parsed.data.baseTotal !== undefined ? toDecimal(parsed.data.baseTotal) : undefined,
-          taxTotal: parsed.data.taxTotal !== undefined ? toDecimal(parsed.data.taxTotal) : undefined,
+            parsed.data.baseTotal !== undefined
+              ? (toDecimal(parsed.data.baseTotal) ?? undefined)
+              : undefined,
+          taxTotal:
+            parsed.data.taxTotal !== undefined
+              ? (toDecimal(parsed.data.taxTotal) ?? undefined)
+              : undefined,
           grandTotal:
-            parsed.data.grandTotal !== undefined ? toDecimal(parsed.data.grandTotal) : undefined,
+            parsed.data.grandTotal !== undefined
+              ? (toDecimal(parsed.data.grandTotal) ?? undefined)
+              : undefined,
           updatedAt: new Date(),
-        } as any)
+        } satisfies PreTourPlanTotalUpdate)
         .where(and(eq(schema.preTourPlanTotal.id, id), eq(schema.preTourPlanTotal.companyId, companyId)))
         .returning();
 
@@ -2553,7 +3277,7 @@ export async function updatePreTourRecord(
         .set({
           ...parsed.data,
           updatedAt: new Date(),
-        } as any)
+        } satisfies PreTourPlanCategoryUpdate)
         .where(
           and(
             eq(schema.preTourPlanCategory.id, id),
@@ -2615,7 +3339,7 @@ export async function updatePreTourRecord(
         .set({
           ...parsed.data,
           updatedAt: new Date(),
-        } as any)
+        } satisfies PreTourPlanTechnicalVisitUpdate)
         .where(
           and(
             eq(schema.preTourPlanTechnicalVisit.id, id),
@@ -2664,7 +3388,7 @@ export async function updatePreTourRecord(
             updatedByUserId: userId,
             updatedByName: userName,
             updatedAt: new Date(),
-          } as any)
+          } satisfies PreTourPlanUpdate)
           .where(
             and(
               eq(schema.preTourPlan.id, String(binRecord.planId)),
@@ -2697,7 +3421,7 @@ export async function deletePreTourRecord(
   headers: Headers
 ) {
   const resource = parseResource(resourceInput);
-  const access = await ensureWritable(headers, resource);
+  const access = await ensureWritable(headers);
   const { companyId, userId, userName } = access;
 
   switch (resource) {
@@ -2728,7 +3452,7 @@ export async function deletePreTourRecord(
             updatedByUserId: userId,
             updatedByName: userName,
             updatedAt: deletedAt,
-          } as any)
+          } satisfies PreTourPlanUpdate)
           .where(and(eq(schema.preTourPlan.id, id), eq(schema.preTourPlan.companyId, companyId)));
 
         await tx.insert(schema.preTourPlanBin).values({
@@ -2743,7 +3467,7 @@ export async function deletePreTourRecord(
           deletedByName: userName,
           deletedAt,
           snapshot: current as Record<string, unknown>,
-        } as any).onConflictDoNothing({ target: [schema.preTourPlanBin.planId] });
+        } satisfies PreTourPlanBinInsert).onConflictDoNothing({ target: [schema.preTourPlanBin.planId] });
       });
       return;
     }
@@ -2819,7 +3543,7 @@ export async function deletePreTourRecord(
           throw new PreTourError(
             400,
             "VALIDATION_ERROR",
-            "Selected category requires itinerary/day records. You cannot remove the last day."
+            "Selected category requires planned day records. You cannot remove the last day."
           );
         }
         if (categoryRule.minDays !== null && remainingDays < Number(categoryRule.minDays)) {
@@ -2836,6 +3560,7 @@ export async function deletePreTourRecord(
         .where(and(eq(schema.preTourPlanDay.id, id), eq(schema.preTourPlanDay.companyId, companyId)))
         .returning({ id: schema.preTourPlanDay.id });
       if (!deleted) throw new PreTourError(404, "NOT_FOUND", "Pre-tour day not found.");
+      await recomputePreTourPlanTotals(companyId, String(currentDay.planId), { userId, userName });
       return;
     }
     case "pre-tour-items": {
@@ -2923,9 +3648,22 @@ export async function deletePreTourRecord(
         .where(and(eq(schema.preTourPlanItem.id, id), eq(schema.preTourPlanItem.companyId, companyId)))
         .returning({ id: schema.preTourPlanItem.id });
       if (!deleted) throw new PreTourError(404, "NOT_FOUND", "Pre-tour item not found.");
+      await recomputePreTourPlanTotals(companyId, String(currentItem.planId), { userId, userName });
       return;
     }
     case "pre-tour-item-addons": {
+      const [currentAddon] = await db
+        .select({ planId: schema.preTourPlanItemAddon.planId })
+        .from(schema.preTourPlanItemAddon)
+        .where(
+          and(
+            eq(schema.preTourPlanItemAddon.id, id),
+            eq(schema.preTourPlanItemAddon.companyId, companyId)
+          )
+        )
+        .limit(1);
+      if (!currentAddon) throw new PreTourError(404, "NOT_FOUND", "Pre-tour addon not found.");
+
       const [deleted] = await db
         .delete(schema.preTourPlanItemAddon)
         .where(
@@ -2936,9 +3674,24 @@ export async function deletePreTourRecord(
         )
         .returning({ id: schema.preTourPlanItemAddon.id });
       if (!deleted) throw new PreTourError(404, "NOT_FOUND", "Pre-tour addon not found.");
+      await recomputePreTourPlanTotals(companyId, String(currentAddon.planId), { userId, userName });
       return;
     }
     case "pre-tour-guide-allocations": {
+      const [currentGuideAllocation] = await db
+        .select({ planId: schema.preTourPlanGuideAllocation.planId })
+        .from(schema.preTourPlanGuideAllocation)
+        .where(
+          and(
+            eq(schema.preTourPlanGuideAllocation.id, id),
+            eq(schema.preTourPlanGuideAllocation.companyId, companyId)
+          )
+        )
+        .limit(1);
+      if (!currentGuideAllocation) {
+        throw new PreTourError(404, "NOT_FOUND", "Pre-tour guide allocation not found.");
+      }
+
       const [deleted] = await db
         .delete(schema.preTourPlanGuideAllocation)
         .where(
@@ -2951,6 +3704,10 @@ export async function deletePreTourRecord(
       if (!deleted) {
         throw new PreTourError(404, "NOT_FOUND", "Pre-tour guide allocation not found.");
       }
+      await recomputePreTourPlanTotals(companyId, String(currentGuideAllocation.planId), {
+        userId,
+        userName,
+      });
       return;
     }
     case "pre-tour-totals": {

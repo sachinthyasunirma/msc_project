@@ -3,6 +3,7 @@ import type { BusinessNetworkResourceKey } from "@/modules/business-network/shar
 type BusinessNetworkRecordsInput = {
   resource: BusinessNetworkResourceKey;
   q?: string;
+  page?: number;
   limit?: number;
 };
 
@@ -10,13 +11,15 @@ export const businessNetworkKeys = {
   all: ["business-network-management"] as const,
   lookups: () => [...businessNetworkKeys.all, "lookups"] as const,
   recordsRoot: () => [...businessNetworkKeys.all, "records"] as const,
+  recordsByResource: (resource: BusinessNetworkResourceKey) =>
+    [...businessNetworkKeys.recordsRoot(), resource] as const,
   records: (input: BusinessNetworkRecordsInput) =>
     [
-      ...businessNetworkKeys.recordsRoot(),
+      ...businessNetworkKeys.recordsByResource(input.resource),
       {
-        resource: input.resource,
         q: input.q ?? "",
-        limit: input.limit ?? 200,
+        page: input.page ?? 1,
+        limit: input.limit ?? 25,
       },
     ] as const,
 };
@@ -24,6 +27,7 @@ export const businessNetworkKeys = {
 export function buildBusinessNetworkRecordsParams(input: BusinessNetworkRecordsInput) {
   return {
     q: input.q,
-    limit: input.limit ?? 200,
+    page: input.page ?? 1,
+    limit: input.limit ?? 25,
   };
 }

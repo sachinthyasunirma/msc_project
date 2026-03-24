@@ -140,6 +140,7 @@ export function TransportManagementSection({
     query: state.query,
     records: state.records,
     pagedRecords: state.pagedRecords,
+    totalRecords: state.totalRecords,
     loading: state.loading,
     currentPage: state.currentPage,
     pageSize: state.pageSize,

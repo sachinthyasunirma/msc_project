@@ -633,13 +633,13 @@ const postHandler = withApiLogging(
 );
 
 export async function GET(request: Request) {
-  return getHandler(request, {});
+  return getHandler(request);
 }
 
 export async function PATCH(request: Request) {
-  return patchHandler(request, {});
+  return patchHandler(request);
 }
 
 export async function POST(request: Request) {
-  return postHandler(request, {});
+  return postHandler(request);
 }

@@ -43,6 +43,11 @@ export const technicalVisit = pgTable(
     index("idx_technical_visit_reference").on(table.referenceId),
     index("idx_technical_visit_date").on(table.visitDate),
     index("idx_technical_visit_status").on(table.status),
+    index("idx_technical_visit_company_date_created").on(
+      table.companyId,
+      table.visitDate,
+      table.createdAt
+    ),
   ]
 );
 
@@ -72,6 +77,11 @@ export const technicalVisitChecklist = pgTable(
     unique("uq_technical_visit_checklist_company_code").on(table.companyId, table.code),
     index("idx_technical_visit_checklist_company").on(table.companyId),
     index("idx_technical_visit_checklist_visit").on(table.visitId),
+    index("idx_technical_visit_checklist_visit_sort_created").on(
+      table.visitId,
+      table.sortOrder,
+      table.createdAt
+    ),
   ]
 );
 
@@ -98,6 +108,7 @@ export const technicalVisitMedia = pgTable(
     unique("uq_technical_visit_media_company_code").on(table.companyId, table.code),
     index("idx_technical_visit_media_company").on(table.companyId),
     index("idx_technical_visit_media_visit").on(table.visitId),
+    index("idx_technical_visit_media_visit_created").on(table.visitId, table.createdAt),
   ]
 );
 
@@ -129,5 +140,6 @@ export const technicalVisitAction = pgTable(
     index("idx_technical_visit_action_company").on(table.companyId),
     index("idx_technical_visit_action_visit").on(table.visitId),
     index("idx_technical_visit_action_status").on(table.status),
+    index("idx_technical_visit_action_visit_created").on(table.visitId, table.createdAt),
   ]
 );

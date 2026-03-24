@@ -1,4 +1,4 @@
-import { and, desc, eq, ilike, or } from "drizzle-orm";
+import { and, count, desc, eq, ilike, or } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
 import * as schema from "@/db/schema";
@@ -21,6 +21,7 @@ import {
   updateTechnicalVisitMediaSchema,
   updateTechnicalVisitSchema,
 } from "@/modules/technical-visit/shared/technical-visit-schemas";
+import type { PaginatedRecordsResponse } from "@/lib/types/paginated-records";
 
 class TechnicalVisitError extends Error {
   constructor(
@@ -33,6 +34,14 @@ class TechnicalVisitError extends Error {
 }
 
 type TechnicalVisitResource = z.infer<typeof technicalVisitResourceSchema>;
+type TechnicalVisitInsert = typeof schema.technicalVisit.$inferInsert;
+type TechnicalVisitChecklistInsert = typeof schema.technicalVisitChecklist.$inferInsert;
+type TechnicalVisitMediaInsert = typeof schema.technicalVisitMedia.$inferInsert;
+type TechnicalVisitActionInsert = typeof schema.technicalVisitAction.$inferInsert;
+type TechnicalVisitUpdate = Partial<TechnicalVisitInsert>;
+type TechnicalVisitChecklistUpdate = Partial<TechnicalVisitChecklistInsert>;
+type TechnicalVisitMediaUpdate = Partial<TechnicalVisitMediaInsert>;
+type TechnicalVisitActionUpdate = Partial<TechnicalVisitActionInsert>;
 
 function normalizeZodError(error: z.ZodError) {
   return error.issues[0]?.message || "Validation failed.";
@@ -108,10 +117,40 @@ async function ensureUserInCompany(companyId: string, userId: string) {
   }
 }
 
-export async function listTechnicalVisitRecords(
+async function paginateTechnicalVisitTable<TTable>(
+  table: TTable,
+  whereClause: ReturnType<typeof and>,
+  page: number,
+  limit: number,
+  orderByClauses: Array<unknown>
+): Promise<PaginatedRecordsResponse> {
+  const offset = (page - 1) * limit;
+  const [totalRow] = (await db
+    .select({ count: count() })
+    .from(table as never)
+    .where(whereClause)) as Array<{ count: number | string }>;
+
+  const rows = await db
+    .select()
+    .from(table as never)
+    .where(whereClause)
+    .orderBy(...(orderByClauses as []))
+    .limit(limit)
+    .offset(offset);
+
+  return {
+    rows,
+    total: Number(totalRow?.count ?? 0),
+    page,
+    limit,
+  };
+}
+
+async function listTechnicalVisitRecordsInternal(
   resourceInput: string,
   searchParams: URLSearchParams,
-  headers: Headers
+  headers: Headers,
+  paginated: boolean
 ) {
   const resource = parseResource(resourceInput);
   const parsed = technicalVisitListQuerySchema.safeParse(Object.fromEntries(searchParams));
@@ -122,90 +161,123 @@ export async function listTechnicalVisitRecords(
   const { companyId } = await getAccess(headers);
   const q = parsed.data.q ? `%${parsed.data.q}%` : null;
   const limit = parsed.data.limit;
-  const cacheKey = masterDataListCacheKey("technical-visit", companyId, resource, parsed.data);
+  const page = parsed.data.page ?? 1;
+  const cacheKey = masterDataListCacheKey("technical-visit", companyId, resource, {
+    ...parsed.data,
+    paginated,
+    page,
+  });
   return getOrSetMasterDataCache(cacheKey, async () => {
     switch (resource) {
-    case "technical-visits":
-      return db
-        .select()
-        .from(schema.technicalVisit)
-        .where(
-          and(
-            eq(schema.technicalVisit.companyId, companyId),
-            parsed.data.visitType ? eq(schema.technicalVisit.visitType, parsed.data.visitType) : undefined,
-            q
-              ? or(
-                  ilike(schema.technicalVisit.code, q),
-                  ilike(schema.technicalVisit.visitType, q),
-                  ilike(schema.technicalVisit.status, q),
-                  ilike(schema.technicalVisit.summary, q)
-                )
-              : undefined
-          )
-        )
-        .orderBy(desc(schema.technicalVisit.visitDate), desc(schema.technicalVisit.createdAt))
-        .limit(limit);
-
-    case "technical-visit-checklists":
-      return db
-        .select()
-        .from(schema.technicalVisitChecklist)
-        .where(
-          and(
-            eq(schema.technicalVisitChecklist.companyId, companyId),
-            parsed.data.visitId ? eq(schema.technicalVisitChecklist.visitId, parsed.data.visitId) : undefined,
-            q
-              ? or(
-                  ilike(schema.technicalVisitChecklist.code, q),
-                  ilike(schema.technicalVisitChecklist.category, q),
-                  ilike(schema.technicalVisitChecklist.item, q)
-                )
-              : undefined
-          )
-        )
-        .orderBy(schema.technicalVisitChecklist.sortOrder, desc(schema.technicalVisitChecklist.createdAt))
-        .limit(limit);
-
-    case "technical-visit-media":
-      return db
-        .select()
-        .from(schema.technicalVisitMedia)
-        .where(
-          and(
-            eq(schema.technicalVisitMedia.companyId, companyId),
-            parsed.data.visitId ? eq(schema.technicalVisitMedia.visitId, parsed.data.visitId) : undefined,
-            q
-              ? or(
-                  ilike(schema.technicalVisitMedia.code, q),
-                  ilike(schema.technicalVisitMedia.fileUrl, q),
-                  ilike(schema.technicalVisitMedia.caption, q)
-                )
-              : undefined
-          )
-        )
-        .orderBy(desc(schema.technicalVisitMedia.createdAt))
-        .limit(limit);
-
-    case "technical-visit-actions":
-      return db
-        .select()
-        .from(schema.technicalVisitAction)
-        .where(
-          and(
-            eq(schema.technicalVisitAction.companyId, companyId),
-            parsed.data.visitId ? eq(schema.technicalVisitAction.visitId, parsed.data.visitId) : undefined,
-            q
-              ? or(
-                  ilike(schema.technicalVisitAction.code, q),
-                  ilike(schema.technicalVisitAction.action, q),
-                  ilike(schema.technicalVisitAction.status, q)
-                )
-              : undefined
-          )
-        )
-        .orderBy(desc(schema.technicalVisitAction.createdAt))
-        .limit(limit);
-
+      case "technical-visits": {
+        const whereClause = and(
+          eq(schema.technicalVisit.companyId, companyId),
+          parsed.data.visitType ? eq(schema.technicalVisit.visitType, parsed.data.visitType) : undefined,
+          q
+            ? or(
+                ilike(schema.technicalVisit.code, q),
+                ilike(schema.technicalVisit.visitType, q),
+                ilike(schema.technicalVisit.status, q),
+                ilike(schema.technicalVisit.summary, q)
+              )
+            : undefined
+        );
+        return paginated
+          ? paginateTechnicalVisitTable(
+              schema.technicalVisit,
+              whereClause,
+              page,
+              limit,
+              [desc(schema.technicalVisit.visitDate), desc(schema.technicalVisit.createdAt)]
+            )
+          : db
+              .select()
+              .from(schema.technicalVisit)
+              .where(whereClause)
+              .orderBy(desc(schema.technicalVisit.visitDate), desc(schema.technicalVisit.createdAt))
+              .limit(limit);
+      }
+      case "technical-visit-checklists": {
+        const whereClause = and(
+          eq(schema.technicalVisitChecklist.companyId, companyId),
+          parsed.data.visitId ? eq(schema.technicalVisitChecklist.visitId, parsed.data.visitId) : undefined,
+          q
+            ? or(
+                ilike(schema.technicalVisitChecklist.code, q),
+                ilike(schema.technicalVisitChecklist.category, q),
+                ilike(schema.technicalVisitChecklist.item, q)
+              )
+            : undefined
+        );
+        return paginated
+          ? paginateTechnicalVisitTable(
+              schema.technicalVisitChecklist,
+              whereClause,
+              page,
+              limit,
+              [schema.technicalVisitChecklist.sortOrder, desc(schema.technicalVisitChecklist.createdAt)]
+            )
+          : db
+              .select()
+              .from(schema.technicalVisitChecklist)
+              .where(whereClause)
+              .orderBy(schema.technicalVisitChecklist.sortOrder, desc(schema.technicalVisitChecklist.createdAt))
+              .limit(limit);
+      }
+      case "technical-visit-media": {
+        const whereClause = and(
+          eq(schema.technicalVisitMedia.companyId, companyId),
+          parsed.data.visitId ? eq(schema.technicalVisitMedia.visitId, parsed.data.visitId) : undefined,
+          q
+            ? or(
+                ilike(schema.technicalVisitMedia.code, q),
+                ilike(schema.technicalVisitMedia.fileUrl, q),
+                ilike(schema.technicalVisitMedia.caption, q)
+              )
+            : undefined
+        );
+        return paginated
+          ? paginateTechnicalVisitTable(
+              schema.technicalVisitMedia,
+              whereClause,
+              page,
+              limit,
+              [desc(schema.technicalVisitMedia.createdAt)]
+            )
+          : db
+              .select()
+              .from(schema.technicalVisitMedia)
+              .where(whereClause)
+              .orderBy(desc(schema.technicalVisitMedia.createdAt))
+              .limit(limit);
+      }
+      case "technical-visit-actions": {
+        const whereClause = and(
+          eq(schema.technicalVisitAction.companyId, companyId),
+          parsed.data.visitId ? eq(schema.technicalVisitAction.visitId, parsed.data.visitId) : undefined,
+          q
+            ? or(
+                ilike(schema.technicalVisitAction.code, q),
+                ilike(schema.technicalVisitAction.action, q),
+                ilike(schema.technicalVisitAction.status, q)
+              )
+            : undefined
+        );
+        return paginated
+          ? paginateTechnicalVisitTable(
+              schema.technicalVisitAction,
+              whereClause,
+              page,
+              limit,
+              [desc(schema.technicalVisitAction.createdAt)]
+            )
+          : db
+              .select()
+              .from(schema.technicalVisitAction)
+              .where(whereClause)
+              .orderBy(desc(schema.technicalVisitAction.createdAt))
+              .limit(limit);
+      }
       default:
         throw new TechnicalVisitError(
           404,
@@ -214,6 +286,26 @@ export async function listTechnicalVisitRecords(
         );
     }
   });
+}
+
+export async function listTechnicalVisitRecords(
+  resourceInput: string,
+  searchParams: URLSearchParams,
+  headers: Headers
+) {
+  return listTechnicalVisitRecordsInternal(resourceInput, searchParams, headers, false) as Promise<
+    Array<Record<string, unknown>>
+  >;
+}
+
+export async function listTechnicalVisitRecordPage(
+  resourceInput: string,
+  searchParams: URLSearchParams,
+  headers: Headers
+) {
+  return listTechnicalVisitRecordsInternal(resourceInput, searchParams, headers, true) as Promise<
+    PaginatedRecordsResponse
+  >;
 }
 
 export async function createTechnicalVisitRecord(
@@ -238,7 +330,7 @@ export async function createTechnicalVisitRecord(
           companyId,
           visitDate: toDate(parsed.data.visitDate)!,
           nextVisitDate: toDate(parsed.data.nextVisitDate),
-        } as any)
+        } satisfies TechnicalVisitInsert)
         .returning();
       return created;
     }
@@ -251,7 +343,7 @@ export async function createTechnicalVisitRecord(
       await ensureVisit(companyId, parsed.data.visitId);
       const [created] = await db
         .insert(schema.technicalVisitChecklist)
-        .values({ ...parsed.data, companyId } as any)
+        .values({ ...parsed.data, companyId } satisfies TechnicalVisitChecklistInsert)
         .returning();
       return created;
     }
@@ -264,7 +356,7 @@ export async function createTechnicalVisitRecord(
       await ensureVisit(companyId, parsed.data.visitId);
       const [created] = await db
         .insert(schema.technicalVisitMedia)
-        .values({ ...parsed.data, companyId } as any)
+        .values({ ...parsed.data, companyId } satisfies TechnicalVisitMediaInsert)
         .returning();
       return created;
     }
@@ -284,7 +376,7 @@ export async function createTechnicalVisitRecord(
           ...parsed.data,
           companyId,
           dueDate: toDate(parsed.data.dueDate),
-        } as any)
+        } satisfies TechnicalVisitActionInsert)
         .returning();
       return created;
     }
@@ -325,11 +417,13 @@ export async function updateTechnicalVisitRecord(
         .update(schema.technicalVisit)
         .set({
           ...parsed.data,
-          visitDate: parsed.data.visitDate ? toDate(parsed.data.visitDate) : undefined,
+          visitDate: parsed.data.visitDate ? toDate(parsed.data.visitDate)! : undefined,
           nextVisitDate:
-            parsed.data.nextVisitDate !== undefined ? toDate(parsed.data.nextVisitDate) : undefined,
+            parsed.data.nextVisitDate !== undefined
+              ? (toDate(parsed.data.nextVisitDate) ?? undefined)
+              : undefined,
           updatedAt: new Date(),
-        } as any)
+        } satisfies TechnicalVisitUpdate)
         .where(and(eq(schema.technicalVisit.id, id), eq(schema.technicalVisit.companyId, companyId)))
         .returning();
       if (!updated) {
@@ -347,7 +441,7 @@ export async function updateTechnicalVisitRecord(
 
       const [updated] = await db
         .update(schema.technicalVisitChecklist)
-        .set({ ...parsed.data, updatedAt: new Date() } as any)
+        .set({ ...parsed.data, updatedAt: new Date() } satisfies TechnicalVisitChecklistUpdate)
         .where(
           and(
             eq(schema.technicalVisitChecklist.id, id),
@@ -370,7 +464,7 @@ export async function updateTechnicalVisitRecord(
 
       const [updated] = await db
         .update(schema.technicalVisitMedia)
-        .set({ ...parsed.data, updatedAt: new Date() } as any)
+        .set({ ...parsed.data, updatedAt: new Date() } satisfies TechnicalVisitMediaUpdate)
         .where(
           and(
             eq(schema.technicalVisitMedia.id, id),
@@ -400,7 +494,7 @@ export async function updateTechnicalVisitRecord(
           ...parsed.data,
           dueDate: parsed.data.dueDate !== undefined ? toDate(parsed.data.dueDate) : undefined,
           updatedAt: new Date(),
-        } as any)
+        } satisfies TechnicalVisitActionUpdate)
         .where(
           and(
             eq(schema.technicalVisitAction.id, id),
