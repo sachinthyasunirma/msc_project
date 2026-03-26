@@ -144,8 +144,15 @@ const navigationItems = [
     href: "/master-data/pre-tours",
     group: "Tours",
     icon: CalendarRange,
+    keywords: "pre tour pre-tour plan day plan items addons totals reference number versions on-tour",
+  },
+  {
+    title: "On-Tours",
+    href: "/tours/on-tours",
+    group: "Tours",
+    icon: CalendarRange,
     keywords:
-      "pre tour pre-tour plan itinerary day plan items addons totals reference number versions on-tour",
+      "on tour operational departures rooming traveler groups requisitions vouchers supplier coordination finance",
   },
   {
     title: "Field Visits",
@@ -390,6 +397,7 @@ export const DashboardCommands = ({ open, setOpen }: Props) => {
       "/master-data/tour-categories": "SCREEN_MASTER_TOUR_CATEGORIES",
       "/master-data/business-network": "SCREEN_MASTER_BUSINESS_NETWORK",
       "/master-data/pre-tours": "SCREEN_PRE_TOURS",
+      "/tours/on-tours": "SCREEN_PRE_TOURS",
       "/master-data/technical-visits": "SCREEN_TECHNICAL_VISITS",
       "/configuration/company": "SCREEN_CONFIGURATION_COMPANY",
       "/billing/plans": "SUBSCRIPTION_MANAGE",

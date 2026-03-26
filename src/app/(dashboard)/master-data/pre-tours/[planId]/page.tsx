@@ -1,5 +1,21 @@
+import dynamic from "next/dynamic";
+import { LoadingState } from "@/components/ui/loading-state";
 import { loadPreTourMastersData } from "@/modules/pre-tour/server/pre-tour-masters-service";
-import { PreTourPlanManageView } from "@/modules/pre-tour/ui/views/pre-tour-plan-manage-view";
+
+const PreTourPlanManageView = dynamic(
+  () =>
+    import("@/modules/pre-tour/ui/views/pre-tour-plan-manage-view").then(
+      (module) => module.PreTourPlanManageView
+    ),
+  {
+    loading: () => (
+      <LoadingState
+        title="Loading pre-tour editor"
+        description="Preparing days, allocations, costing, and routing tools."
+      />
+    ),
+  }
+);
 
 type PageProps = {
   params: Promise<{ planId: string }>;

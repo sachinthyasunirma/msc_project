@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import {
   createGuideRecord,
+  listGuideRecordPage,
   listGuideRecords,
   toGuideErrorResponse,
 } from "@/modules/guides/server/guides-service";
@@ -12,7 +13,9 @@ export async function GET(
   try {
     const params = await context.params;
     const searchParams = new URL(request.url).searchParams;
-    const records = await listGuideRecords(params.resource, searchParams, request.headers);
+    const records = searchParams.has("page")
+      ? await listGuideRecordPage(params.resource, searchParams, request.headers)
+      : await listGuideRecords(params.resource, searchParams, request.headers);
     return NextResponse.json(records);
   } catch (error) {
     const normalized = toGuideErrorResponse(error);

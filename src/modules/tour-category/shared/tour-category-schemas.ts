@@ -11,6 +11,7 @@ export type TourCategoryResourceKey = z.infer<typeof tourCategoryResourceSchema>
 export const tourCategoryListQuerySchema = z.object({
   q: z.string().trim().max(120).optional(),
   limit: z.coerce.number().int().min(1).max(500).default(200),
+  page: z.coerce.number().int().min(1).optional(),
   typeId: z.string().trim().min(1).optional(),
   categoryId: z.string().trim().min(1).optional(),
 });

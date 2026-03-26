@@ -24,7 +24,12 @@ export type Field = {
 export type Row = Record<string, unknown>;
 
 export type CompanySettingsResponse = {
-  company?: { baseCurrencyCode?: string | null } | null;
+  company?:
+    | {
+        baseCurrencyCode?: string | null;
+        transportRateBasis?: "VEHICLE_CATEGORY" | "VEHICLE_TYPE" | null;
+      }
+    | null;
 };
 
 export type AccessControlResponse = {

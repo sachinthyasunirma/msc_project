@@ -16,6 +16,8 @@ import {
 import {
   createActivityRecord,
   deleteActivityRecord,
+  listAllActivityCodes,
+  listActivityRecordPage,
   listActivityRecords,
   updateActivityRecord,
 } from "@/modules/activity/lib/activity-api";
@@ -33,6 +35,8 @@ import type {
 import { listTransportRecords } from "@/modules/transport/lib/transport-api";
 
 const EMPTY_ROWS: Array<Record<string, unknown>> = [];
+const DEFAULT_PAGE_SIZE = 25;
+const LOOKUP_LIMIT = 100;
 
 type UseActivityManagementOptions = {
   activityId?: string;
@@ -59,7 +63,7 @@ export function useActivityManagement({
   }>({ open: false, mode: "create", row: null });
   const [form, setForm] = useState<Record<string, unknown>>({});
   const [batchOpen, setBatchOpen] = useState(false);
-  const [pageSize, setPageSize] = useState(25);
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
   const [currentPage, setCurrentPage] = useState(1);
 
   const lookupsInitialData = initialData
@@ -73,7 +77,8 @@ export function useActivityManagement({
     const input = buildActivityRecordsParams({
       resource,
       q: query || undefined,
-      limit: 500,
+      page: currentPage,
+      limit: pageSize,
     });
 
     if (!showActivityList && activityId) {
@@ -85,9 +90,13 @@ export function useActivityManagement({
     }
 
     return input;
-  }, [activityId, query, resource, showActivityList]);
+  }, [activityId, currentPage, pageSize, query, resource, showActivityList]);
 
-  const isDefaultRecordsQuery = resource === initialResource && query.length === 0;
+  const isDefaultRecordsQuery =
+    resource === initialResource &&
+    query.length === 0 &&
+    currentPage === 1 &&
+    pageSize === DEFAULT_PAGE_SIZE;
 
   const {
     data: lookupsData,
@@ -98,20 +107,21 @@ export function useActivityManagement({
     queryKey: activityKeys.lookups(),
     queryFn: async () => {
       const [activities, locations] = await Promise.all([
-        listActivityRecords("activities", { limit: 500 }),
-        listTransportRecords("locations", { limit: 500 }),
+        listActivityRecords("activities", { limit: LOOKUP_LIMIT }),
+        listTransportRecords("locations", { limit: LOOKUP_LIMIT }),
       ]);
 
       return {
         activities,
-        locations,
+        locations: locations.rows,
       };
     },
     initialData: lookupsInitialData,
+    staleTime: 5 * 60 * 1000,
   });
 
   const {
-    data: records = EMPTY_ROWS,
+    data: recordsPage,
     error: recordsError,
     isFetching: recordsLoading,
     refetch: refetchRecords,
@@ -121,10 +131,18 @@ export function useActivityManagement({
       q: recordsInput.q,
       activityId: recordsInput.activityId,
       parentActivityId: recordsInput.parentActivityId,
+      page: recordsInput.page,
       limit: recordsInput.limit,
     }),
-    queryFn: () => listActivityRecords(resource, recordsInput),
-    initialData: isDefaultRecordsQuery ? initialData?.records ?? undefined : undefined,
+    queryFn: () => listActivityRecordPage(resource, recordsInput),
+    initialData: isDefaultRecordsQuery
+      ? {
+          rows: initialData?.records ?? EMPTY_ROWS,
+          total: initialData?.totalRecords ?? 0,
+          page: 1,
+          limit: DEFAULT_PAGE_SIZE,
+        }
+      : undefined,
     placeholderData: keepPreviousData,
   });
 
@@ -150,6 +168,8 @@ export function useActivityManagement({
 
   const activities = lookupsData?.activities ?? EMPTY_ROWS;
   const locations = lookupsData?.locations ?? EMPTY_ROWS;
+  const records = recordsPage?.rows ?? EMPTY_ROWS;
+  const totalRecords = recordsPage?.total ?? 0;
   const loading = lookupsLoading || recordsLoading;
   const saving =
     createActivityMutation.isPending ||
@@ -381,13 +401,10 @@ export function useActivityManagement({
   }, [activities, activityId, locations, resource, showActivityList]);
 
   const totalPages = useMemo(
-    () => Math.max(1, Math.ceil(records.length / pageSize)),
-    [records.length, pageSize]
+    () => Math.max(1, Math.ceil(totalRecords / pageSize)),
+    [pageSize, totalRecords]
   );
-  const pagedRecords = useMemo(() => {
-    const start = (currentPage - 1) * pageSize;
-    return records.slice(start, start + pageSize);
-  }, [records, currentPage, pageSize]);
+  const pagedRecords = records;
 
   useEffect(() => {
     setCurrentPage(1);
@@ -400,12 +417,18 @@ export function useActivityManagement({
   }, [currentPage, totalPages]);
 
   const refreshAll = useCallback(async () => {
-    await Promise.all([
-      queryClient.invalidateQueries({ queryKey: activityKeys.lookups() }),
-      queryClient.invalidateQueries({ queryKey: activityKeys.recordsRoot() }),
-    ]);
-    await Promise.all([refetchLookups(), refetchRecords()]);
-  }, [queryClient, refetchLookups, refetchRecords]);
+    await queryClient.invalidateQueries({
+      queryKey: activityKeys.recordsByResource(resource),
+    });
+
+    if (resource === "activities") {
+      await queryClient.invalidateQueries({ queryKey: activityKeys.lookups() });
+      await Promise.all([refetchLookups(), refetchRecords()]);
+      return;
+    }
+
+    await refetchRecords();
+  }, [queryClient, refetchLookups, refetchRecords, resource]);
 
   const openDialog = useCallback(
     (mode: "create" | "edit", row?: Record<string, unknown>) => {
@@ -549,7 +572,7 @@ export function useActivityManagement({
   );
 
   const refreshActivityExistingCodes = useCallback(async () => {
-    const rows = await listActivityRecords("activities", { limit: 500 });
+    const rows = await listAllActivityCodes("activities", { limit: LOOKUP_LIMIT });
     return new Set(
       rows
         .map((row) => String(row.code ?? "").trim().toUpperCase())
@@ -558,8 +581,8 @@ export function useActivityManagement({
   }, []);
 
   const refreshActivityRateExistingCodes = useCallback(async () => {
-    const rows = await listActivityRecords("activity-rates", {
-      limit: 500,
+    const rows = await listAllActivityCodes("activity-rates", {
+      limit: LOOKUP_LIMIT,
       activityId: showActivityList ? undefined : activityId || undefined,
     });
     return new Set(
@@ -583,6 +606,7 @@ export function useActivityManagement({
     query,
     setQuery,
     records,
+    totalRecords,
     pagedRecords,
     loading,
     saving,

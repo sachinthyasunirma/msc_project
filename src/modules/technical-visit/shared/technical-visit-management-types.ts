@@ -9,6 +9,7 @@ export type TechnicalVisitLookupHotel = {
 export type TechnicalVisitManagementInitialData = {
   resource: TechnicalVisitResourceKey;
   rows: Array<Record<string, unknown>>;
+  totalRows: number;
   visits: Array<Record<string, unknown>>;
   guides: Array<Record<string, unknown>>;
   activities: Array<Record<string, unknown>>;

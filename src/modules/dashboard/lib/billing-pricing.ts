@@ -39,7 +39,7 @@ export const PLAN_META: Array<{
     idealFor: "Multi-market tour operators and scaling DMCs",
     outcomes: [
       "Advanced commercial workflows for tax/currency contexts",
-      "Better margin control in complex itineraries",
+      "Better margin control in complex tour programs",
       "Broader operational visibility for leaders",
     ],
     isFree: false,

@@ -16,6 +16,7 @@ export type HotelFormState = {
   code: string;
   name: string;
   description: string;
+  locationId: string;
   address: string;
   city: string;
   country: string;
@@ -89,6 +90,7 @@ export function getInitialHotelForm(row: Hotel | null = null): HotelFormState {
     code: row?.code ?? "",
     name: row?.name ?? "",
     description: row?.description ?? "",
+    locationId: "",
     address: row?.address ?? "",
     city: row?.city ?? "",
     country: row?.country ?? "",

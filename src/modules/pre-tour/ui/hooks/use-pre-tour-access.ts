@@ -12,7 +12,9 @@ export function usePreTourAccess() {
       isAdmin,
       privileges,
       canViewRouteMap: privileges.includes("PRE_TOUR_MAP"),
-      canViewCosting: privileges.includes("PRE_TOUR_COSTING"),
+      canViewCosting:
+        privileges.includes("SCREEN_PRE_TOURS") ||
+        privileges.includes("PRE_TOUR_COSTING"),
     }),
     [canWritePreTour, isAdmin, privileges]
   );

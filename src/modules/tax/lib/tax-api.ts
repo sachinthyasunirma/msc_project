@@ -1,3 +1,5 @@
+import type { PaginatedRecordsResponse } from "@/lib/types/paginated-records";
+
 type ApiError = { message?: string };
 
 async function parseResponse<T>(response: Response): Promise<T> {
@@ -20,6 +22,21 @@ export async function listTaxRecords(
     cache: "no-store",
   });
   return parseResponse<Array<Record<string, unknown>>>(response);
+}
+
+export async function listTaxRecordPage(
+  resource: string,
+  params?: { q?: string; page?: number; limit?: number; taxId?: string }
+) {
+  const search = new URLSearchParams();
+  if (params?.q) search.set("q", params.q);
+  if (params?.page) search.set("page", String(params.page));
+  if (params?.limit) search.set("limit", String(params.limit));
+  if (params?.taxId) search.set("taxId", params.taxId);
+  const response = await fetch(`/api/taxes/${resource}?${search.toString()}`, {
+    cache: "no-store",
+  });
+  return parseResponse<PaginatedRecordsResponse>(response);
 }
 
 export async function createTaxRecord(resource: string, payload: Record<string, unknown>) {

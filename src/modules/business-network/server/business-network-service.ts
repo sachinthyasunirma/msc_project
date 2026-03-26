@@ -1,4 +1,4 @@
-import { and, desc, eq, ilike, or } from "drizzle-orm";
+import { and, count, desc, eq, ilike, or } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
 import * as schema from "@/db/schema";
@@ -23,6 +23,7 @@ import {
   updateBusinessOrganizationSchema,
   updateBusinessOrgMemberSchema,
 } from "@/modules/business-network/shared/business-network-schemas";
+import type { PaginatedRecordsResponse } from "@/lib/types/paginated-records";
 
 class BusinessNetworkError extends Error {
   constructor(
@@ -170,10 +171,40 @@ async function ensureUserInCompany(companyId: string, userId: string) {
   }
 }
 
-export async function listBusinessNetworkRecords(
+async function paginateBusinessNetworkTable<TTable>(
+  table: TTable,
+  whereClause: ReturnType<typeof and>,
+  page: number,
+  limit: number,
+  orderByClauses: Array<unknown>
+): Promise<PaginatedRecordsResponse> {
+  const offset = (page - 1) * limit;
+  const [totalRow] = (await db
+    .select({ count: count() })
+    .from(table as never)
+    .where(whereClause)) as Array<{ count: number | string }>;
+
+  const rows = await db
+    .select()
+    .from(table as never)
+    .where(whereClause)
+    .orderBy(...(orderByClauses as []))
+    .limit(limit)
+    .offset(offset);
+
+  return {
+    rows,
+    total: Number(totalRow?.count ?? 0),
+    page,
+    limit,
+  };
+}
+
+async function listBusinessNetworkRecordsInternal(
   resourceInput: string,
   searchParams: URLSearchParams,
-  headers: Headers
+  headers: Headers,
+  paginated: boolean
 ) {
   const resource = parseResource(resourceInput);
   const parsed = businessNetworkListQuerySchema.safeParse(Object.fromEntries(searchParams));
@@ -183,113 +214,161 @@ export async function listBusinessNetworkRecords(
   const { companyId } = await getAccess(headers);
   const q = parsed.data.q ? `%${parsed.data.q}%` : null;
   const limit = parsed.data.limit;
-  const cacheKey = masterDataListCacheKey("business-network", companyId, resource, parsed.data);
+  const page = parsed.data.page ?? 1;
+  const cacheKey = masterDataListCacheKey("business-network", companyId, resource, {
+    ...parsed.data,
+    paginated,
+    page,
+  });
   return getOrSetMasterDataCache(cacheKey, async () => {
     switch (resource) {
-    case "organizations":
-      return db
-        .select()
-        .from(schema.businessOrganization)
-        .where(
-          and(
-            eq(schema.businessOrganization.companyId, companyId),
-            q
-              ? or(
-                  ilike(schema.businessOrganization.code, q),
-                  ilike(schema.businessOrganization.name, q),
-                  ilike(schema.businessOrganization.type, q)
-                )
-              : undefined
-          )
-        )
-        .orderBy(desc(schema.businessOrganization.createdAt))
-        .limit(limit);
-    case "operator-profiles":
-      return db
-        .select()
-        .from(schema.businessOperatorProfile)
-        .where(
-          and(
-            eq(schema.businessOperatorProfile.companyId, companyId),
-            parsed.data.organizationId
-              ? eq(schema.businessOperatorProfile.organizationId, parsed.data.organizationId)
-              : undefined,
-            q
-              ? or(
-                  ilike(schema.businessOperatorProfile.code, q),
-                  ilike(schema.businessOperatorProfile.operatorKind, q),
-                  ilike(schema.businessOperatorProfile.bookingMode, q)
-                )
-              : undefined
-          )
-        )
-        .orderBy(desc(schema.businessOperatorProfile.createdAt))
-        .limit(limit);
-    case "market-profiles":
-      return db
-        .select()
-        .from(schema.businessMarketProfile)
-        .where(
-          and(
-            eq(schema.businessMarketProfile.companyId, companyId),
-            parsed.data.organizationId
-              ? eq(schema.businessMarketProfile.organizationId, parsed.data.organizationId)
-              : undefined,
-            q
-              ? or(
-                  ilike(schema.businessMarketProfile.code, q),
-                  ilike(schema.businessMarketProfile.agencyType, q),
-                  ilike(schema.businessMarketProfile.licenseNo, q)
-                )
-              : undefined
-          )
-        )
-        .orderBy(desc(schema.businessMarketProfile.createdAt))
-        .limit(limit);
-    case "org-members":
-      return db
-        .select()
-        .from(schema.businessOrgMember)
-        .where(
-          and(
-            eq(schema.businessOrgMember.companyId, companyId),
-            parsed.data.organizationId
-              ? eq(schema.businessOrgMember.organizationId, parsed.data.organizationId)
-              : undefined,
-            q
-              ? or(
-                  ilike(schema.businessOrgMember.code, q),
-                  ilike(schema.businessOrgMember.role, q)
-                )
-              : undefined
-          )
-        )
-        .orderBy(desc(schema.businessOrgMember.createdAt))
-        .limit(limit);
-    case "operator-market-contracts":
-      return db
-        .select()
-        .from(schema.businessOperatorMarketContract)
-        .where(
-          and(
-            eq(schema.businessOperatorMarketContract.companyId, companyId),
-            parsed.data.operatorOrgId
-              ? eq(schema.businessOperatorMarketContract.operatorOrgId, parsed.data.operatorOrgId)
-              : undefined,
-            parsed.data.marketOrgId
-              ? eq(schema.businessOperatorMarketContract.marketOrgId, parsed.data.marketOrgId)
-              : undefined,
-            q
-              ? or(
-                  ilike(schema.businessOperatorMarketContract.code, q),
-                  ilike(schema.businessOperatorMarketContract.status, q),
-                  ilike(schema.businessOperatorMarketContract.pricingMode, q)
-                )
-              : undefined
-          )
-        )
-        .orderBy(desc(schema.businessOperatorMarketContract.createdAt))
-        .limit(limit);
+      case "organizations": {
+        const whereClause = and(
+          eq(schema.businessOrganization.companyId, companyId),
+          q
+            ? or(
+                ilike(schema.businessOrganization.code, q),
+                ilike(schema.businessOrganization.name, q),
+                ilike(schema.businessOrganization.type, q)
+              )
+            : undefined
+        );
+        return paginated
+          ? paginateBusinessNetworkTable(
+              schema.businessOrganization,
+              whereClause,
+              page,
+              limit,
+              [desc(schema.businessOrganization.createdAt)]
+            )
+          : db
+              .select()
+              .from(schema.businessOrganization)
+              .where(whereClause)
+              .orderBy(desc(schema.businessOrganization.createdAt))
+              .limit(limit);
+      }
+      case "operator-profiles": {
+        const whereClause = and(
+          eq(schema.businessOperatorProfile.companyId, companyId),
+          parsed.data.organizationId
+            ? eq(schema.businessOperatorProfile.organizationId, parsed.data.organizationId)
+            : undefined,
+          q
+            ? or(
+                ilike(schema.businessOperatorProfile.code, q),
+                ilike(schema.businessOperatorProfile.operatorKind, q),
+                ilike(schema.businessOperatorProfile.bookingMode, q)
+              )
+            : undefined
+        );
+        return paginated
+          ? paginateBusinessNetworkTable(
+              schema.businessOperatorProfile,
+              whereClause,
+              page,
+              limit,
+              [desc(schema.businessOperatorProfile.createdAt)]
+            )
+          : db
+              .select()
+              .from(schema.businessOperatorProfile)
+              .where(whereClause)
+              .orderBy(desc(schema.businessOperatorProfile.createdAt))
+              .limit(limit);
+      }
+      case "market-profiles": {
+        const whereClause = and(
+          eq(schema.businessMarketProfile.companyId, companyId),
+          parsed.data.organizationId
+            ? eq(schema.businessMarketProfile.organizationId, parsed.data.organizationId)
+            : undefined,
+          q
+            ? or(
+                ilike(schema.businessMarketProfile.code, q),
+                ilike(schema.businessMarketProfile.agencyType, q),
+                ilike(schema.businessMarketProfile.licenseNo, q)
+              )
+            : undefined
+        );
+        return paginated
+          ? paginateBusinessNetworkTable(
+              schema.businessMarketProfile,
+              whereClause,
+              page,
+              limit,
+              [desc(schema.businessMarketProfile.createdAt)]
+            )
+          : db
+              .select()
+              .from(schema.businessMarketProfile)
+              .where(whereClause)
+              .orderBy(desc(schema.businessMarketProfile.createdAt))
+              .limit(limit);
+      }
+      case "org-members": {
+        const whereClause = and(
+          eq(schema.businessOrgMember.companyId, companyId),
+          parsed.data.organizationId
+            ? eq(schema.businessOrgMember.organizationId, parsed.data.organizationId)
+            : undefined,
+          q
+            ? or(
+                ilike(schema.businessOrgMember.code, q),
+                ilike(schema.businessOrgMember.role, q)
+              )
+            : undefined
+        );
+        return paginated
+          ? paginateBusinessNetworkTable(
+              schema.businessOrgMember,
+              whereClause,
+              page,
+              limit,
+              [desc(schema.businessOrgMember.createdAt)]
+            )
+          : db
+              .select()
+              .from(schema.businessOrgMember)
+              .where(whereClause)
+              .orderBy(desc(schema.businessOrgMember.createdAt))
+              .limit(limit);
+      }
+      case "operator-market-contracts": {
+        const whereClause = and(
+          eq(schema.businessOperatorMarketContract.companyId, companyId),
+          parsed.data.operatorOrgId
+            ? eq(
+                schema.businessOperatorMarketContract.operatorOrgId,
+                parsed.data.operatorOrgId
+              )
+            : undefined,
+          parsed.data.marketOrgId
+            ? eq(schema.businessOperatorMarketContract.marketOrgId, parsed.data.marketOrgId)
+            : undefined,
+          q
+            ? or(
+                ilike(schema.businessOperatorMarketContract.code, q),
+                ilike(schema.businessOperatorMarketContract.status, q),
+                ilike(schema.businessOperatorMarketContract.pricingMode, q)
+              )
+            : undefined
+        );
+        return paginated
+          ? paginateBusinessNetworkTable(
+              schema.businessOperatorMarketContract,
+              whereClause,
+              page,
+              limit,
+              [desc(schema.businessOperatorMarketContract.createdAt)]
+            )
+          : db
+              .select()
+              .from(schema.businessOperatorMarketContract)
+              .where(whereClause)
+              .orderBy(desc(schema.businessOperatorMarketContract.createdAt))
+              .limit(limit);
+      }
       default:
         throw new BusinessNetworkError(
           404,
@@ -298,6 +377,26 @@ export async function listBusinessNetworkRecords(
         );
     }
   });
+}
+
+export async function listBusinessNetworkRecords(
+  resourceInput: string,
+  searchParams: URLSearchParams,
+  headers: Headers
+) {
+  return listBusinessNetworkRecordsInternal(resourceInput, searchParams, headers, false) as Promise<
+    Array<Record<string, unknown>>
+  >;
+}
+
+export async function listBusinessNetworkRecordPage(
+  resourceInput: string,
+  searchParams: URLSearchParams,
+  headers: Headers
+) {
+  return listBusinessNetworkRecordsInternal(resourceInput, searchParams, headers, true) as Promise<
+    PaginatedRecordsResponse
+  >;
 }
 
 export async function createBusinessNetworkRecord(

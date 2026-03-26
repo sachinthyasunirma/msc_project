@@ -263,9 +263,9 @@ export function GuidesManagementSection({
             )}
           </TableBody>
         </Table>
-        {!state.loading && state.records.length > 0 ? (
+        {!state.loading && state.totalRecords > 0 ? (
           <TablePagination
-            totalItems={state.records.length}
+            totalItems={state.totalRecords}
             page={state.currentPage}
             pageSize={state.pageSize}
             onPageChange={state.setCurrentPage}

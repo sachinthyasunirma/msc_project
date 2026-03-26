@@ -2,32 +2,6 @@
 
 import type { Field, PreTourResourceKey } from "@/modules/pre-tour/shared/pre-tour-management-types";
 
-export type DayTransportForm = {
-  enabled: boolean;
-  serviceId: string;
-  startAt: string;
-  endAt: string;
-  pax: string;
-  baseAmount: string;
-  taxAmount: string;
-  totalAmount: string;
-  status: string;
-  notes: string;
-};
-
-export const EMPTY_DAY_TRANSPORT_FORM: DayTransportForm = {
-  enabled: false,
-  serviceId: "",
-  startAt: "",
-  endAt: "",
-  pax: "",
-  baseAmount: "0",
-  taxAmount: "0",
-  totalAmount: "0",
-  status: "PLANNED",
-  notes: "",
-};
-
 type FieldOptions = {
   planOptions: Array<{ value: string; label: string }>;
   dayOptions: Array<{ value: string; label: string }>;
@@ -143,6 +117,21 @@ export function getPreTourFields(
             { label: "INCLUSIVE", value: "INCLUSIVE" },
           ],
         },
+        {
+          key: "transportChargeMethodDefault",
+          label: "Transport Charge Method",
+          type: "select",
+          defaultValue: "PER_KM",
+          options: [
+            { label: "Per Transfer", value: "PER_TRANSFER" },
+            { label: "Per Vehicle", value: "PER_VEHICLE" },
+            { label: "Per Pax", value: "PER_PAX" },
+            { label: "Per Hour", value: "PER_HOUR" },
+            { label: "Per Day", value: "PER_DAY" },
+            { label: "Per Km", value: "PER_KM" },
+            { label: "Slab", value: "SLAB" },
+          ],
+        },
         { key: "pricingPolicy", label: "Pricing Policy JSON", type: "json", nullable: true },
         { key: "baseTotal", label: "Base Total", type: "number", defaultValue: 0 },
         { key: "taxTotal", label: "Tax Total", type: "number", defaultValue: 0 },
@@ -159,8 +148,6 @@ export function getPreTourFields(
         { key: "dayNumber", label: "Day Number", type: "number", required: true, defaultValue: 1 },
         { key: "date", label: "Date", type: "datetime", required: true },
         { key: "title", label: "Title", type: "text", nullable: true },
-        { key: "startLocationId", label: "Start Location", type: "select", nullable: true, options: locationOptions },
-        { key: "endLocationId", label: "End Location", type: "select", nullable: true, options: locationOptions },
         { key: "notes", label: "Notes", type: "textarea", nullable: true },
         { key: "isActive", label: "Active", type: "boolean", defaultValue: true },
       ];

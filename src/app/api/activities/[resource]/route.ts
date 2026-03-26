@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import {
   createActivityRecord,
+  listActivityRecordPage,
   listActivityRecords,
   toActivityErrorResponse,
 } from "@/modules/activity/server/activity-service";
@@ -12,7 +13,9 @@ export async function GET(
   try {
     const params = await context.params;
     const searchParams = new URL(request.url).searchParams;
-    const records = await listActivityRecords(params.resource, searchParams, request.headers);
+    const records = searchParams.has("page")
+      ? await listActivityRecordPage(params.resource, searchParams, request.headers)
+      : await listActivityRecords(params.resource, searchParams, request.headers);
     return NextResponse.json(records);
   } catch (error) {
     const normalized = toActivityErrorResponse(error);
@@ -34,4 +37,3 @@ export async function POST(
     return NextResponse.json(normalized.body, { status: normalized.status });
   }
 }
-

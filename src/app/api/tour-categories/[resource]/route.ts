@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import {
   createTourCategoryRecord,
+  listTourCategoryRecordPage,
   listTourCategoryRecords,
   toTourCategoryErrorResponse,
 } from "@/modules/tour-category/server/tour-category-service";
@@ -12,7 +13,9 @@ export async function GET(
   try {
     const params = await context.params;
     const searchParams = new URL(request.url).searchParams;
-    const records = await listTourCategoryRecords(params.resource, searchParams, request.headers);
+    const records = searchParams.has("page")
+      ? await listTourCategoryRecordPage(params.resource, searchParams, request.headers)
+      : await listTourCategoryRecords(params.resource, searchParams, request.headers);
     return NextResponse.json(records);
   } catch (error) {
     const normalized = toTourCategoryErrorResponse(error);
@@ -34,4 +37,3 @@ export async function POST(
     return NextResponse.json(normalized.body, { status: normalized.status });
   }
 }
-

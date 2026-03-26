@@ -3,6 +3,7 @@ import type { TourCategoryResourceKey } from "@/modules/tour-category/shared/tou
 export type TourCategoryManagementInitialData = {
   resource: TourCategoryResourceKey;
   records: Array<Record<string, unknown>>;
+  totalRecords: number;
   types: Array<Record<string, unknown>>;
   categories: Array<Record<string, unknown>>;
 };

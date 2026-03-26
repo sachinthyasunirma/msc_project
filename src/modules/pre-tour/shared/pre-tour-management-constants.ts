@@ -3,19 +3,19 @@ import type { PreTourResourceKey } from "@/modules/pre-tour/shared/pre-tour-mana
 export const META: Record<PreTourResourceKey, { title: string; description: string }> = {
   "pre-tours": {
     title: "Pre-Tour Plans",
-    description: "Create itinerary plans before operational on-tour execution.",
+    description: "Create sketch tour programs and sample quotations before operational on-tour execution.",
   },
   "pre-tour-days": {
     title: "Day Plan",
-    description: "Define day-by-day structure and travel flow.",
+    description: "Define the day-by-day structure of the quotation plan.",
   },
   "pre-tour-items": {
     title: "Plan Items",
-    description: "Service lines for selected day.",
+    description: "Draft service allocations and sample costing lines for the selected day.",
   },
   "pre-tour-guide-allocations": {
     title: "Guide Allocations",
-    description: "Tour-level guide costing and assignment across the itinerary.",
+    description: "Tour-level guide costing and assignment across the full trip plan.",
   },
   "pre-tour-item-addons": {
     title: "Item Addons",
@@ -154,6 +154,7 @@ export const PRE_TOUR_FORM_GROUPS: Array<{
       "exchangeRateMode",
       "exchangeRate",
       "priceMode",
+      "transportChargeMethodDefault",
       "pricingPolicy",
       "baseTotal",
       "taxTotal",
@@ -178,13 +179,8 @@ export const PRE_TOUR_DAY_FORM_GROUPS: Array<{
     keys: ["code", "dayNumber", "date", "title"],
   },
   {
-    title: "Route",
-    description: "Define start and end locations for this day flow.",
-    keys: ["startLocationId", "endLocationId"],
-  },
-  {
     title: "Control & Notes",
-    description: "Operational status and internal planning notes.",
+    description: "Planning status and internal notes for this draft day.",
     keys: ["isActive", "notes"],
   },
 ];

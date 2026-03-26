@@ -1,7 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { memo } from "react";
+import { memo, useMemo } from "react";
 import { hotelImportConfig } from "@/components/batch-import/master-batch-import-config";
 import { createHotel } from "@/modules/accommodation/lib/accommodation-api";
 import {
@@ -9,7 +9,14 @@ import {
   type AccommodationHotelListData,
 } from "@/modules/accommodation/lib/use-accommodation-hotel-list";
 import { AccommodationHotelListCard } from "@/modules/accommodation/ui/components/accommodation-hotel-list-card";
-import { AccommodationHotelDialog } from "@/modules/accommodation/ui/components/dialogs/accommodation-hotel-dialog";
+
+const AccommodationHotelDialog = dynamic(
+  () =>
+    import("@/modules/accommodation/ui/components/dialogs/accommodation-hotel-dialog").then(
+      (module) => module.AccommodationHotelDialog
+    ),
+  { ssr: false }
+);
 
 const MasterBatchImportDialog = dynamic(
   () =>
@@ -50,9 +57,52 @@ function AccommodationHotelListSectionComponent({
     goPreviousPage,
     goNextPage,
     hotelDialog,
+    systemLocationOptions,
+    loadingSystemLocations,
     hotelExistingCodes,
     refreshHotelExistingCodes,
   } = useAccommodationHotelList({ isReadOnly, initialData: initialHotelList });
+
+  const hotelBatchImportConfig = useMemo(
+    () => ({
+      ...hotelImportConfig,
+      fields: hotelImportConfig.fields.map((field) =>
+        field.key === "locationCode"
+          ? {
+              ...field,
+              options: systemLocationOptions.map((location) => ({
+                value: location.code,
+                label: location.label,
+              })),
+            }
+          : field
+      ),
+    }),
+    [systemLocationOptions]
+  );
+
+  const locationByCode = useMemo(
+    () =>
+      new Map(
+        systemLocationOptions.map((location) => [location.code.trim().toUpperCase(), location.id])
+      ),
+    [systemLocationOptions]
+  );
+
+  const locationDetailsByCode = useMemo(
+    () =>
+      new Map(
+        systemLocationOptions.map((location) => [
+          location.code.trim().toUpperCase(),
+          {
+            city: location.city,
+            country: location.country,
+            address: location.address,
+          },
+        ])
+      ),
+    [systemLocationOptions]
+  );
 
   return (
     <>
@@ -79,26 +129,31 @@ function AccommodationHotelListSectionComponent({
         onNextPage={goNextPage}
       />
 
-      <AccommodationHotelDialog
-        open={hotelDialog.dialog.open}
-        mode={hotelDialog.dialog.mode}
-        row={hotelDialog.dialog.row}
-        form={hotelDialog.form}
-        setForm={hotelDialog.setForm}
-        saving={saving}
-        isReadOnly={isReadOnly}
-        onOpenChange={hotelDialog.setOpen}
-        onCancel={hotelDialog.closeDialog}
-        onSubmit={() => void submitHotel()}
-      />
+      {hotelDialog.dialog.open ? (
+        <AccommodationHotelDialog
+          open={hotelDialog.dialog.open}
+          mode={hotelDialog.dialog.mode}
+          row={hotelDialog.dialog.row}
+          form={hotelDialog.form}
+          setForm={hotelDialog.setForm}
+          locationOptions={systemLocationOptions}
+          loadingLocations={loadingSystemLocations}
+          saving={saving}
+          isReadOnly={isReadOnly}
+          onOpenChange={hotelDialog.setOpen}
+          onCancel={hotelDialog.closeDialog}
+          onSubmit={() => void submitHotel()}
+        />
+      ) : null}
 
       <MasterBatchImportDialog
         open={batchOpen}
         onOpenChange={setBatchOpen}
-        config={hotelImportConfig}
+        config={hotelBatchImportConfig}
         readOnly={isReadOnly}
         context={{
-          locationByCode: new Map(),
+          locationByCode,
+          locationDetailsByCode,
           currencyByCode: new Map(),
           vehicleCategoryByCode: new Map(),
           vehicleTypeByCode: new Map(),

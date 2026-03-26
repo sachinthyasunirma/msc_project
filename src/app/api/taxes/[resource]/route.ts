@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import {
   createTaxRecord,
+  listTaxRecordPage,
   listTaxRecords,
   toTaxErrorResponse,
 } from "@/modules/tax/server/tax-service";
@@ -12,7 +13,9 @@ export async function GET(
   try {
     const params = await context.params;
     const searchParams = new URL(request.url).searchParams;
-    const records = await listTaxRecords(params.resource, searchParams, request.headers);
+    const records = searchParams.has("page")
+      ? await listTaxRecordPage(params.resource, searchParams, request.headers)
+      : await listTaxRecords(params.resource, searchParams, request.headers);
     return NextResponse.json(records);
   } catch (error) {
     const normalized = toTaxErrorResponse(error);

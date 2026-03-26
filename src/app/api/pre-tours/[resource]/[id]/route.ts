@@ -1,14 +1,35 @@
 import { NextResponse } from "next/server";
-import { withApiLogging } from "@/lib/logging/request";
+import { withApiLogging, type ApiRouteContext } from "@/lib/logging/request";
 import {
   deletePreTourRecord,
+  getPreTourRecord,
   toPreTourErrorResponse,
   updatePreTourRecord,
 } from "@/modules/pre-tour/server/pre-tour-service";
 
+const getHandler = withApiLogging(
+  { route: "/api/pre-tours/[resource]/[id]", feature: "pre-tour" },
+  async (request: Request, context: ApiRouteContext<{ resource: string; id: string }>) => {
+    try {
+      const params = await context.params;
+      if (!params?.resource || !params?.id) {
+        return NextResponse.json(
+          { code: "VALIDATION_ERROR", message: "Pre-tour resource and id are required." },
+          { status: 400 }
+        );
+      }
+      const record = await getPreTourRecord(params.resource, params.id, request.headers);
+      return NextResponse.json(record);
+    } catch (error) {
+      const normalized = toPreTourErrorResponse(error);
+      return NextResponse.json(normalized.body, { status: normalized.status });
+    }
+  }
+);
+
 const patchHandler = withApiLogging(
   { route: "/api/pre-tours/[resource]/[id]", feature: "pre-tour" },
-  async (request, context) => {
+  async (request: Request, context: ApiRouteContext<{ resource: string; id: string }>) => {
     try {
       const params = await context.params;
       if (!params?.resource || !params?.id) {
@@ -34,7 +55,7 @@ const patchHandler = withApiLogging(
 
 const deleteHandler = withApiLogging(
   { route: "/api/pre-tours/[resource]/[id]", feature: "pre-tour" },
-  async (request, context) => {
+  async (request: Request, context: ApiRouteContext<{ resource: string; id: string }>) => {
     try {
       const params = await context.params;
       if (!params?.resource || !params?.id) {
@@ -57,6 +78,13 @@ export async function PATCH(
   context: { params: Promise<{ resource: string; id: string }> }
 ) {
   return patchHandler(request, context);
+}
+
+export async function GET(
+  request: Request,
+  context: { params: Promise<{ resource: string; id: string }> }
+) {
+  return getHandler(request, context);
 }
 
 export async function DELETE(

@@ -111,7 +111,7 @@ export function useAccommodationRoomRatesTab({
   const loadCurrencyOptions = useCallback(async () => {
     setCurrencyLoading(true);
     try {
-      const records = await listCurrencyRecords("currencies", { limit: 200 });
+      const records = await listCurrencyRecords("currencies", { limit: 100 });
       const options = records
         .filter((record) => record.isActive !== false)
         .map((record) => {

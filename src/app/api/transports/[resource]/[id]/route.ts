@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { withApiLogging } from "@/lib/logging/request";
+import { withApiLogging, type ApiRouteContext } from "@/lib/logging/request";
 import {
   deleteTransportRecord,
   toTransportErrorResponse,
@@ -8,7 +8,7 @@ import {
 
 const patchHandler = withApiLogging(
   { route: "/api/transports/[resource]/[id]", method: "PATCH", feature: "master-transport" },
-  async (request, context) => {
+  async (request: Request, context: ApiRouteContext<{ resource: string; id: string }>) => {
     try {
       const params = await context.params;
       if (!params?.resource || !params?.id) {
@@ -34,7 +34,7 @@ const patchHandler = withApiLogging(
 
 const deleteHandler = withApiLogging(
   { route: "/api/transports/[resource]/[id]", method: "DELETE", feature: "master-transport" },
-  async (request, context) => {
+  async (request: Request, context: ApiRouteContext<{ resource: string; id: string }>) => {
     try {
       const params = await context.params;
       if (!params?.resource || !params?.id) {

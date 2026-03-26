@@ -1,4 +1,4 @@
-import { and, desc, eq, ilike, or } from "drizzle-orm";
+import { and, count, desc, eq, ilike, or } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
 import * as schema from "@/db/schema";
@@ -23,6 +23,7 @@ import {
   updateActivitySchema,
   updateActivitySupplementSchema,
 } from "@/modules/activity/shared/activity-schemas";
+import type { PaginatedRecordsResponse } from "@/lib/types/paginated-records";
 
 class ActivityError extends Error {
   constructor(
@@ -119,10 +120,70 @@ async function ensureTransportLocation(companyId: string, locationId: string) {
   }
 }
 
-export async function listActivityRecords(
+async function paginateActivityTable<TTable>(
+  table: TTable,
+  whereClause: ReturnType<typeof and>,
+  page: number,
+  limit: number,
+  orderByClauses: Array<unknown>
+): Promise<PaginatedRecordsResponse> {
+  const offset = (page - 1) * limit;
+  const [totalRow] = (await db
+    .select({ count: count() })
+    .from(table as never)
+    .where(whereClause)) as Array<{ count: number | string }>;
+
+  const rows = await db
+    .select()
+    .from(table as never)
+    .where(whereClause)
+    .orderBy(...(orderByClauses as []))
+    .limit(limit)
+    .offset(offset);
+
+  return {
+    rows,
+    total: Number(totalRow?.count ?? 0),
+    page,
+    limit,
+  };
+}
+
+async function paginateActivityCodeTable<TTable>(
+  table: TTable,
+  whereClause: ReturnType<typeof and>,
+  page: number,
+  limit: number,
+  orderByClauses: Array<unknown>,
+  columns: { id: unknown; code: unknown }
+): Promise<PaginatedRecordsResponse> {
+  const offset = (page - 1) * limit;
+  const [totalRow] = (await db
+    .select({ count: count() })
+    .from(table as never)
+    .where(whereClause)) as Array<{ count: number | string }>;
+
+  const rows = await db
+    .select({ id: columns.id as never, code: columns.code as never })
+    .from(table as never)
+    .where(whereClause)
+    .orderBy(...(orderByClauses as []))
+    .limit(limit)
+    .offset(offset);
+
+  return {
+    rows: rows as Array<Record<string, unknown>>,
+    total: Number(totalRow?.count ?? 0),
+    page,
+    limit,
+  };
+}
+
+async function listActivityRecordsInternal(
   resourceInput: string,
   searchParams: URLSearchParams,
-  headers: Headers
+  headers: Headers,
+  paginated: boolean
 ) {
   const resource = parseResource(resourceInput);
   const parsed = activityListQuerySchema.safeParse(Object.fromEntries(searchParams));
@@ -134,98 +195,181 @@ export async function listActivityRecords(
   const limit = parsed.data.limit;
   const activityId = parsed.data.activityId;
   const parentActivityId = parsed.data.parentActivityId;
-  const cacheKey = masterDataListCacheKey("activity", companyId, resource, parsed.data);
+  const page = parsed.data.page ?? 1;
+  const codesOnly = parsed.data.codesOnly;
+  const cacheKey = masterDataListCacheKey("activity", companyId, resource, {
+    ...parsed.data,
+    paginated,
+    page,
+  });
+
   return getOrSetMasterDataCache(cacheKey, async () => {
     switch (resource) {
       case "activities": {
-        const clauses = [eq(schema.activity.companyId, companyId)];
-        if (q) {
-          const searchClause = or(ilike(schema.activity.code, q), ilike(schema.activity.name, q));
-          if (searchClause) clauses.push(searchClause);
-        }
-        return db
-          .select()
-          .from(schema.activity)
-          .where(and(...clauses))
-          .orderBy(desc(schema.activity.createdAt))
-          .limit(limit);
+        const whereClause = and(
+          eq(schema.activity.companyId, companyId),
+          q ? or(ilike(schema.activity.code, q), ilike(schema.activity.name, q)) : undefined
+        );
+        return paginated
+          ? codesOnly
+            ? paginateActivityCodeTable(
+                schema.activity,
+                whereClause,
+                page,
+                limit,
+                [desc(schema.activity.createdAt)],
+                { id: schema.activity.id, code: schema.activity.code }
+              )
+            : paginateActivityTable(
+                schema.activity,
+                whereClause,
+                page,
+                limit,
+                [desc(schema.activity.createdAt)]
+              )
+          : db
+              .select()
+              .from(schema.activity)
+              .where(whereClause)
+              .orderBy(desc(schema.activity.createdAt))
+              .limit(limit);
       }
       case "activity-images": {
-        const clauses = [eq(schema.activityImage.companyId, companyId)];
-        if (activityId) {
-          clauses.push(eq(schema.activityImage.activityId, activityId));
-        }
-        if (q) {
-          const searchClause = or(
-            ilike(schema.activityImage.code, q),
-            ilike(schema.activityImage.url, q),
-            ilike(schema.activityImage.altText, q)
-          );
-          if (searchClause) clauses.push(searchClause);
-        }
-        return db
-          .select()
-          .from(schema.activityImage)
-          .where(and(...clauses))
-          .orderBy(desc(schema.activityImage.createdAt))
-          .limit(limit);
+        const whereClause = and(
+          eq(schema.activityImage.companyId, companyId),
+          activityId ? eq(schema.activityImage.activityId, activityId) : undefined,
+          q
+            ? or(
+                ilike(schema.activityImage.code, q),
+                ilike(schema.activityImage.url, q),
+                ilike(schema.activityImage.altText, q)
+              )
+            : undefined
+        );
+        return paginated
+          ? paginateActivityTable(
+              schema.activityImage,
+              whereClause,
+              page,
+              limit,
+              [desc(schema.activityImage.createdAt)]
+            )
+          : db
+              .select()
+              .from(schema.activityImage)
+              .where(whereClause)
+              .orderBy(desc(schema.activityImage.createdAt))
+              .limit(limit);
       }
       case "activity-availability": {
-        const clauses = [eq(schema.activityAvailability.companyId, companyId)];
-        if (activityId) {
-          clauses.push(eq(schema.activityAvailability.activityId, activityId));
-        }
-        if (q) {
-          const searchClause = or(
-            ilike(schema.activityAvailability.code, q),
-            ilike(schema.activityAvailability.startTime, q),
-            ilike(schema.activityAvailability.endTime, q)
-          );
-          if (searchClause) clauses.push(searchClause);
-        }
-        return db
-          .select()
-          .from(schema.activityAvailability)
-          .where(and(...clauses))
-          .orderBy(desc(schema.activityAvailability.createdAt))
-          .limit(limit);
+        const whereClause = and(
+          eq(schema.activityAvailability.companyId, companyId),
+          activityId ? eq(schema.activityAvailability.activityId, activityId) : undefined,
+          q
+            ? or(
+                ilike(schema.activityAvailability.code, q),
+                ilike(schema.activityAvailability.startTime, q),
+                ilike(schema.activityAvailability.endTime, q)
+              )
+            : undefined
+        );
+        return paginated
+          ? paginateActivityTable(
+              schema.activityAvailability,
+              whereClause,
+              page,
+              limit,
+              [desc(schema.activityAvailability.createdAt)]
+            )
+          : db
+              .select()
+              .from(schema.activityAvailability)
+              .where(whereClause)
+              .orderBy(desc(schema.activityAvailability.createdAt))
+              .limit(limit);
       }
       case "activity-rates": {
-        const clauses = [eq(schema.activityRate.companyId, companyId)];
-        if (activityId) {
-          clauses.push(eq(schema.activityRate.activityId, activityId));
-        }
-        if (q) {
-          const searchClause = or(
-            ilike(schema.activityRate.code, q),
-            ilike(schema.activityRate.label, q),
-            ilike(schema.activityRate.pricingModel, q)
-          );
-          if (searchClause) clauses.push(searchClause);
-        }
-        return db
-          .select()
-          .from(schema.activityRate)
-          .where(and(...clauses))
-          .orderBy(desc(schema.activityRate.createdAt))
-          .limit(limit);
+        const whereClause = and(
+          eq(schema.activityRate.companyId, companyId),
+          activityId ? eq(schema.activityRate.activityId, activityId) : undefined,
+          q
+            ? or(
+                ilike(schema.activityRate.code, q),
+                ilike(schema.activityRate.label, q),
+                ilike(schema.activityRate.pricingModel, q)
+              )
+            : undefined
+        );
+        return paginated
+          ? codesOnly
+            ? paginateActivityCodeTable(
+                schema.activityRate,
+                whereClause,
+                page,
+                limit,
+                [desc(schema.activityRate.createdAt)],
+                { id: schema.activityRate.id, code: schema.activityRate.code }
+              )
+            : paginateActivityTable(
+                schema.activityRate,
+                whereClause,
+                page,
+                limit,
+                [desc(schema.activityRate.createdAt)]
+              )
+          : db
+              .select()
+              .from(schema.activityRate)
+              .where(whereClause)
+              .orderBy(desc(schema.activityRate.createdAt))
+              .limit(limit);
       }
       case "activity-supplements": {
-        const clauses = [eq(schema.activitySupplement.companyId, companyId)];
-        if (parentActivityId) {
-          clauses.push(eq(schema.activitySupplement.parentActivityId, parentActivityId));
-        }
-        return db
-          .select()
-          .from(schema.activitySupplement)
-          .where(and(...clauses))
-          .orderBy(desc(schema.activitySupplement.createdAt))
-          .limit(limit);
+        const whereClause = and(
+          eq(schema.activitySupplement.companyId, companyId),
+          parentActivityId
+            ? eq(schema.activitySupplement.parentActivityId, parentActivityId)
+            : undefined
+        );
+        return paginated
+          ? paginateActivityTable(
+              schema.activitySupplement,
+              whereClause,
+              page,
+              limit,
+              [desc(schema.activitySupplement.createdAt)]
+            )
+          : db
+              .select()
+              .from(schema.activitySupplement)
+              .where(whereClause)
+              .orderBy(desc(schema.activitySupplement.createdAt))
+              .limit(limit);
       }
       default:
         throw new ActivityError(404, "RESOURCE_NOT_FOUND", "Activity resource not found.");
     }
   });
+}
+
+export async function listActivityRecords(
+  resourceInput: string,
+  searchParams: URLSearchParams,
+  headers: Headers
+) {
+  return listActivityRecordsInternal(resourceInput, searchParams, headers, false) as Promise<
+    Array<Record<string, unknown>>
+  >;
+}
+
+export async function listActivityRecordPage(
+  resourceInput: string,
+  searchParams: URLSearchParams,
+  headers: Headers
+) {
+  return listActivityRecordsInternal(resourceInput, searchParams, headers, true) as Promise<
+    PaginatedRecordsResponse
+  >;
 }
 
 export async function createActivityRecord(

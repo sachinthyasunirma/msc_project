@@ -3,6 +3,7 @@ import type { BusinessNetworkResourceKey } from "@/modules/business-network/shar
 export type BusinessNetworkManagementInitialData = {
   resource: BusinessNetworkResourceKey;
   records: Array<Record<string, unknown>>;
+  totalRecords: number;
   organizations: Array<Record<string, unknown>>;
   users: Array<Record<string, unknown>>;
   currencies: Array<Record<string, unknown>>;

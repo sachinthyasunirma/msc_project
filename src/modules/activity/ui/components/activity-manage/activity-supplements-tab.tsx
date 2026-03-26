@@ -5,8 +5,8 @@ import { ActivityRecordTableCard } from "@/modules/activity/ui/components/activi
 type ActivityTabProps = {
   query: string;
   loading: boolean;
-  records: Array<Record<string, unknown>>;
   pagedRecords: Array<Record<string, unknown>>;
+  totalItems: number;
   currentPage: number;
   pageSize: number;
   lookups: Record<string, string>;
@@ -22,14 +22,16 @@ type ActivityTabProps = {
 };
 
 export function ActivitySupplementsTab(props: ActivityTabProps) {
+  const { totalItems, ...tableProps } = props;
+
   return (
     <ActivityRecordTableCard
+      {...tableProps}
       resource="activity-supplements"
       resourceTabs={["activity-supplements"]}
       showActivityList={false}
       selectedActivityLabel=""
-      totalItems={props.records.length}
-      {...props}
+      totalItems={totalItems}
     />
   );
 }

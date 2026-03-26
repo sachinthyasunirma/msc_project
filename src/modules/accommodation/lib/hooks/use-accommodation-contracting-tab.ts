@@ -308,13 +308,24 @@ export function useAccommodationContractingTab({
   } = useQuery({
     queryKey: accommodationKeys.supplierOrganizations(),
     queryFn: async () => {
-      const rows = await listBusinessNetworkRecords("organizations", { limit: 300 });
+      const rows = await listBusinessNetworkRecords("organizations", { limit: 100 });
       return rows.map((row) => ({
         value: String(row.id),
+        code: String(row.code ?? "").trim().toUpperCase(),
         label: `${String(row.code ?? row.id)} - ${String(row.name ?? "Organization")}`,
       }));
     },
   });
+
+  const supplierByCode = useMemo(
+    () =>
+      new Map(
+        supplierOptions
+          .filter((option) => option.code.length > 0)
+          .map((option) => [option.code, option.value])
+      ),
+    [supplierOptions]
+  );
 
   const refresh = useCallback(async () => {
     try {
@@ -349,6 +360,15 @@ export function useAccommodationContractingTab({
     () => contracting?.contracts.find((row) => row.id === selectedContractId) ?? null,
     [contracting, selectedContractId]
   );
+  const contractExistingCodes = useCallback(
+    () =>
+      new Set(
+        (contracting?.contracts ?? [])
+          .map((row) => String(row.code ?? "").trim().toUpperCase())
+          .filter((value) => value.length > 0)
+      ),
+    [contracting]
+  );
   const selectedRatePlans = useMemo(
     () => contracting?.ratePlans.filter((row) => row.contractId === selectedContractId) ?? [],
     [contracting, selectedContractId]
@@ -382,9 +402,20 @@ export function useAccommodationContractingTab({
     () =>
       (contracting?.cancellationPolicies ?? []).map((row) => ({
         value: row.id,
+        code: String(row.code ?? "").trim().toUpperCase(),
         label: `${row.code} - ${row.name}`,
       })),
     [contracting]
+  );
+
+  const cancellationPolicyByCode = useMemo(
+    () =>
+      new Map(
+        cancellationPolicyOptions
+          .filter((option) => option.code.length > 0)
+          .map((option) => [option.code, option.value])
+      ),
+    [cancellationPolicyOptions]
   );
 
   useEffect(() => {
@@ -1040,6 +1071,114 @@ export function useAccommodationContractingTab({
     [confirm, guardReadOnly, refresh]
   );
 
+  const refreshContractExistingCodes = useCallback(async () => {
+    const payload = await getAccommodationContractingBundle(hotelId);
+    return new Set(
+      (payload.contracting?.contracts ?? [])
+        .map((row) => String(row.code ?? "").trim().toUpperCase())
+        .filter((value) => value.length > 0)
+    );
+  }, [hotelId]);
+
+  const ratePlanExistingCodes = useCallback(
+    () =>
+      new Set(
+        selectedRatePlans
+          .map((row) => String(row.code ?? "").trim().toUpperCase())
+          .filter((value) => value.length > 0)
+      ),
+    [selectedRatePlans]
+  );
+
+  const refreshRatePlanExistingCodes = useCallback(async () => {
+    const payload = await getAccommodationContractingBundle(hotelId);
+    return new Set(
+      (payload.contracting?.ratePlans ?? [])
+        .filter((row) => row.contractId === selectedContractId)
+        .map((row) => String(row.code ?? "").trim().toUpperCase())
+        .filter((value) => value.length > 0)
+    );
+  }, [hotelId, selectedContractId]);
+
+  const roomRateExistingCodes = useCallback(
+    () =>
+      new Set(
+        selectedRoomRates
+          .map((row) => String(row.code ?? "").trim().toUpperCase())
+          .filter((value) => value.length > 0)
+      ),
+    [selectedRoomRates]
+  );
+
+  const refreshRoomRateExistingCodes = useCallback(async () => {
+    const payload = await getAccommodationContractingBundle(hotelId);
+    return new Set(
+      (payload.contracting?.roomRates ?? [])
+        .filter((row) => row.ratePlanId === selectedRatePlanId)
+        .map((row) => String(row.code ?? "").trim().toUpperCase())
+        .filter((value) => value.length > 0)
+    );
+  }, [hotelId, selectedRatePlanId]);
+
+  const cancellationPolicyExistingCodes = useCallback(
+    () =>
+      new Set(
+        (contracting?.cancellationPolicies ?? [])
+          .map((row) => String(row.code ?? "").trim().toUpperCase())
+          .filter((value) => value.length > 0)
+      ),
+    [contracting]
+  );
+
+  const refreshCancellationPolicyExistingCodes = useCallback(async () => {
+    const payload = await getAccommodationContractingBundle(hotelId);
+    return new Set(
+      (payload.contracting?.cancellationPolicies ?? [])
+        .map((row) => String(row.code ?? "").trim().toUpperCase())
+        .filter((value) => value.length > 0)
+    );
+  }, [hotelId]);
+
+  const cancellationPolicyRuleExistingCodes = useCallback(
+    () =>
+      new Set(
+        selectedCancellationPolicyRules
+          .map((row) => String(row.code ?? "").trim().toUpperCase())
+          .filter((value) => value.length > 0)
+      ),
+    [selectedCancellationPolicyRules]
+  );
+
+  const refreshCancellationPolicyRuleExistingCodes = useCallback(async () => {
+    const payload = await getAccommodationContractingBundle(hotelId);
+    return new Set(
+      (payload.contracting?.cancellationPolicyRules ?? [])
+        .filter((row) => row.policyId === selectedCancellationPolicyId)
+        .map((row) => String(row.code ?? "").trim().toUpperCase())
+        .filter((value) => value.length > 0)
+    );
+  }, [hotelId, selectedCancellationPolicyId]);
+
+  const restrictionExistingCodes = useCallback(
+    () =>
+      new Set(
+        selectedRestrictions
+          .map((row) => String(row.code ?? "").trim().toUpperCase())
+          .filter((value) => value.length > 0)
+      ),
+    [selectedRestrictions]
+  );
+
+  const refreshRestrictionExistingCodes = useCallback(async () => {
+    const payload = await getAccommodationContractingBundle(hotelId);
+    return new Set(
+      (payload.contracting?.restrictions ?? [])
+        .filter((row) => row.ratePlanId === selectedRatePlanId)
+        .map((row) => String(row.code ?? "").trim().toUpperCase())
+        .filter((value) => value.length > 0)
+    );
+  }, [hotelId, selectedRatePlanId]);
+
   return {
     contracting,
     loading,
@@ -1056,7 +1195,9 @@ export function useAccommodationContractingTab({
     selectedRestrictions,
     selectedFeeRules,
     supplierOptions,
+    supplierByCode,
     cancellationPolicyOptions,
+    cancellationPolicyByCode,
     setSelectedContractId,
     setSelectedRatePlanId,
     setSelectedCancellationPolicyId,
@@ -1077,6 +1218,18 @@ export function useAccommodationContractingTab({
     openCancellationPolicyDialog,
     openCancellationPolicyRuleDialog,
     openInventoryDayDialog,
+    contractExistingCodes,
+    refreshContractExistingCodes,
+    ratePlanExistingCodes,
+    refreshRatePlanExistingCodes,
+    roomRateExistingCodes,
+    refreshRoomRateExistingCodes,
+    cancellationPolicyExistingCodes,
+    refreshCancellationPolicyExistingCodes,
+    cancellationPolicyRuleExistingCodes,
+    refreshCancellationPolicyRuleExistingCodes,
+    restrictionExistingCodes,
+    refreshRestrictionExistingCodes,
     submitContract,
     submitRatePlan,
     submitRoomRate,

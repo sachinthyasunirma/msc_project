@@ -1,5 +1,8 @@
 import { headers } from "next/headers";
-import { listBusinessNetworkRecords } from "@/modules/business-network/server/business-network-service";
+import {
+  listBusinessNetworkRecordPage,
+  listBusinessNetworkRecords,
+} from "@/modules/business-network/server/business-network-service";
 import type { BusinessNetworkResourceKey } from "@/modules/business-network/shared/business-network-management-config";
 import type { BusinessNetworkManagementInitialData } from "@/modules/business-network/shared/business-network-management-types";
 import { listCurrencyRecords } from "@/modules/currency/server/currency-service";
@@ -25,19 +28,24 @@ export async function loadBusinessNetworkManagementInitialData(
   try {
     const requestHeaders = await headers();
     const [records, organizations, users, currencies] = await Promise.all([
-      listBusinessNetworkRecords(resource, new URLSearchParams({ limit: "200" }), requestHeaders),
-      listBusinessNetworkRecords(
-        "organizations",
-        new URLSearchParams({ limit: "200" }),
+      listBusinessNetworkRecordPage(
+        resource,
+        new URLSearchParams({ page: "1", limit: "25" }),
         requestHeaders
       ),
-      listCompanyUsersLookup(requestHeaders),
-      listCurrencyRecords("currencies", new URLSearchParams({ limit: "500" }), requestHeaders),
+      listBusinessNetworkRecords(
+        "organizations",
+        new URLSearchParams({ limit: "100" }),
+        requestHeaders
+      ),
+      listCompanyUsersLookup(requestHeaders, { limit: 100 }),
+      listCurrencyRecords("currencies", new URLSearchParams({ limit: "100" }), requestHeaders),
     ]);
 
     return {
       resource,
-      records: toPlainRecords(records),
+      records: toPlainRecords(records.rows),
+      totalRecords: records.total,
       organizations: toPlainRecords(organizations),
       users: toPlainRecords(users),
       currencies: toPlainRecords(currencies),

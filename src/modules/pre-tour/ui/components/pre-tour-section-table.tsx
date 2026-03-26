@@ -35,11 +35,21 @@ type SectionTableProps = {
   onCreateVersion?: (row: Row) => void;
   onCopyPlan?: (row: Row) => void;
   onAdd?: () => void;
+  addLabel?: string;
+  addDisabled?: boolean;
   hideAdd?: boolean;
   onView?: (row: Row) => void;
   hideEdit?: boolean;
+  hideDelete?: boolean;
   editLabel?: string;
   deleteLabel?: string;
+  serverPagination?: {
+    summaryText: string;
+    canPrevious: boolean;
+    canNext: boolean;
+    onPrevious: () => void;
+    onNext: () => void;
+  };
   onEdit: (row: Row) => void;
   onDelete: (row: Row) => void;
 };
@@ -57,11 +67,15 @@ export function SectionTable({
   onCreateVersion,
   onCopyPlan,
   onAdd,
+  addLabel,
+  addDisabled = false,
   hideAdd,
   onView,
   hideEdit,
+  hideDelete,
   editLabel,
   deleteLabel,
+  serverPagination,
   onEdit,
   onDelete,
 }: SectionTableProps) {
@@ -75,9 +89,10 @@ export function SectionTable({
   }, [page, pageSize, rows.length]);
 
   const paginatedRows = useMemo(() => {
+    if (serverPagination) return rows;
     const start = (page - 1) * pageSize;
     return rows.slice(start, start + pageSize);
-  }, [page, pageSize, rows]);
+  }, [page, pageSize, rows, serverPagination]);
 
   const preTourSummary = useMemo(() => {
     if (!isPreTourPlans) return null;
@@ -196,23 +211,25 @@ export function SectionTable({
           </Button>
         )
       ) : null}
-      {compact ? (
-        <Button
-          size="icon"
-          variant="outline"
-          className="size-7"
-          title={deleteLabel || "Delete"}
-          onClick={() => onDelete(row)}
-          disabled={isReadOnly}
-        >
-          <Trash2 className="size-4" />
-        </Button>
-      ) : (
-        <Button size="sm" variant="outline" onClick={() => onDelete(row)} disabled={isReadOnly}>
-          <Trash2 className="mr-1 size-4" />
-          {deleteLabel || "Delete"}
-        </Button>
-      )}
+      {!hideDelete
+        ? compact ? (
+            <Button
+              size="icon"
+              variant="outline"
+              className="size-7"
+              title={deleteLabel || "Delete"}
+              onClick={() => onDelete(row)}
+              disabled={isReadOnly}
+            >
+              <Trash2 className="size-4" />
+            </Button>
+          ) : (
+            <Button size="sm" variant="outline" onClick={() => onDelete(row)} disabled={isReadOnly}>
+              <Trash2 className="mr-1 size-4" />
+              {deleteLabel || "Delete"}
+            </Button>
+          )
+        : null}
     </div>
   );
 
@@ -225,9 +242,9 @@ export function SectionTable({
             <CardDescription className="text-xs">{META[resource].description}</CardDescription>
           </div>
           {!hideAdd ? (
-            <Button className="master-add-btn" size="sm" onClick={onAdd} disabled={isReadOnly}>
+            <Button className="master-add-btn" size="sm" onClick={onAdd} disabled={isReadOnly || addDisabled}>
               <Plus className="mr-1 size-4" />
-              Add
+              {addLabel || "Add"}
             </Button>
           ) : null}
         </CardHeader>
@@ -407,13 +424,23 @@ export function SectionTable({
           </Table>
         </div>
         )}
-        <TablePagination
-          totalItems={rows.length}
-          page={page}
-          pageSize={pageSize}
-          onPageChange={setPage}
-          onPageSizeChange={setPageSize}
-        />
+        {serverPagination ? (
+          <TablePagination
+            summaryText={serverPagination.summaryText}
+            canPrevious={serverPagination.canPrevious}
+            canNext={serverPagination.canNext}
+            onPrevious={serverPagination.onPrevious}
+            onNext={serverPagination.onNext}
+          />
+        ) : (
+          <TablePagination
+            totalItems={rows.length}
+            page={page}
+            pageSize={pageSize}
+            onPageChange={setPage}
+            onPageSizeChange={setPageSize}
+          />
+        )}
       </CardContent>
     </Card>
   );

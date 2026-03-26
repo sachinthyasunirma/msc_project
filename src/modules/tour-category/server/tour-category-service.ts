@@ -1,4 +1,4 @@
-import { and, desc, eq, ilike, or } from "drizzle-orm";
+import { and, count, desc, eq, ilike, or } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
 import * as schema from "@/db/schema";
@@ -19,6 +19,7 @@ import {
   updateTourCategorySchema,
   updateTourCategoryTypeSchema,
 } from "@/modules/tour-category/shared/tour-category-schemas";
+import type { PaginatedRecordsResponse } from "@/lib/types/paginated-records";
 
 class TourCategoryError extends Error {
   constructor(
@@ -198,10 +199,40 @@ function validateRuleConsistency(rule: {
   }
 }
 
-export async function listTourCategoryRecords(
+async function paginateTourCategoryTable<TTable>(
+  table: TTable,
+  whereClause: ReturnType<typeof and>,
+  page: number,
+  limit: number,
+  orderByClauses: Array<unknown>
+): Promise<PaginatedRecordsResponse> {
+  const offset = (page - 1) * limit;
+  const [totalRow] = (await db
+    .select({ count: count() })
+    .from(table as never)
+    .where(whereClause)) as Array<{ count: number | string }>;
+
+  const rows = await db
+    .select()
+    .from(table as never)
+    .where(whereClause)
+    .orderBy(...(orderByClauses as []))
+    .limit(limit)
+    .offset(offset);
+
+  return {
+    rows,
+    total: Number(totalRow?.count ?? 0),
+    page,
+    limit,
+  };
+}
+
+async function listTourCategoryRecordsInternal(
   resourceInput: string,
   searchParams: URLSearchParams,
-  headers: Headers
+  headers: Headers,
+  paginated: boolean
 ) {
   const resource = parseResource(resourceInput);
   const parsed = tourCategoryListQuerySchema.safeParse(Object.fromEntries(searchParams));
@@ -211,66 +242,105 @@ export async function listTourCategoryRecords(
   const { companyId } = await getAccess(headers);
   const q = parsed.data.q ? `%${parsed.data.q}%` : null;
   const limit = parsed.data.limit;
-  const cacheKey = masterDataListCacheKey("tour-category", companyId, resource, parsed.data);
+  const page = parsed.data.page ?? 1;
+  const cacheKey = masterDataListCacheKey("tour-category", companyId, resource, {
+    ...parsed.data,
+    paginated,
+    page,
+  });
   return getOrSetMasterDataCache(cacheKey, async () => {
     switch (resource) {
-    case "tour-category-types":
-      return db
-        .select()
-        .from(schema.tourCategoryType)
-        .where(
-          and(
-            eq(schema.tourCategoryType.companyId, companyId),
-            q
-              ? or(
-                  ilike(schema.tourCategoryType.code, q),
-                  ilike(schema.tourCategoryType.name, q)
-                )
-              : undefined
-          )
-        )
-        .orderBy(schema.tourCategoryType.sortOrder, desc(schema.tourCategoryType.createdAt))
-        .limit(limit);
+      case "tour-category-types": {
+        const whereClause = and(
+          eq(schema.tourCategoryType.companyId, companyId),
+          q
+            ? or(ilike(schema.tourCategoryType.code, q), ilike(schema.tourCategoryType.name, q))
+            : undefined
+        );
+        return paginated
+          ? paginateTourCategoryTable(
+              schema.tourCategoryType,
+              whereClause,
+              page,
+              limit,
+              [schema.tourCategoryType.sortOrder, desc(schema.tourCategoryType.createdAt)]
+            )
+          : db
+              .select()
+              .from(schema.tourCategoryType)
+              .where(whereClause)
+              .orderBy(schema.tourCategoryType.sortOrder, desc(schema.tourCategoryType.createdAt))
+              .limit(limit);
+      }
 
-    case "tour-categories":
-      return db
-        .select()
-        .from(schema.tourCategory)
-        .where(
-          and(
-            eq(schema.tourCategory.companyId, companyId),
-            parsed.data.typeId ? eq(schema.tourCategory.typeId, parsed.data.typeId) : undefined,
-            q
-              ? or(
-                  ilike(schema.tourCategory.code, q),
-                  ilike(schema.tourCategory.name, q)
-                )
-              : undefined
-          )
-        )
-        .orderBy(schema.tourCategory.sortOrder, desc(schema.tourCategory.createdAt))
-        .limit(limit);
+      case "tour-categories": {
+        const whereClause = and(
+          eq(schema.tourCategory.companyId, companyId),
+          parsed.data.typeId ? eq(schema.tourCategory.typeId, parsed.data.typeId) : undefined,
+          q ? or(ilike(schema.tourCategory.code, q), ilike(schema.tourCategory.name, q)) : undefined
+        );
+        return paginated
+          ? paginateTourCategoryTable(
+              schema.tourCategory,
+              whereClause,
+              page,
+              limit,
+              [schema.tourCategory.sortOrder, desc(schema.tourCategory.createdAt)]
+            )
+          : db
+              .select()
+              .from(schema.tourCategory)
+              .where(whereClause)
+              .orderBy(schema.tourCategory.sortOrder, desc(schema.tourCategory.createdAt))
+              .limit(limit);
+      }
 
-    case "tour-category-rules":
-      return db
-        .select()
-        .from(schema.tourCategoryRule)
-        .where(
-          and(
-            eq(schema.tourCategoryRule.companyId, companyId),
-            parsed.data.categoryId
-              ? eq(schema.tourCategoryRule.categoryId, parsed.data.categoryId)
-              : undefined,
-            q ? ilike(schema.tourCategoryRule.code, q) : undefined
-          )
-        )
-        .orderBy(desc(schema.tourCategoryRule.createdAt))
-        .limit(limit);
+      case "tour-category-rules": {
+        const whereClause = and(
+          eq(schema.tourCategoryRule.companyId, companyId),
+          parsed.data.categoryId ? eq(schema.tourCategoryRule.categoryId, parsed.data.categoryId) : undefined,
+          q ? ilike(schema.tourCategoryRule.code, q) : undefined
+        );
+        return paginated
+          ? paginateTourCategoryTable(
+              schema.tourCategoryRule,
+              whereClause,
+              page,
+              limit,
+              [desc(schema.tourCategoryRule.createdAt)]
+            )
+          : db
+              .select()
+              .from(schema.tourCategoryRule)
+              .where(whereClause)
+              .orderBy(desc(schema.tourCategoryRule.createdAt))
+              .limit(limit);
+      }
 
       default:
         throw new TourCategoryError(404, "RESOURCE_NOT_FOUND", "Tour category resource not found.");
     }
   });
+}
+
+export async function listTourCategoryRecords(
+  resourceInput: string,
+  searchParams: URLSearchParams,
+  headers: Headers
+) {
+  return listTourCategoryRecordsInternal(resourceInput, searchParams, headers, false) as Promise<
+    Array<Record<string, unknown>>
+  >;
+}
+
+export async function listTourCategoryRecordPage(
+  resourceInput: string,
+  searchParams: URLSearchParams,
+  headers: Headers
+) {
+  return listTourCategoryRecordsInternal(resourceInput, searchParams, headers, true) as Promise<
+    PaginatedRecordsResponse
+  >;
 }
 
 export async function createTourCategoryRecord(

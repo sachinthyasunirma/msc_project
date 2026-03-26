@@ -24,9 +24,17 @@ export type CompanySettingsResponse = {
   } | null;
 };
 
+export type TransportListPage = {
+  rows: Array<Record<string, unknown>>;
+  total: number;
+  page: number;
+  limit: number;
+};
+
 export type TransportManagementInitialData = {
   resource: TransportResourceKey;
   records: Array<Record<string, unknown>>;
+  totalRecords: number;
   catalogs: {
     locations: Array<Record<string, unknown>>;
     vehicleCategories: Array<Record<string, unknown>>;

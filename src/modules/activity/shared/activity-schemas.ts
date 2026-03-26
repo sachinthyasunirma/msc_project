@@ -11,8 +11,10 @@ export const activityResourceSchema = z.enum([
 export const activityListQuerySchema = z.object({
   q: z.string().trim().max(120).optional(),
   limit: z.coerce.number().int().min(1).max(500).default(100),
+  page: z.coerce.number().int().min(1).optional(),
   activityId: z.string().trim().min(1).optional(),
   parentActivityId: z.string().trim().min(1).optional(),
+  codesOnly: z.enum(["true", "false"]).optional().transform((value) => value === "true"),
 });
 
 const baseSchema = z.object({

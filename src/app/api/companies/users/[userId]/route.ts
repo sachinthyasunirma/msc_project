@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { db } from "@/db";
 import { companyRole, user, userCompanyRole } from "@/db/schema";
-import { withApiLogging } from "@/lib/logging/request";
+import { withApiLogging, type ApiRouteContext } from "@/lib/logging/request";
 import {
   AccessControlError,
   assignSystemRoleToUser,
@@ -45,7 +45,7 @@ async function ensureRoleIdsBelongToCompany(companyId: string, roleIds: string[]
 
 const patchHandler = withApiLogging(
   { route: "/api/companies/users/[userId]", feature: "company-users" },
-  async (request, context) => {
+  async (request: Request, context: ApiRouteContext<{ userId: string }>) => {
     try {
       const access = await resolveAccess(request.headers, {
         requiredPrivilege: "COMPANY_USERS_MANAGE",

@@ -14,4 +14,5 @@ export * from "@/db/schemas/tour-category";
 export * from "@/db/schemas/technical-visit";
 
 export * from "@/db/schemas/pre-tour";
+export * from "@/db/schemas/on-tour";
 export * from "@/db/schemas/notification";

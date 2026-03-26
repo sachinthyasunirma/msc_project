@@ -2,6 +2,7 @@ import {
   technicalVisitResourceSchema,
   type TechnicalVisitResourceKey,
 } from "@/modules/technical-visit/shared/technical-visit-schemas";
+import type { PaginatedRecordsResponse } from "@/lib/types/paginated-records";
 
 async function parseResponse<T>(response: Response): Promise<T> {
   const body = (await response.json()) as T & { message?: string };
@@ -26,6 +27,24 @@ export async function listTechnicalVisitRecords(
     cache: "no-store",
   });
   return parseResponse<Array<Record<string, unknown>>>(response);
+}
+
+export async function listTechnicalVisitRecordPage(
+  resource: TechnicalVisitResourceKey,
+  params?: { q?: string; page?: number; limit?: number; visitId?: string; visitType?: string }
+) {
+  technicalVisitResourceSchema.parse(resource);
+  const search = new URLSearchParams();
+  if (params?.q) search.set("q", params.q);
+  if (params?.page) search.set("page", String(params.page));
+  if (params?.limit) search.set("limit", String(params.limit));
+  if (params?.visitId) search.set("visitId", params.visitId);
+  if (params?.visitType) search.set("visitType", params.visitType);
+
+  const response = await fetch(`/api/technical-visits/${resource}?${search.toString()}`, {
+    cache: "no-store",
+  });
+  return parseResponse<PaginatedRecordsResponse>(response);
 }
 
 export async function createTechnicalVisitRecord(

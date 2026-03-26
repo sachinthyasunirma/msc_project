@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, ilike, or } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { db } from "@/db";
 import {
@@ -20,6 +20,41 @@ export async function GET(request: Request) {
     const access = await resolveAccess(request.headers, {
       requiredPrivilege: "SCREEN_CONFIGURATION_COMPANY",
     });
+
+    const searchParams = new URL(request.url).searchParams;
+    const lookupMode = searchParams.get("lookup") === "true";
+    const limit = Math.min(
+      Math.max(Number(searchParams.get("limit") ?? "100") || 100, 1),
+      100
+    );
+    const q = searchParams.get("q")?.trim();
+
+    if (lookupMode) {
+      const users = await db
+        .select({
+          id: user.id,
+          name: user.name,
+          email: user.email,
+          isActive: user.isActive,
+          createdAt: user.createdAt,
+        })
+        .from(user)
+        .where(
+          and(
+            eq(user.companyId, access.companyId),
+            q
+              ? or(
+                  ilike(user.name, `%${q}%`),
+                  ilike(user.email, `%${q}%`)
+                )
+              : undefined
+          )
+        )
+        .orderBy(user.createdAt)
+        .limit(limit);
+
+      return NextResponse.json({ users });
+    }
 
     await ensureCompanyDefaultRoles(access.companyId);
 

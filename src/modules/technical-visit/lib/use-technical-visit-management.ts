@@ -21,6 +21,7 @@ import {
 import {
   createTechnicalVisitRecord,
   deleteTechnicalVisitRecord,
+  listTechnicalVisitRecordPage,
   listTechnicalVisitRecords,
   updateTechnicalVisitRecord,
 } from "@/modules/technical-visit/lib/technical-visit-api";
@@ -51,6 +52,8 @@ type UseTechnicalVisitManagementOptions = {
 
 const EMPTY_ROWS: Row[] = [];
 const EMPTY_HOTELS: TechnicalVisitLookupHotel[] = [];
+const DEFAULT_PAGE_SIZE = 25;
+const LOOKUP_LIMIT = 100;
 
 function defaultValue(field: Field) {
   if (field.defaultValue !== undefined) return field.defaultValue;
@@ -85,7 +88,7 @@ export function useTechnicalVisitManagement({
   const [resource, setResource] = useState<TechnicalVisitResourceKey>(initialResource);
   const [query, setQuery] = useState("");
   const [selectedVisitId, setSelectedVisitId] = useState(initialData?.selectedVisitId ?? "");
-  const [pageSize, setPageSize] = useState(25);
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
   const [page, setPage] = useState(1);
   const [dialog, setDialog] = useState<{
     open: boolean;
@@ -115,16 +118,19 @@ export function useTechnicalVisitManagement({
       buildTechnicalVisitRecordsParams({
         resource,
         q: query || undefined,
-        limit: 500,
+        page,
+        limit: pageSize,
         visitId: resource === "technical-visits" ? undefined : selectedVisitId || undefined,
       }),
-    [query, resource, selectedVisitId]
+    [page, pageSize, query, resource, selectedVisitId]
   );
 
   const isDefaultRecordsQuery =
     resource === initialResource &&
     query.length === 0 &&
-    selectedVisitId === (initialData?.selectedVisitId ?? "");
+    selectedVisitId === (initialData?.selectedVisitId ?? "") &&
+    page === 1 &&
+    pageSize === DEFAULT_PAGE_SIZE;
 
   const {
     data: lookupsData,
@@ -143,20 +149,20 @@ export function useTechnicalVisitManagement({
         organizations,
         users,
       ] = await Promise.all([
-        listTechnicalVisitRecords("technical-visits", { limit: 500 }),
-        listGuideRecords("guides", { limit: 300 }),
-        listActivityRecords("activities", { limit: 300 }),
-        listTransportRecords("vehicle-types", { limit: 300 }),
-        listHotels(new URLSearchParams({ limit: "200" })),
-        listBusinessNetworkRecords("organizations", { limit: 400 }),
-        listCompanyUsersLookup(),
+        listTechnicalVisitRecords("technical-visits", { limit: LOOKUP_LIMIT }),
+        listGuideRecords("guides", { limit: LOOKUP_LIMIT }),
+        listActivityRecords("activities", { limit: LOOKUP_LIMIT }),
+        listTransportRecords("vehicle-types", { limit: LOOKUP_LIMIT }),
+        listHotels(new URLSearchParams({ limit: String(LOOKUP_LIMIT) })),
+        listBusinessNetworkRecords("organizations", { limit: LOOKUP_LIMIT }),
+        listCompanyUsersLookup({ limit: LOOKUP_LIMIT }),
       ]);
 
       return {
         visits,
         guides,
         activities,
-        vehicleTypes,
+        vehicleTypes: vehicleTypes.rows,
         hotels: hotelResponse.items.map((item) => ({
           id: item.id,
           code: item.code,
@@ -170,10 +176,11 @@ export function useTechnicalVisitManagement({
       };
     },
     initialData: lookupsInitialData,
+    staleTime: 5 * 60 * 1000,
   });
 
   const {
-    data: rows = EMPTY_ROWS,
+    data: rowsPage,
     error: recordsError,
     isFetching: recordsLoading,
     refetch: refetchRecords,
@@ -181,11 +188,19 @@ export function useTechnicalVisitManagement({
     queryKey: technicalVisitKeys.records({
       resource,
       q: recordsInput.q,
+      page: recordsInput.page,
       limit: recordsInput.limit,
       visitId: recordsInput.visitId,
     }),
-    queryFn: () => listTechnicalVisitRecords(resource, recordsInput),
-    initialData: isDefaultRecordsQuery ? initialData?.rows ?? undefined : undefined,
+    queryFn: () => listTechnicalVisitRecordPage(resource, recordsInput),
+    initialData: isDefaultRecordsQuery
+      ? {
+          rows: initialData?.rows ?? EMPTY_ROWS,
+          total: initialData?.totalRows ?? 0,
+          page: 1,
+          limit: DEFAULT_PAGE_SIZE,
+        }
+      : undefined,
     placeholderData: keepPreviousData,
     enabled: resource === "technical-visits" || Boolean(selectedVisitId),
   });
@@ -217,6 +232,8 @@ export function useTechnicalVisitManagement({
   const hotels = lookupsData?.hotels ?? EMPTY_HOTELS;
   const restaurants = lookupsData?.restaurants ?? EMPTY_ROWS;
   const users = lookupsData?.users ?? EMPTY_ROWS;
+  const rows = rowsPage?.rows ?? EMPTY_ROWS;
+  const totalRows = rowsPage?.total ?? 0;
   const loading = lookupsLoading || recordsLoading;
   const saving = createMutation.isPending || updateMutation.isPending || deleteMutation.isPending;
 
@@ -397,18 +414,28 @@ export function useTechnicalVisitManagement({
     }
   }, [resource, selectedVisitId, visitOptions]);
 
-  const visibleRows = useMemo(() => {
-    const from = (page - 1) * pageSize;
-    return rows.slice(from, from + pageSize);
-  }, [page, pageSize, rows]);
+  const totalPages = useMemo(() => Math.max(1, Math.ceil(totalRows / pageSize)), [pageSize, totalRows]);
+  const visibleRows = rows;
+
+  useEffect(() => {
+    if (page > totalPages) {
+      setPage(totalPages);
+    }
+  }, [page, totalPages]);
 
   const refreshAll = useCallback(async () => {
-    await Promise.all([
-      queryClient.invalidateQueries({ queryKey: technicalVisitKeys.lookups() }),
-      queryClient.invalidateQueries({ queryKey: technicalVisitKeys.recordsRoot() }),
-    ]);
-    await Promise.all([refetchLookups(), refetchRecords()]);
-  }, [queryClient, refetchLookups, refetchRecords]);
+    await queryClient.invalidateQueries({
+      queryKey: technicalVisitKeys.recordsByResource(resource),
+    });
+
+    if (resource === "technical-visits") {
+      await queryClient.invalidateQueries({ queryKey: technicalVisitKeys.lookups() });
+      await Promise.all([refetchLookups(), refetchRecords()]);
+      return;
+    }
+
+    await refetchRecords();
+  }, [queryClient, refetchLookups, refetchRecords, resource]);
 
   const openDialog = useCallback(
     (mode: "create" | "edit", row?: Row) => {
@@ -527,6 +554,7 @@ export function useTechnicalVisitManagement({
     page,
     pageSize,
     rows,
+    totalRows,
     refreshAll,
     referenceOptions,
     resource,

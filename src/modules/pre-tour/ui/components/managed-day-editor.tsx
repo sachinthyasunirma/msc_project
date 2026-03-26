@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { memo, useMemo, useState } from "react";
 import { CopyPlus, GripVertical, PanelLeftOpen, Plus, Settings2, Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -14,7 +14,7 @@ type ManagedDayEditorProps = {
   query: string;
   isReadOnly: boolean;
   addonsByItemId: Map<string, Row[]>;
-  lookupLabel: (id: unknown) => string;
+  routeSummary?: string;
   onAddItem: (day: Row) => void;
   onEditDay: (day: Row) => void;
   onViewItem: (day: Row, item: Row) => void;
@@ -26,13 +26,13 @@ type ManagedDayEditorProps = {
   onMoveItemWithinDay: (dayId: string, dragItemId: string, targetItemId: string) => void;
 };
 
-export function ManagedDayEditor({
+function ManagedDayEditorComponent({
   selectedDay,
   selectedDayItems,
   query,
   isReadOnly,
   addonsByItemId,
-  lookupLabel,
+  routeSummary,
   onAddItem,
   onEditDay,
   onViewItem,
@@ -78,8 +78,7 @@ export function ManagedDayEditor({
               <span className="text-sm font-semibold">{String(selectedDay.title || "Untitled Day")}</span>
             </div>
             <CardDescription className="text-xs">
-              {formatDate(selectedDay.date)} • {lookupLabel(selectedDay.startLocationId)} →{" "}
-              {lookupLabel(selectedDay.endLocationId)}
+              {formatDate(selectedDay.date)} • {routeSummary?.trim() || "Transport route not yet planned"}
             </CardDescription>
           </div>
           <div className="flex items-center gap-1">
@@ -218,3 +217,5 @@ export function ManagedDayEditor({
     </Card>
   );
 }
+
+export const ManagedDayEditor = memo(ManagedDayEditorComponent);

@@ -33,5 +33,5 @@ const getHandler = withApiLogging(
 );
 
 export async function GET(request: Request) {
-  return getHandler(request, {});
+  return getHandler(request);
 }

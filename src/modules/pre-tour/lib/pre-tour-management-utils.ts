@@ -77,6 +77,27 @@ export function parseFieldValue(field: Field, value: unknown) {
   return value;
 }
 
+export function validateRequiredFieldValue(field: Field, value: unknown) {
+  if (!field.required) return;
+
+  if (field.type === "boolean") return;
+
+  if (field.type === "number") {
+    if (value === "" || value === null || value === undefined) {
+      throw new Error(`${field.label} is required.`);
+    }
+    return;
+  }
+
+  if (value === "" || value === null || value === undefined) {
+    throw new Error(`${field.label} is required.`);
+  }
+
+  if (typeof value === "string" && value.trim().length === 0) {
+    throw new Error(`${field.label} is required.`);
+  }
+}
+
 export function addDays(baseIso: string, count: number) {
   const base = new Date(baseIso);
   if (Number.isNaN(base.getTime())) return new Date();

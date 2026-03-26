@@ -16,6 +16,7 @@ import {
 import {
   createTourCategoryRecord,
   deleteTourCategoryRecord,
+  listTourCategoryRecordPage,
   listTourCategoryRecords,
   updateTourCategoryRecord,
 } from "@/modules/tour-category/lib/tour-category-api";
@@ -39,6 +40,8 @@ type UseTourCategoryManagementOptions = {
 };
 
 const EMPTY_ROWS: Array<Record<string, unknown>> = [];
+const DEFAULT_PAGE_SIZE = 25;
+const LOOKUP_LIMIT = 100;
 
 function defaultValue(field: Field) {
   if (field.defaultValue !== undefined) return field.defaultValue;
@@ -61,7 +64,7 @@ export function useTourCategoryManagement({
   const queryClient = useQueryClient();
   const [resource, setResource] = useState<TourCategoryResourceKey>(initialResource);
   const [query, setQuery] = useState("");
-  const [pageSize, setPageSize] = useState(25);
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
   const [currentPage, setCurrentPage] = useState(1);
   const [dialog, setDialog] = useState<{
     open: boolean;
@@ -86,12 +89,17 @@ export function useTourCategoryManagement({
       buildTourCategoryRecordsParams({
         resource,
         q: query || undefined,
-        limit: 500,
+        page: currentPage,
+        limit: pageSize,
       }),
-    [query, resource]
+    [currentPage, pageSize, query, resource]
   );
 
-  const isDefaultRecordsQuery = resource === initialResource && query.length === 0;
+  const isDefaultRecordsQuery =
+    resource === initialResource &&
+    query.length === 0 &&
+    currentPage === 1 &&
+    pageSize === DEFAULT_PAGE_SIZE;
 
   const {
     data: lookupsData,
@@ -102,16 +110,17 @@ export function useTourCategoryManagement({
     queryKey: tourCategoryKeys.lookups(),
     queryFn: async () => {
       const [types, categories] = await Promise.all([
-        listTourCategoryRecords("tour-category-types", { limit: 500 }),
-        listTourCategoryRecords("tour-categories", { limit: 500 }),
+        listTourCategoryRecords("tour-category-types", { limit: LOOKUP_LIMIT }),
+        listTourCategoryRecords("tour-categories", { limit: LOOKUP_LIMIT }),
       ]);
       return { types, categories };
     },
     initialData: lookupsInitialData,
+    staleTime: 5 * 60 * 1000,
   });
 
   const {
-    data: records = EMPTY_ROWS,
+    data: recordsPage,
     error: recordsError,
     isFetching: recordsLoading,
     refetch: refetchRecords,
@@ -119,10 +128,18 @@ export function useTourCategoryManagement({
     queryKey: tourCategoryKeys.records({
       resource,
       q: recordsInput.q,
+      page: recordsInput.page,
       limit: recordsInput.limit,
     }),
-    queryFn: () => listTourCategoryRecords(resource, recordsInput),
-    initialData: isDefaultRecordsQuery ? initialData?.records ?? undefined : undefined,
+    queryFn: () => listTourCategoryRecordPage(resource, recordsInput),
+    initialData: isDefaultRecordsQuery
+      ? {
+          rows: initialData?.records ?? EMPTY_ROWS,
+          total: initialData?.totalRecords ?? 0,
+          page: 1,
+          limit: DEFAULT_PAGE_SIZE,
+        }
+      : undefined,
     placeholderData: keepPreviousData,
   });
 
@@ -148,6 +165,8 @@ export function useTourCategoryManagement({
 
   const types = lookupsData?.types ?? EMPTY_ROWS;
   const categories = lookupsData?.categories ?? EMPTY_ROWS;
+  const records = recordsPage?.rows ?? EMPTY_ROWS;
+  const totalRecords = recordsPage?.total ?? 0;
   const loading = lookupsLoading || recordsLoading;
   const saving =
     createMutation.isPending || updateMutation.isPending || deleteMutation.isPending;
@@ -257,14 +276,11 @@ export function useTourCategoryManagement({
   }, [categories, dialog.row, selectedCategoryTypeId]);
 
   const totalPages = useMemo(
-    () => Math.max(1, Math.ceil(records.length / pageSize)),
-    [pageSize, records.length]
+    () => Math.max(1, Math.ceil(totalRecords / pageSize)),
+    [pageSize, totalRecords]
   );
 
-  const pagedRecords = useMemo(() => {
-    const start = (currentPage - 1) * pageSize;
-    return records.slice(start, start + pageSize);
-  }, [currentPage, pageSize, records]);
+  const pagedRecords = records;
 
   useEffect(() => {
     setCurrentPage(1);
@@ -275,12 +291,18 @@ export function useTourCategoryManagement({
   }, [currentPage, totalPages]);
 
   const refreshAll = useCallback(async () => {
-    await Promise.all([
-      queryClient.invalidateQueries({ queryKey: tourCategoryKeys.lookups() }),
-      queryClient.invalidateQueries({ queryKey: tourCategoryKeys.recordsRoot() }),
-    ]);
-    await Promise.all([refetchLookups(), refetchRecords()]);
-  }, [queryClient, refetchLookups, refetchRecords]);
+    await queryClient.invalidateQueries({
+      queryKey: tourCategoryKeys.recordsByResource(resource),
+    });
+
+    if (resource === "tour-category-types" || resource === "tour-categories") {
+      await queryClient.invalidateQueries({ queryKey: tourCategoryKeys.lookups() });
+      await Promise.all([refetchLookups(), refetchRecords()]);
+      return;
+    }
+
+    await refetchRecords();
+  }, [queryClient, refetchLookups, refetchRecords, resource]);
 
   const openDialog = useCallback(
     (mode: "create" | "edit", row?: Record<string, unknown>) => {
@@ -417,6 +439,7 @@ export function useTourCategoryManagement({
     parentCategoryOptions,
     query,
     records,
+    totalRecords,
     refreshAll,
     resource,
     saving,

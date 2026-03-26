@@ -272,7 +272,7 @@ export type HotelFeeRuleRecord = {
   feeType: HotelFeeType | string;
   guestType?: HotelGuestType | string | null;
   chargeBasis: HotelFeeChargeBasis | string;
-  amountType?: "FIXED" | "PERCENT";
+  amountType?: HotelAdjustmentAmountType | string;
   amount: string;
   currencyCode: string | null;
   taxMode?: HotelTaxMode | string;

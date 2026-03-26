@@ -621,7 +621,7 @@ const MATCHERS: HelpMatcher[] = [
         {
           field: "Structural Requirement Flags",
           instruction:
-            "Use require/allow flags to define mandatory components by tour type (hotel/transport/itinerary/activity/ceremony).",
+            "Use require/allow flags to define mandatory components by tour type (hotel/transport/day-plan/activity/ceremony).",
         },
       ],
       checklist: commonChecklist,

@@ -5,12 +5,7 @@ import { createUuid } from "@/lib/runtime/uuid";
 function withCorrelationHeaders(request: NextRequest) {
   const requestId = request.headers.get("x-request-id")?.trim() || createUuid();
   const traceId = request.headers.get("x-trace-id")?.trim() || requestId;
-
-  const requestHeaders = new Headers(request.headers);
-  requestHeaders.set("x-request-id", requestId);
-  requestHeaders.set("x-trace-id", traceId);
-
-  const response = NextResponse.next({ request: { headers: requestHeaders } });
+  const response = NextResponse.next();
   response.headers.set("x-request-id", requestId);
   response.headers.set("x-trace-id", traceId);
   return response;

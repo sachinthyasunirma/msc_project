@@ -96,6 +96,12 @@ export const preTourPlan = pgTable(
     index("idx_pre_tour_plan_status").on(table.status),
     index("idx_pre_tour_plan_deleted_at").on(table.deletedAt),
     index("idx_pre_tour_plan_date_range").on(table.startDate, table.endDate),
+    index("idx_pre_tour_plan_company_deleted_created").on(
+      table.companyId,
+      table.deletedAt,
+      table.createdAt,
+      table.id
+    ),
   ]
 );
 
@@ -126,6 +132,11 @@ export const preTourPlanBin = pgTable(
     unique("uq_pre_tour_plan_bin_plan").on(table.planId),
     index("idx_pre_tour_plan_bin_company").on(table.companyId),
     index("idx_pre_tour_plan_bin_deleted_at").on(table.deletedAt),
+    index("idx_pre_tour_plan_bin_company_deleted").on(
+      table.companyId,
+      table.deletedAt,
+      table.id
+    ),
   ]
 );
 
@@ -257,6 +268,11 @@ export const preTourPlanItemAddon = pgTable(
     index("idx_pre_tour_plan_item_addon_company").on(table.companyId),
     index("idx_pre_tour_plan_item_addon_plan").on(table.planId),
     index("idx_pre_tour_plan_item_addon_item").on(table.planItemId),
+    index("idx_pre_tour_plan_item_addon_company_plan_created").on(
+      table.companyId,
+      table.planId,
+      table.createdAt
+    ),
   ]
 );
 

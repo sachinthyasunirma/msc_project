@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import {
   createBusinessNetworkRecord,
+  listBusinessNetworkRecordPage,
   listBusinessNetworkRecords,
   toBusinessNetworkErrorResponse,
 } from "@/modules/business-network/server/business-network-service";
@@ -12,7 +13,9 @@ export async function GET(
   try {
     const params = await context.params;
     const searchParams = new URL(request.url).searchParams;
-    const records = await listBusinessNetworkRecords(params.resource, searchParams, request.headers);
+    const records = searchParams.has("page")
+      ? await listBusinessNetworkRecordPage(params.resource, searchParams, request.headers)
+      : await listBusinessNetworkRecords(params.resource, searchParams, request.headers);
     return NextResponse.json(records);
   } catch (error) {
     const normalized = toBusinessNetworkErrorResponse(error);

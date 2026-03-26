@@ -1,15 +1,21 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import dynamic from "next/dynamic";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { ArrowLeft, MapPinned, RefreshCw } from "lucide-react";
 import { notify } from "@/lib/notify";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { LoadingState } from "@/components/ui/loading-state";
 import {
   createPreTourRecord,
   deletePreTourRecord,
+  generatePreTourCosting,
+  getPreTourRecord,
+  listAllPreTourRecords,
   listPreTourRecords,
   updatePreTourRecord,
 } from "@/modules/pre-tour/lib/pre-tour-api";
@@ -19,34 +25,116 @@ import {
   getCoordinatesFromGeo,
   matchesQuery,
   parseFieldValue,
-  sanitizeCodePart,
-  toIsoDateTime,
+  validateRequiredFieldValue,
   toLocalDateTime,
   toNightCount,
-  toNumericValue,
 } from "@/modules/pre-tour/lib/pre-tour-management-utils";
 import type { PreTourMastersData } from "@/modules/pre-tour/shared/pre-tour-master-types";
 import type { DetailSheetState, PreTourResourceKey, Row } from "@/modules/pre-tour/shared/pre-tour-management-types";
-import { ManagedDayEditor } from "@/modules/pre-tour/ui/components/managed-day-editor";
-import { PreTourCopyDialogController } from "@/modules/pre-tour/ui/components/pre-tour-copy-dialog-controller";
-import { PreTourDayWorkspace } from "@/modules/pre-tour/ui/components/pre-tour-day-workspace";
-import { PreTourDetailSheet } from "@/modules/pre-tour/ui/components/pre-tour-detail-sheet";
-import { PreTourGuideAllocationDialog } from "@/modules/pre-tour/ui/components/pre-tour-guide-allocation-dialog";
-import { PreTourItemAllocationDialog } from "@/modules/pre-tour/ui/components/pre-tour-item-allocation-dialog";
-import { PreTourRecordDialog } from "@/modules/pre-tour/ui/components/pre-tour-record-dialog";
-import { PreTourRouteMapDialogController } from "@/modules/pre-tour/ui/components/pre-tour-route-map-dialog-controller";
-import { SectionTable } from "@/modules/pre-tour/ui/components/pre-tour-section-table";
-import { PreTourShareDialogController } from "@/modules/pre-tour/ui/components/pre-tour-share-dialog-controller";
 import { usePreTourAccess } from "@/modules/pre-tour/ui/hooks/use-pre-tour-access";
 import { usePreTourDayInitialization } from "@/modules/pre-tour/ui/hooks/use-pre-tour-day-initialization";
 import { usePreTourMasters } from "@/modules/pre-tour/ui/hooks/use-pre-tour-masters";
 import { usePreTourPlanOperations } from "@/modules/pre-tour/ui/hooks/use-pre-tour-plan-operations";
+import { convertPreTourToOnTour } from "@/modules/on-tour/lib/on-tour-api";
 import {
-  EMPTY_DAY_TRANSPORT_FORM,
   getPreTourFields,
   getVisiblePreTourFields,
-  type DayTransportForm,
 } from "@/modules/pre-tour/ui/lib/pre-tour-form-config";
+
+const ManagedDayEditor = dynamic(
+  () =>
+    import("@/modules/pre-tour/ui/components/managed-day-editor").then(
+      (module) => module.ManagedDayEditor
+    ),
+  {
+    loading: () => (
+      <LoadingState
+        title="Loading day editor"
+        description="Preparing item sequencing, addon tools, and day-level actions."
+      />
+    ),
+  }
+);
+const PreTourDayWorkspace = dynamic(
+  () =>
+    import("@/modules/pre-tour/ui/components/pre-tour-day-workspace").then(
+      (module) => module.PreTourDayWorkspace
+    ),
+  {
+    loading: () => (
+      <LoadingState
+        title="Loading day planner"
+        description="Preparing day summaries, routing hints, and quick item actions."
+      />
+    ),
+  }
+);
+const SectionTable = dynamic(
+  () =>
+    import("@/modules/pre-tour/ui/components/pre-tour-section-table").then(
+      (module) => module.SectionTable
+    ),
+  {
+    loading: () => (
+      <LoadingState
+        compact
+        size="sm"
+        title="Loading section table"
+        description="Preparing linked planning records."
+      />
+    ),
+  }
+);
+
+const PreTourCopyDialogController = dynamic(
+  () =>
+    import("@/modules/pre-tour/ui/components/pre-tour-copy-dialog-controller").then(
+      (module) => module.PreTourCopyDialogController
+    ),
+  { ssr: false }
+);
+const PreTourDetailSheet = dynamic(
+  () =>
+    import("@/modules/pre-tour/ui/components/pre-tour-detail-sheet").then(
+      (module) => module.PreTourDetailSheet
+    ),
+  { ssr: false }
+);
+const PreTourGuideAllocationDialog = dynamic(
+  () =>
+    import("@/modules/pre-tour/ui/components/pre-tour-guide-allocation-dialog").then(
+      (module) => module.PreTourGuideAllocationDialog
+    ),
+  { ssr: false }
+);
+const PreTourItemAllocationDialog = dynamic(
+  () =>
+    import("@/modules/pre-tour/ui/components/pre-tour-item-allocation-dialog").then(
+      (module) => module.PreTourItemAllocationDialog
+    ),
+  { ssr: false }
+);
+const PreTourRecordDialog = dynamic(
+  () =>
+    import("@/modules/pre-tour/ui/components/pre-tour-record-dialog").then(
+      (module) => module.PreTourRecordDialog
+    ),
+  { ssr: false }
+);
+const PreTourRouteMapDialogController = dynamic(
+  () =>
+    import("@/modules/pre-tour/ui/components/pre-tour-route-map-dialog-controller").then(
+      (module) => module.PreTourRouteMapDialogController
+    ),
+  { ssr: false }
+);
+const PreTourShareDialogController = dynamic(
+  () =>
+    import("@/modules/pre-tour/ui/components/pre-tour-share-dialog-controller").then(
+      (module) => module.PreTourShareDialogController
+    ),
+  { ssr: false }
+);
 
 type PreTourPlanManageViewProps = {
   planId: string;
@@ -62,13 +150,57 @@ function isMissingGuideAllocationTableError(error: unknown) {
   );
 }
 
+function extractTransportLocationSequence(items: Row[]) {
+  return items
+    .flatMap((item) => [item.fromLocationId, item.toLocationId])
+    .filter(Boolean)
+    .map((value) => String(value))
+    .filter((value, index, entries) => index === 0 || value !== entries[index - 1]);
+}
+
+const TRANSPORT_CHARGE_METHODS = new Set([
+  "PER_TRANSFER",
+  "PER_VEHICLE",
+  "PER_PAX",
+  "PER_HOUR",
+  "PER_DAY",
+  "PER_KM",
+  "SLAB",
+]);
+
+function readTransportChargeMethodDefault(row: Row | null | undefined) {
+  const pricingPolicy =
+    row?.pricingPolicy && typeof row.pricingPolicy === "object" && !Array.isArray(row.pricingPolicy)
+      ? (row.pricingPolicy as Record<string, unknown>)
+      : null;
+  const value = String(pricingPolicy?.transportChargeMethodDefault || "").toUpperCase();
+  return TRANSPORT_CHARGE_METHODS.has(value) ? value : "PER_KM";
+}
+
+function applyTransportChargeMethodDefaultToPricingPolicy(payload: Record<string, unknown>) {
+  const value = String(payload.transportChargeMethodDefault || "").toUpperCase();
+  delete payload.transportChargeMethodDefault;
+  const currentPricingPolicy =
+    payload.pricingPolicy && typeof payload.pricingPolicy === "object" && !Array.isArray(payload.pricingPolicy)
+      ? (payload.pricingPolicy as Record<string, unknown>)
+      : {};
+  payload.pricingPolicy = {
+    ...currentPricingPolicy,
+    transportChargeMethodDefault: TRANSPORT_CHARGE_METHODS.has(value) ? value : "PER_KM",
+  };
+}
+
+const INITIAL_PRE_TOUR_PAGE_SIZE = 100;
+
 export function PreTourPlanManageView({
   planId,
   initialMasters = null,
 }: PreTourPlanManageViewProps) {
+  const router = useRouter();
   const { isReadOnly, isAdmin, canViewRouteMap, canViewCosting } = usePreTourAccess();
   const {
     locations,
+    vehicleCategories,
     vehicleTypes,
     activities,
     guides,
@@ -81,18 +213,29 @@ export function PreTourPlanManageView({
     hotels,
     tourCategoryRules,
     companyBaseCurrencyCode,
+    transportRateBasis,
   } = usePreTourMasters({ initialData: initialMasters });
 
   const [query, setQuery] = useState("");
+  const deferredQuery = useDeferredValue(query);
   const [loading, setLoading] = useState(true);
+  const [supplementalLoading, setSupplementalLoading] = useState(true);
+  const [dayDataLoading, setDayDataLoading] = useState(true);
+  const [routeDataLoading, setRouteDataLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [generatingCosting, setGeneratingCosting] = useState(false);
+  const [convertingToOnTour, setConvertingToOnTour] = useState(false);
+  const [recordsVersion, setRecordsVersion] = useState(0);
   const [plans, setPlans] = useState<Row[]>([]);
   const [days, setDays] = useState<Row[]>([]);
+  const [daysHasMore, setDaysHasMore] = useState(false);
   const [items, setItems] = useState<Row[]>([]);
   const [guideAllocations, setGuideAllocations] = useState<Row[]>([]);
   const [addons, setAddons] = useState<Row[]>([]);
   const [totals, setTotals] = useState<Row[]>([]);
   const [planTechnicalVisits, setPlanTechnicalVisits] = useState<Row[]>([]);
+  const [routeTransportItems, setRouteTransportItems] = useState<Row[]>([]);
+  const [routeTransportLoaded, setRouteTransportLoaded] = useState(false);
   const [selectedDayId, setSelectedDayId] = useState("");
   const [selectedItemId, setSelectedItemId] = useState("");
   const [mapDialogOpen, setMapDialogOpen] = useState(false);
@@ -113,43 +256,96 @@ export function PreTourPlanManageView({
     resource: PreTourResourceKey;
     row: Row | null;
   }>({ open: false, mode: "create", resource: "pre-tour-days", row: null });
+  const loadRequestIdRef = useRef(0);
+  const dayDataRequestIdRef = useRef(0);
+  const routeDataRequestIdRef = useRef(0);
 
   const loadData = useCallback(async () => {
+    const requestId = ++loadRequestIdRef.current;
     setLoading(true);
+    setSupplementalLoading(true);
+    setDayDataLoading(true);
     try {
-      const planRows = await listPreTourRecords("pre-tours", { limit: 400 });
-      setPlans(planRows);
+      setItems([]);
+      setAddons([]);
+      setGuideAllocations([]);
+      setTotals([]);
+      setPlanTechnicalVisits([]);
+      setRouteTransportItems([]);
+      setRouteTransportLoaded(false);
 
-      const [dayRows, itemRows, guideAllocationRows, addonRows, totalRows, technicalVisitRows] = await Promise.all([
-        listPreTourRecords("pre-tour-days", { limit: 500, planId }),
-        listPreTourRecords("pre-tour-items", { limit: 500, planId }),
-        listPreTourRecords("pre-tour-guide-allocations", { limit: 200, planId }).catch((error) => {
-          if (!isMissingGuideAllocationTableError(error)) throw error;
-          if (!guideAllocationUnavailableNotifiedRef.current) {
-            guideAllocationUnavailableNotifiedRef.current = true;
-            notify.warning(
-              "Guide allocations are disabled until the pre_tour_plan_guide_allocation table is created."
-            );
-          }
-          return [] as Row[];
+      const [planRecord, dayRows] = await Promise.all([
+        getPreTourRecord("pre-tours", planId),
+        listPreTourRecords("pre-tour-days", {
+          limit: INITIAL_PRE_TOUR_PAGE_SIZE,
+          planId,
         }),
-        listPreTourRecords("pre-tour-item-addons", { limit: 500, planId }),
-        canViewCosting
-          ? listPreTourRecords("pre-tour-totals", { limit: 500, planId })
-          : Promise.resolve([] as Row[]),
-        listPreTourRecords("pre-tour-technical-visits", { limit: 500, planId }),
       ]);
 
+      if (loadRequestIdRef.current !== requestId) return;
+
+      setPlans([planRecord]);
       setDays(dayRows);
-      setItems(itemRows);
-      setGuideAllocations(guideAllocationRows);
-      setAddons(addonRows);
-      setTotals(totalRows);
-      setPlanTechnicalVisits(technicalVisitRows);
-    } catch (error) {
-      notify.error(error instanceof Error ? error.message : "Failed to load records.");
-    } finally {
+      setDaysHasMore(dayRows.length === INITIAL_PRE_TOUR_PAGE_SIZE);
+      setRecordsVersion((value) => value + 1);
       setLoading(false);
+
+      void (async () => {
+        try {
+          const [guideAllocationRows, totalRows, technicalVisitRows] = await Promise.all([
+            listPreTourRecords("pre-tour-guide-allocations", {
+              limit: INITIAL_PRE_TOUR_PAGE_SIZE,
+              planId,
+            }).catch(
+              (error) => {
+                if (!isMissingGuideAllocationTableError(error)) throw error;
+                if (!guideAllocationUnavailableNotifiedRef.current) {
+                  guideAllocationUnavailableNotifiedRef.current = true;
+                  notify.warning(
+                    "Guide allocations are disabled until the pre_tour_plan_guide_allocation table is created."
+                  );
+                }
+                return [] as Row[];
+              }
+            ),
+            canViewCosting
+              ? listPreTourRecords("pre-tour-totals", {
+                  limit: INITIAL_PRE_TOUR_PAGE_SIZE,
+                  planId,
+                })
+              : Promise.resolve([] as Row[]),
+            listPreTourRecords("pre-tour-technical-visits", {
+              limit: INITIAL_PRE_TOUR_PAGE_SIZE,
+              planId,
+            }),
+          ]);
+
+          if (loadRequestIdRef.current !== requestId) return;
+
+          setGuideAllocations(guideAllocationRows);
+          setTotals(totalRows);
+          setPlanTechnicalVisits(technicalVisitRows);
+        } catch (error) {
+          if (loadRequestIdRef.current !== requestId) return;
+          notify.error(
+            error instanceof Error
+              ? error.message
+              : "Failed to load supplemental pre-tour sections."
+          );
+        } finally {
+          if (loadRequestIdRef.current === requestId) {
+            setSupplementalLoading(false);
+          }
+        }
+      })();
+    } catch (error) {
+      if (loadRequestIdRef.current === requestId) {
+        notify.error(error instanceof Error ? error.message : "Failed to load records.");
+      }
+    } finally {
+      if (loadRequestIdRef.current === requestId) {
+        setLoading(false);
+      }
     }
   }, [canViewCosting, planId]);
 
@@ -157,14 +353,94 @@ export function PreTourPlanManageView({
     void loadData();
   }, [loadData]);
 
+  const loadMoreDays = useCallback(async () => {
+    if (!daysHasMore || loading) return;
+    try {
+      const nextRows = await listPreTourRecords("pre-tour-days", {
+        planId,
+        limit: INITIAL_PRE_TOUR_PAGE_SIZE,
+        offset: days.length,
+      });
+      setDays((current) => [...current, ...nextRows]);
+      setDaysHasMore(nextRows.length === INITIAL_PRE_TOUR_PAGE_SIZE);
+    } catch (error) {
+      notify.error(error instanceof Error ? error.message : "Failed to load more days.");
+    }
+  }, [days.length, daysHasMore, loading, planId]);
+
+  useEffect(() => {
+    if (!selectedDayId) {
+      setItems([]);
+      setAddons([]);
+      setDayDataLoading(false);
+      return;
+    }
+
+    const requestId = ++dayDataRequestIdRef.current;
+    setDayDataLoading(true);
+
+    void (async () => {
+      try {
+        const [dayItems, dayAddons] = await Promise.all([
+          listAllPreTourRecords("pre-tour-items", {
+            planId,
+            dayId: selectedDayId,
+            limit: INITIAL_PRE_TOUR_PAGE_SIZE,
+          }),
+          listAllPreTourRecords("pre-tour-item-addons", {
+            planId,
+            dayId: selectedDayId,
+            limit: INITIAL_PRE_TOUR_PAGE_SIZE,
+          }),
+        ]);
+
+        if (dayDataRequestIdRef.current !== requestId) return;
+
+        setItems(dayItems);
+        setAddons(dayAddons);
+      } catch (error) {
+        if (dayDataRequestIdRef.current !== requestId) return;
+        notify.error(error instanceof Error ? error.message : "Failed to load day services.");
+      } finally {
+        if (dayDataRequestIdRef.current === requestId) {
+          setDayDataLoading(false);
+        }
+      }
+    })();
+  }, [planId, recordsVersion, selectedDayId]);
+
+  const loadRouteTransportData = useCallback(async () => {
+    const requestId = ++routeDataRequestIdRef.current;
+    setRouteDataLoading(true);
+
+    try {
+      const nextRouteItems = await listAllPreTourRecords("pre-tour-items", {
+        planId,
+        itemType: "TRANSPORT",
+        limit: INITIAL_PRE_TOUR_PAGE_SIZE,
+      });
+
+      if (routeDataRequestIdRef.current !== requestId) return;
+
+      setRouteTransportItems(nextRouteItems);
+      setRouteTransportLoaded(true);
+    } catch (error) {
+      if (routeDataRequestIdRef.current !== requestId) return;
+      notify.error(error instanceof Error ? error.message : "Failed to load plan route data.");
+    } finally {
+      if (routeDataRequestIdRef.current === requestId) {
+        setRouteTransportLoaded(true);
+        setRouteDataLoading(false);
+      }
+    }
+  }, [planId]);
+
   const selectedPlan = useMemo(
     () => plans.find((row) => String(row.id) === planId) ?? null,
     [planId, plans]
   );
 
   const { clonePlanChildren, createVersionFromPlan } = usePreTourPlanOperations({
-    canViewCosting,
-    companyBaseCurrencyCode,
     onSuccess: loadData,
   });
 
@@ -192,14 +468,9 @@ export function PreTourPlanManageView({
     }
   }, [selectedDayId, sortedDays]);
 
-  const nonTransportItems = useMemo(
+  const selectedDayItems = useMemo(
     () => items.filter((item) => String(item.itemType || "").toUpperCase() !== "TRANSPORT"),
     [items]
-  );
-
-  const selectedDayItems = useMemo(
-    () => nonTransportItems.filter((item) => String(item.dayId) === selectedDayId),
-    [nonTransportItems, selectedDayId]
   );
 
   useEffect(() => {
@@ -212,28 +483,13 @@ export function PreTourPlanManageView({
     }
   }, [selectedDayItems, selectedItemId]);
 
-  const transportItemsByDayId = useMemo(() => {
-    const map = new Map<string, Row[]>();
-    items.forEach((item) => {
-      if (String(item.itemType || "").toUpperCase() !== "TRANSPORT") return;
-      const dayKey = String(item.dayId || "");
-      if (!dayKey) return;
-      map.set(dayKey, [...(map.get(dayKey) ?? []), item]);
-    });
-    map.forEach((rows) => rows.sort((a, b) => Number(a.sortOrder ?? 0) - Number(b.sortOrder ?? 0)));
-    return map;
-  }, [items]);
-
-  const itemsByDayId = useMemo(() => {
-    const map = new Map<string, Row[]>();
-    nonTransportItems.forEach((item) => {
-      const dayKey = String(item.dayId || "");
-      if (!dayKey) return;
-      map.set(dayKey, [...(map.get(dayKey) ?? []), item]);
-    });
-    map.forEach((rows) => rows.sort((a, b) => Number(a.sortOrder ?? 0) - Number(b.sortOrder ?? 0)));
-    return map;
-  }, [nonTransportItems]);
+  const selectedDayTransportItems = useMemo(
+    () =>
+      items
+        .filter((item) => String(item.itemType || "").toUpperCase() === "TRANSPORT")
+        .sort((a, b) => Number(a.sortOrder ?? 0) - Number(b.sortOrder ?? 0)),
+    [items]
+  );
 
   const addonsByItemId = useMemo(() => {
     const map = new Map<string, Row[]>();
@@ -251,15 +507,15 @@ export function PreTourPlanManageView({
   );
 
   const selectedManagedDayItems = useMemo(() => {
-    const baseItems = itemsByDayId.get(selectedDayId) ?? [];
-    if (!query.trim()) return baseItems;
+    const baseItems = items;
+    if (!deferredQuery.trim()) return baseItems;
     return baseItems.filter((item) => {
-      if (matchesQuery("pre-tour-items", item, query)) return true;
+      if (matchesQuery("pre-tour-items", item, deferredQuery)) return true;
       return (addonsByItemId.get(String(item.id || "")) ?? []).some((addon) =>
-        matchesQuery("pre-tour-item-addons", addon, query)
+        matchesQuery("pre-tour-item-addons", addon, deferredQuery)
       );
     });
-  }, [addonsByItemId, itemsByDayId, query, selectedDayId]);
+  }, [addonsByItemId, deferredQuery, items]);
 
   const planOptions = useMemo(
     () => plans.map((row) => ({ value: String(row.id), label: `${row.code} - ${row.title}` })),
@@ -277,16 +533,26 @@ export function PreTourPlanManageView({
     () => items.map((row) => ({ value: String(row.id), label: `${row.code} - ${row.title || row.itemType}` })),
     [items]
   );
-  const filteredItemOptions = useMemo(
-    () =>
-      itemOptions.filter((option) =>
-        items.some((row) => String(row.id) === option.value && String(row.dayId) === selectedDayId)
-      ),
-    [itemOptions, items, selectedDayId]
-  );
+  const filteredItemOptions = useMemo(() => itemOptions, [itemOptions]);
   const locationOptions = useMemo(
     () => locations.map((row) => ({ value: String(row.id), label: `${row.code} - ${row.name}` })),
     [locations]
+  );
+  const vehicleCategoryOptions = useMemo(
+    () =>
+      vehicleCategories.map((row) => ({
+        value: String(row.id),
+        label: `${row.code} - ${row.name}`,
+      })),
+    [vehicleCategories]
+  );
+  const vehicleTypeOptions = useMemo(
+    () =>
+      vehicleTypes.map((row) => ({
+        value: String(row.id),
+        label: `${row.code} - ${row.name}`,
+      })),
+    [vehicleTypes]
   );
   const serviceOptions = useMemo(
     () => [
@@ -295,10 +561,6 @@ export function PreTourPlanManageView({
       ...guides.map((row) => ({ value: String(row.id), label: `GUIDE • ${row.code} - ${row.fullName}` })),
     ],
     [activities, guides, vehicleTypes]
-  );
-  const transportVehicleOptions = useMemo(
-    () => vehicleTypes.map((row) => ({ value: String(row.id), label: `${row.code} - ${row.name}` })),
-    [vehicleTypes]
   );
   const currencyOptions = useMemo(
     () => currencies.map((row) => ({ value: String(row.code), label: `${row.code} - ${row.name}` })),
@@ -460,7 +722,10 @@ export function PreTourPlanManageView({
     const visibleFields = buildVisibleFields(dialog.resource, {});
     const nextForm: Row = {};
     visibleFields.forEach((field) => {
-      const existing = dialog.row?.[field.key];
+      const existing =
+        field.key === "transportChargeMethodDefault"
+          ? readTransportChargeMethodDefault(dialog.row)
+          : dialog.row?.[field.key];
       if (field.type === "datetime") {
         nextForm[field.key] = existing ? toLocalDateTime(existing) : "";
       } else if (field.type === "json") {
@@ -509,28 +774,6 @@ export function PreTourPlanManageView({
     tourCategoryTypeOptions,
   ]);
 
-  const dialogInitialDayTransportForm = useMemo<DayTransportForm>(() => {
-    if (dialog.resource !== "pre-tour-days") return EMPTY_DAY_TRANSPORT_FORM;
-    const currentDayId = dialog.mode === "edit" ? String(dialog.row?.id || "") : "";
-    const existingTransportItem = currentDayId
-      ? items.find(
-          (item) => String(item.dayId) === currentDayId && String(item.itemType || "").toUpperCase() === "TRANSPORT"
-        )
-      : null;
-    return {
-      enabled: Boolean(existingTransportItem),
-      serviceId: String(existingTransportItem?.serviceId || ""),
-      startAt: toLocalDateTime(existingTransportItem?.startAt),
-      endAt: toLocalDateTime(existingTransportItem?.endAt),
-      pax: existingTransportItem?.pax !== undefined && existingTransportItem?.pax !== null ? String(existingTransportItem.pax) : "",
-      baseAmount: String(existingTransportItem?.baseAmount ?? "0"),
-      taxAmount: String(existingTransportItem?.taxAmount ?? "0"),
-      totalAmount: String(existingTransportItem?.totalAmount ?? "0"),
-      status: String(existingTransportItem?.status || "PLANNED"),
-      notes: String(existingTransportItem?.notes || ""),
-    };
-  }, [dialog.mode, dialog.resource, dialog.row?.id, items]);
-
   const lookups = useMemo(() => {
     const pairs: Array<[string, string]> = [];
     [
@@ -561,13 +804,9 @@ export function PreTourPlanManageView({
     tourCategoryTypeOptions,
   ]);
 
-  const lookupLabel = useCallback((id: unknown) => {
-    if (!id || typeof id !== "string") return "-";
-    return lookups[id] ?? id;
-  }, [lookups]);
-
   const routeLocationSequenceIds = useMemo(() => {
     const orderedLocationIds: string[] = [];
+    const transportByDayId = new Map<string, Row[]>();
     const appendDayPath = (path: unknown[]) => {
       const normalized = path
         .filter(Boolean)
@@ -580,22 +819,21 @@ export function PreTourPlanManageView({
       orderedLocationIds.push(...normalized);
     };
 
+    routeTransportItems.forEach((item) => {
+      const dayId = String(item.dayId || "");
+      if (!dayId) return;
+      transportByDayId.set(dayId, [...(transportByDayId.get(dayId) ?? []), item]);
+    });
+
     sortedDays.forEach((day) => {
-      const dayTransportItems = transportItemsByDayId.get(String(day.id || "")) ?? [];
-      if (dayTransportItems.length > 0) {
-        const dayPath: unknown[] = [];
-        dayTransportItems.forEach((item) => {
-          dayPath.push(item.fromLocationId ?? day.startLocationId);
-          dayPath.push(item.toLocationId ?? day.endLocationId);
-        });
-        appendDayPath(dayPath);
-        return;
-      }
-      appendDayPath([day.startLocationId, day.endLocationId]);
+      const dayTransportItems = (transportByDayId.get(String(day.id || "")) ?? []).sort(
+        (a, b) => Number(a.sortOrder ?? 0) - Number(b.sortOrder ?? 0)
+      );
+      appendDayPath(extractTransportLocationSequence(dayTransportItems));
     });
 
     return orderedLocationIds;
-  }, [sortedDays, transportItemsByDayId]);
+  }, [routeTransportItems, sortedDays]);
 
   const locationCoordinatesById = useMemo(() => {
     const next = new Map<string, { name: string; coordinates: [number, number] }>();
@@ -634,6 +872,24 @@ export function PreTourPlanManageView({
     [locationNameById, routeLocationSequenceIds]
   );
 
+  useEffect(() => {
+    if (
+      (!mapDialogOpen && !(detailSheet.open && detailSheet.kind === "pre-tour")) ||
+      routeTransportLoaded ||
+      routeDataLoading
+    ) {
+      return;
+    }
+    void loadRouteTransportData();
+  }, [
+    detailSheet.kind,
+    detailSheet.open,
+    loadRouteTransportData,
+    mapDialogOpen,
+    routeDataLoading,
+    routeTransportLoaded,
+  ]);
+
   const detailDay = useMemo(() => {
     if (!detailSheet.open || detailSheet.kind !== "day-item") return null;
     const dayId = detailSheet.dayId || String(detailSheet.row?.dayId || "");
@@ -644,11 +900,16 @@ export function PreTourPlanManageView({
     if (!detailSheet.open) return [];
     if (detailSheet.kind === "pre-tour") return routeLocationSequenceIds;
     if (detailSheet.kind === "day-item" && detailDay) {
-      const ids = [detailDay.startLocationId, detailDay.endLocationId].filter(Boolean).map((value) => String(value));
-      return ids.filter((id, index) => id !== ids[index - 1]);
+      return extractTransportLocationSequence(selectedDayTransportItems);
     }
     return [];
-  }, [detailDay, detailSheet.kind, detailSheet.open, routeLocationSequenceIds]);
+  }, [
+    detailDay,
+    detailSheet.kind,
+    detailSheet.open,
+    routeLocationSequenceIds,
+    selectedDayTransportItems,
+  ]);
   const detailRouteMapLocations = useMemo(
     () =>
       detailRouteLocationSequenceIds
@@ -664,62 +925,18 @@ export function PreTourPlanManageView({
     () => detailRouteLocationSequenceIds.map((locationId) => locationNameById.get(locationId) || locationId).join(" -> "),
     [detailRouteLocationSequenceIds, locationNameById]
   );
+  const selectedDayRouteSummary = useMemo(() => {
+    const ids = extractTransportLocationSequence(selectedDayTransportItems);
+    return ids.map((locationId) => locationNameById.get(locationId) || locationId).join(" -> ");
+  }, [locationNameById, selectedDayTransportItems]);
 
-  const upsertDayTransportItem = useCallback(
-    async (dayId: string, dayRow: Row, dayTransportForm: DayTransportForm) => {
-      const existingTransportItem = items.find(
-        (item) => String(item.dayId) === dayId && String(item.itemType || "").toUpperCase() === "TRANSPORT"
-      );
-
-      if (!dayTransportForm.enabled || !dayTransportForm.serviceId) {
-        if (existingTransportItem) await deletePreTourRecord("pre-tour-items", String(existingTransportItem.id));
-        return;
-      }
-      if (!selectedPlan) throw new Error("Pre-tour header is required before saving day transport details.");
-
-      const dayCode = sanitizeCodePart(String(dayRow.code || `DAY_${dayRow.dayNumber || "00"}`));
-      const transportCode = `${dayCode}_TRANSPORT`;
-      const title = `${lookupLabel(dayRow.startLocationId)} -> ${lookupLabel(dayRow.endLocationId)}`.replace(/\s+/g, " ").trim();
-      const payload: Record<string, unknown> = {
-        code: transportCode.slice(0, 80),
-        planId,
-        dayId,
-        itemType: "TRANSPORT",
-        serviceId: dayTransportForm.serviceId || null,
-        startAt: toIsoDateTime(dayTransportForm.startAt),
-        endAt: toIsoDateTime(dayTransportForm.endAt),
-        sortOrder: 0,
-        pax: dayTransportForm.pax === "" ? null : toNumericValue(dayTransportForm.pax),
-        fromLocationId: dayRow.startLocationId ? String(dayRow.startLocationId) : null,
-        toLocationId: dayRow.endLocationId ? String(dayRow.endLocationId) : null,
-        locationId: null,
-        currencyCode: String(selectedPlan.currencyCode || companyBaseCurrencyCode),
-        priceMode: String(selectedPlan.priceMode || "EXCLUSIVE"),
-        baseAmount: toNumericValue(dayTransportForm.baseAmount),
-        taxAmount: toNumericValue(dayTransportForm.taxAmount),
-        totalAmount: toNumericValue(dayTransportForm.totalAmount),
-        title: title || "Day Transport",
-        description: null,
-        notes: dayTransportForm.notes || null,
-        status: dayTransportForm.status || "PLANNED",
-        isActive: true,
-      };
-
-      if (existingTransportItem) {
-        await updatePreTourRecord("pre-tour-items", String(existingTransportItem.id), payload);
-      } else {
-        await createPreTourRecord("pre-tour-items", payload);
-      }
-    },
-    [companyBaseCurrencyCode, items, lookupLabel, planId, selectedPlan]
-  );
-
-  const onSave = async ({ form, dayTransportForm }: { form: Row; dayTransportForm: DayTransportForm }) => {
+  const onSave = async (form: Row) => {
     setSaving(true);
     try {
       const visibleFields = buildVisibleFields(dialog.resource, form);
       const payload: Record<string, unknown> = {};
       visibleFields.forEach((field) => {
+        validateRequiredFieldValue(field, form[field.key]);
         payload[field.key] = parseFieldValue(field, form[field.key]);
       });
 
@@ -777,20 +994,14 @@ export function PreTourPlanManageView({
       }
       if (dialog.resource === "pre-tours") {
         payload.totalNights = toNightCount(String(form.startDate ?? ""), String(form.endDate ?? ""));
-      }
-      if (dialog.resource === "pre-tour-days" && dayTransportForm.enabled && !dayTransportForm.serviceId) {
-        throw new Error("Select vehicle type in Day Transport Details.");
+        applyTransportChargeMethodDefaultToPricingPolicy(payload);
       }
 
       if (dialog.mode === "create") {
-        const created = await createPreTourRecord(dialog.resource, payload);
-        if (dialog.resource === "pre-tour-days") await upsertDayTransportItem(String(created.id), created, dayTransportForm);
+        await createPreTourRecord(dialog.resource, payload);
         notify.success("Record created.");
       } else {
-        const updated = await updatePreTourRecord(dialog.resource, String(dialog.row?.id || ""), payload);
-        if (dialog.resource === "pre-tour-days") {
-          await upsertDayTransportItem(String(dialog.row?.id || ""), updated, dayTransportForm);
-        }
+        await updatePreTourRecord(dialog.resource, String(dialog.row?.id || ""), payload);
         notify.success("Record updated.");
       }
 
@@ -865,6 +1076,27 @@ export function PreTourPlanManageView({
     }
   };
 
+  const onGenerateCosting = useCallback(async () => {
+    if (!selectedPlan) return;
+    setGeneratingCosting(true);
+    try {
+      const total = await generatePreTourCosting(String(selectedPlan.id));
+      await loadData();
+      setDetailSheet({
+        open: true,
+        title: "Costing Sheet Details",
+        description: "Generated pre-tour costing snapshot and totals.",
+        row: total,
+        kind: "generic",
+      });
+      notify.success("Pre-tour costing generated.");
+    } catch (error) {
+      notify.error(error instanceof Error ? error.message : "Failed to generate costing.");
+    } finally {
+      setGeneratingCosting(false);
+    }
+  }, [loadData, selectedPlan]);
+
   const openItemEditor = useCallback(
     (dayId: string, item: Row) => {
       if (String(item.itemType || "").toUpperCase() === "GUIDE") {
@@ -910,20 +1142,42 @@ export function PreTourPlanManageView({
 
   const filteredAddonRows = useMemo(() => {
     const rows = selectedItemId ? addons.filter((row) => String(row.planItemId) === selectedItemId) : addons;
-    return rows.filter((row) => matchesQuery("pre-tour-item-addons", row, query));
-  }, [addons, query, selectedItemId]);
+    return rows.filter((row) => matchesQuery("pre-tour-item-addons", row, deferredQuery));
+  }, [addons, deferredQuery, selectedItemId]);
   const filteredGuideAllocationRows = useMemo(
-    () => guideAllocations.filter((row) => matchesQuery("pre-tour-guide-allocations", row, query)),
-    [guideAllocations, query]
+    () =>
+      guideAllocations.filter((row) =>
+        matchesQuery("pre-tour-guide-allocations", row, deferredQuery)
+      ),
+    [deferredQuery, guideAllocations]
   );
   const filteredTotalRows = useMemo(
-    () => totals.filter((row) => matchesQuery("pre-tour-totals", row, query)),
-    [query, totals]
+    () => totals.filter((row) => matchesQuery("pre-tour-totals", row, deferredQuery)),
+    [deferredQuery, totals]
   );
   const filteredTechnicalVisitRows = useMemo(
-    () => planTechnicalVisits.filter((row) => matchesQuery("pre-tour-technical-visits", row, query)),
-    [planTechnicalVisits, query]
+    () =>
+      planTechnicalVisits.filter((row) =>
+        matchesQuery("pre-tour-technical-visits", row, deferredQuery)
+      ),
+    [deferredQuery, planTechnicalVisits]
   );
+
+  const handleConvertToOnTour = useCallback(async () => {
+    if (!selectedPlan?.id) return;
+    setConvertingToOnTour(true);
+    try {
+      const converted = await convertPreTourToOnTour(String(selectedPlan.id));
+      notify.success(
+        converted.created ? "Converted to on-tour successfully." : "Opened existing on-tour file."
+      );
+      router.push(`/tours/on-tours/${converted.onTourId}`);
+    } catch (error) {
+      notify.error(error instanceof Error ? error.message : "Failed to convert to on-tour.");
+    } finally {
+      setConvertingToOnTour(false);
+    }
+  }, [router, selectedPlan?.id]);
 
   return (
     <Card className="border-border/70 shadow-sm">
@@ -952,7 +1206,26 @@ export function PreTourPlanManageView({
             <Button variant="outline" onClick={() => void syncDaysFromRange()} disabled={isReadOnly || syncingDays}>
               {syncingDays ? "Syncing..." : "Sync Days From Range"}
             </Button>
-            <Button variant="outline" onClick={() => setMapDialogOpen(true)} disabled={routeMapLocations.length === 0}>
+            {canViewCosting ? (
+              <Button
+                variant="outline"
+                onClick={() => void onGenerateCosting()}
+                disabled={isReadOnly || generatingCosting || !selectedPlan}
+              >
+                {generatingCosting ? "Generating Costing..." : "Generate Costing"}
+              </Button>
+            ) : null}
+            <Button
+              onClick={() => void handleConvertToOnTour()}
+              disabled={isReadOnly || convertingToOnTour || !selectedPlan}
+            >
+              {convertingToOnTour ? "Converting..." : "Convert to On-Tour"}
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => setMapDialogOpen(true)}
+              disabled={loading || sortedDays.length === 0}
+            >
               <MapPinned className="mr-1 size-4" />
               Route Map
             </Button>
@@ -967,10 +1240,12 @@ export function PreTourPlanManageView({
 
         <PreTourDayWorkspace
           days={sortedDays}
-          items={nonTransportItems}
+          items={items}
           selectedDayId={selectedDayId}
           onSelectDay={setSelectedDayId}
-          lookupLabel={lookupLabel}
+          routeSummary={selectedDayRouteSummary}
+          hasMoreDays={daysHasMore}
+          onLoadMoreDays={() => void loadMoreDays()}
           onAddItem={() => setDialog({ open: true, mode: "create", resource: "pre-tour-items", row: null })}
           disableAdd={isReadOnly}
         />
@@ -980,10 +1255,10 @@ export function PreTourPlanManageView({
         <ManagedDayEditor
           selectedDay={selectedManagedDay}
           selectedDayItems={selectedManagedDayItems}
-          query={query}
+          query={deferredQuery}
           isReadOnly={isReadOnly}
           addonsByItemId={addonsByItemId}
-          lookupLabel={lookupLabel}
+          routeSummary={selectedDayRouteSummary}
           onAddItem={(day) => {
             setSelectedDayId(String(day.id));
             setDialog({ open: true, mode: "create", resource: "pre-tour-items", row: null });
@@ -1017,7 +1292,7 @@ export function PreTourPlanManageView({
         <SectionTable
           resource="pre-tour-technical-visits"
           rows={filteredTechnicalVisitRows}
-          loading={loading}
+          loading={loading || supplementalLoading}
           isReadOnly={isReadOnly}
           lookups={lookups}
           onAdd={() => setDialog({ open: true, mode: "create", resource: "pre-tour-technical-visits", row: null })}
@@ -1028,7 +1303,7 @@ export function PreTourPlanManageView({
         <SectionTable
           resource="pre-tour-guide-allocations"
           rows={filteredGuideAllocationRows}
-          loading={loading}
+          loading={loading || supplementalLoading}
           isReadOnly={isReadOnly}
           lookups={lookups}
           onAdd={() => setDialog({ open: true, mode: "create", resource: "pre-tour-guide-allocations", row: null })}
@@ -1047,7 +1322,7 @@ export function PreTourPlanManageView({
         <SectionTable
           resource="pre-tour-item-addons"
           rows={filteredAddonRows}
-          loading={loading}
+          loading={loading || dayDataLoading}
           isReadOnly={isReadOnly}
           lookups={lookups}
           onAdd={() => setDialog({ open: true, mode: "create", resource: "pre-tour-item-addons", row: null })}
@@ -1059,95 +1334,115 @@ export function PreTourPlanManageView({
           <SectionTable
             resource="pre-tour-totals"
             rows={filteredTotalRows}
-            loading={loading}
+            loading={loading || supplementalLoading}
             isReadOnly={isReadOnly}
             lookups={lookups}
-            onAdd={() => setDialog({ open: true, mode: "create", resource: "pre-tour-totals", row: null })}
-            onView={(row) => setDetailSheet({ open: true, title: "Totals Details", description: "Selected totals details.", row, kind: "generic" })}
+            addLabel={generatingCosting ? "Generating..." : "Generate Costing"}
+            addDisabled={generatingCosting || !selectedPlan}
+            onAdd={() => void onGenerateCosting()}
+            onView={(row) =>
+              setDetailSheet({
+                open: true,
+                title: "Costing Sheet Details",
+                description: "Selected totals details and generated costing snapshot.",
+                row,
+                kind: "generic",
+              })
+            }
+            hideEdit
+            hideDelete
             onEdit={(row) => setDialog({ open: true, mode: "edit", resource: "pre-tour-totals", row })}
             onDelete={(row) => void onDelete("pre-tour-totals", row)}
           />
         ) : null}
       </CardContent>
 
-      <PreTourRouteMapDialogController
-        open={mapDialogOpen}
-        onOpenChange={setMapDialogOpen}
-        selectedPlan={selectedPlan}
-        routePathLabel={routePathLabel}
-        routeMapLocations={routeMapLocations}
-      />
+      {mapDialogOpen ? (
+        <PreTourRouteMapDialogController
+          open={mapDialogOpen}
+          onOpenChange={setMapDialogOpen}
+          selectedPlan={selectedPlan}
+          routePathLabel={routePathLabel}
+          routeMapLocations={routeMapLocations}
+        />
+      ) : null}
 
-      <PreTourShareDialogController
-        sharingItem={sharingItem}
-        onClose={() => setSharingItem(null)}
-        dayOptions={dayOptions}
-        sortedDays={sortedDays}
-        managedPlanId={planId}
-        selectedPlan={selectedPlan}
-        companyBaseCurrencyCode={companyBaseCurrencyCode}
-        isReadOnly={isReadOnly}
-        onSuccess={loadData}
-      />
+      {sharingItem ? (
+        <PreTourShareDialogController
+          sharingItem={sharingItem}
+          onClose={() => setSharingItem(null)}
+          dayOptions={dayOptions}
+          sortedDays={sortedDays}
+          managedPlanId={planId}
+          selectedPlan={selectedPlan}
+          companyBaseCurrencyCode={companyBaseCurrencyCode}
+          isReadOnly={isReadOnly}
+          onSuccess={loadData}
+        />
+      ) : null}
 
-      <PreTourDetailSheet
-        detailSheet={detailSheet}
-        setDetailSheetOpen={(open) => setDetailSheet((prev) => ({ ...prev, open }))}
-        onClose={() => setDetailSheet((prev) => ({ ...prev, open: false }))}
-        isReadOnly={isReadOnly}
-        canViewRouteMap={canViewRouteMap}
-        lookups={lookups}
-        selectedPlan={selectedPlan}
-        detailPreTourRouteLoading={false}
-        detailRouteLocationSequenceIds={detailRouteLocationSequenceIds}
-        detailRoutePathLabel={detailRoutePathLabel}
-        detailRouteMapLocations={detailRouteMapLocations}
-        onCreateVersion={(row) => void createVersionFromPlan(row)}
-        onCopy={(row) => {
-          setCopySourcePlan(row);
-          setCopyDialogOpen(true);
-        }}
-        onEditPreTour={(row) => setDialog({ open: true, mode: "edit", resource: "pre-tours", row })}
-        onDeletePreTour={(row) => void onDelete("pre-tours", row)}
-        onAddAddonFromItem={(row, dayId) => {
-          setSelectedDayId(String(dayId || row.dayId || ""));
-          setSelectedItemId(String(row.id || ""));
-          setDetailSheet((prev) => ({ ...prev, open: false }));
-          setDialog({ open: true, mode: "create", resource: "pre-tour-item-addons", row: null });
-        }}
-        onShareItem={(row) => {
-          setSharingItem(row);
-          setDetailSheet((prev) => ({ ...prev, open: false }));
-        }}
-        onEditItem={(row, dayId) => {
-          setDetailSheet((prev) => ({ ...prev, open: false }));
-          openItemEditor(String(dayId || row.dayId || ""), row);
-        }}
-        onDeleteItem={(row) => {
-          setDetailSheet((prev) => ({ ...prev, open: false }));
-          void onDelete("pre-tour-items", row);
-        }}
-      />
+      {detailSheet.open ? (
+        <PreTourDetailSheet
+          detailSheet={detailSheet}
+          setDetailSheetOpen={(open) => setDetailSheet((prev) => ({ ...prev, open }))}
+          onClose={() => setDetailSheet((prev) => ({ ...prev, open: false }))}
+          isReadOnly={isReadOnly}
+          canViewRouteMap={canViewRouteMap}
+          lookups={lookups}
+          selectedPlan={selectedPlan}
+          detailPreTourRouteLoading={routeDataLoading}
+          detailRouteLocationSequenceIds={detailRouteLocationSequenceIds}
+          detailRoutePathLabel={detailRoutePathLabel}
+          detailRouteMapLocations={detailRouteMapLocations}
+          onCreateVersion={(row) => void createVersionFromPlan(row)}
+          onCopy={(row) => {
+            setCopySourcePlan(row);
+            setCopyDialogOpen(true);
+          }}
+          onEditPreTour={(row) => setDialog({ open: true, mode: "edit", resource: "pre-tours", row })}
+          onDeletePreTour={(row) => void onDelete("pre-tours", row)}
+          onAddAddonFromItem={(row, dayId) => {
+            setSelectedDayId(String(dayId || row.dayId || ""));
+            setSelectedItemId(String(row.id || ""));
+            setDetailSheet((prev) => ({ ...prev, open: false }));
+            setDialog({ open: true, mode: "create", resource: "pre-tour-item-addons", row: null });
+          }}
+          onShareItem={(row) => {
+            setSharingItem(row);
+            setDetailSheet((prev) => ({ ...prev, open: false }));
+          }}
+          onEditItem={(row, dayId) => {
+            setDetailSheet((prev) => ({ ...prev, open: false }));
+            openItemEditor(String(dayId || row.dayId || ""), row);
+          }}
+          onDeleteItem={(row) => {
+            setDetailSheet((prev) => ({ ...prev, open: false }));
+            void onDelete("pre-tour-items", row);
+          }}
+        />
+      ) : null}
 
-      <PreTourCopyDialogController
-        open={copyDialogOpen}
-        onOpenChange={(open) => {
-          setCopyDialogOpen(open);
-          if (!open) setCopySourcePlan(null);
-        }}
-        sourcePlan={copySourcePlan}
-        companyBaseCurrencyCode={companyBaseCurrencyCode}
-        operatorIdsByMarketId={operatorIdsByMarketId}
-        operatorOrganizationOptions={operatorOrganizationOptions}
-        marketOrganizationOptions={marketOrganizationOptions}
-        allTourCategoryOptions={allTourCategoryOptions}
-        currencyOptions={currencyOptions}
-        isReadOnly={isReadOnly}
-        clonePlanChildren={clonePlanChildren}
-        onSuccess={loadData}
-      />
+      {copyDialogOpen ? (
+        <PreTourCopyDialogController
+          open={copyDialogOpen}
+          onOpenChange={(open) => {
+            setCopyDialogOpen(open);
+            if (!open) setCopySourcePlan(null);
+          }}
+          sourcePlan={copySourcePlan}
+          companyBaseCurrencyCode={companyBaseCurrencyCode}
+          operatorIdsByMarketId={operatorIdsByMarketId}
+          operatorOrganizationOptions={operatorOrganizationOptions}
+          marketOrganizationOptions={marketOrganizationOptions}
+          allTourCategoryOptions={allTourCategoryOptions}
+          currencyOptions={currencyOptions}
+          isReadOnly={isReadOnly}
+          clonePlanChildren={clonePlanChildren}
+          onSuccess={loadData}
+        />
+      ) : null}
 
-      {dialog.resource === "pre-tour-items" ? (
+      {dialog.open && dialog.resource === "pre-tour-items" ? (
         <PreTourItemAllocationDialog
           open={dialog.open}
           onOpenChange={(open) => setDialog((prev) => ({ ...prev, open, row: open ? prev.row : null }))}
@@ -1160,12 +1455,14 @@ export function PreTourPlanManageView({
           companyBaseCurrencyCode={companyBaseCurrencyCode}
           hotelOptions={activeHotelOptions.map(({ value, label }) => ({ value, label }))}
           activityOptions={activities.map((row) => ({ value: String(row.id), label: `${row.code} - ${row.name}` }))}
-          transportOptions={vehicleTypes.map((row) => ({ value: String(row.id), label: `${row.code} - ${row.name}` }))}
           locationOptions={locationOptions}
+          vehicleCategoryOptions={vehicleCategoryOptions}
+          vehicleTypeOptions={vehicleTypeOptions}
+          transportRateBasis={transportRateBasis}
           canOverrideContractRates={!isReadOnly && (isAdmin || canViewCosting)}
           onSubmit={(payload) => onSaveAllocationItem(payload)}
         />
-      ) : dialog.resource === "pre-tour-guide-allocations" ? (
+      ) : dialog.open && dialog.resource === "pre-tour-guide-allocations" ? (
         <PreTourGuideAllocationDialog
           open={dialog.open}
           onOpenChange={(open) => setDialog((prev) => ({ ...prev, open, row: open ? prev.row : null }))}
@@ -1179,7 +1476,7 @@ export function PreTourPlanManageView({
           dayOptions={dayOptions}
           onSubmit={(payload) => onSaveGuideAllocation(payload)}
         />
-      ) : (
+      ) : dialog.open ? (
         <PreTourRecordDialog
           open={dialog.open}
           onOpenChange={(open) => setDialog((prev) => ({ ...prev, open, row: open ? prev.row : null }))}
@@ -1191,7 +1488,6 @@ export function PreTourPlanManageView({
           visibleFields={buildVisibleFields(dialog.resource, dialogInitialForm)}
           buildVisibleFields={(form) => buildVisibleFields(dialog.resource, form)}
           initialForm={dialogInitialForm}
-          initialDayTransportForm={dialogInitialDayTransportForm}
           selectedDialogMarketOrgId={String(dialogInitialForm.marketOrgId ?? dialog.row?.marketOrgId ?? "")}
           hasContractForSelectedDialogMarket={true}
           getHasContractForSelectedDialogMarket={(form) => {
@@ -1200,11 +1496,9 @@ export function PreTourPlanManageView({
             return (operatorIdsByMarketId.get(marketOrgId)?.length ?? 0) > 0;
           }}
           selectedPreTourItemType={String(dialogInitialForm.itemType ?? dialog.row?.itemType ?? "").toUpperCase()}
-          lookupLabel={lookupLabel}
-          transportVehicleOptions={transportVehicleOptions}
-          onSubmit={(payload) => void onSave(payload)}
+          onSubmit={(form) => void onSave(form)}
         />
-      )}
+      ) : null}
     </Card>
   );
 }

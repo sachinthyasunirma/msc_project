@@ -173,7 +173,7 @@ export function TourCategoryManagementView({
                     Loading...
                   </TableCell>
                 </TableRow>
-              ) : state.records.length === 0 ? (
+              ) : state.totalRecords === 0 ? (
                 <TableRow>
                   <TableCell
                     colSpan={COLUMNS[state.resource].length + 1}
@@ -223,9 +223,9 @@ export function TourCategoryManagementView({
           </Table>
         </div>
 
-        {!state.loading && state.records.length > 0 ? (
+        {!state.loading && state.totalRecords > 0 ? (
           <TablePagination
-            totalItems={state.records.length}
+            totalItems={state.totalRecords}
             page={state.currentPage}
             pageSize={state.pageSize}
             onPageChange={state.setCurrentPage}

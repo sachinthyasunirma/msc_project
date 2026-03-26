@@ -1,7 +1,16 @@
 "use client";
 
-import { useMemo } from "react";
+import dynamic from "next/dynamic";
+import { useMemo, useState } from "react";
 import { FileSpreadsheet, Pencil, Plus, ShieldAlert, Tags, Trash2, Wallet } from "lucide-react";
+import {
+  hotelCancellationPolicyImportConfig,
+  hotelCancellationPolicyRuleImportConfig,
+  hotelContractImportConfig,
+  hotelRatePlanImportConfig,
+  hotelRateRestrictionImportConfig,
+  hotelRoomRateImportConfig,
+} from "@/components/batch-import/master-batch-import-config";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -20,6 +29,14 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useAccommodationContractingTab } from "@/modules/accommodation/lib/hooks/use-accommodation-contracting-tab";
+import {
+  createAccommodationCancellationPolicy,
+  createAccommodationCancellationPolicyRule,
+  createAccommodationHotelContract,
+  createAccommodationRatePlan,
+  createAccommodationRateRestriction,
+  createAccommodationRoomRate,
+} from "@/modules/accommodation/lib/accommodation-contracting-api";
 import type { HotelContractingBundle } from "@/modules/accommodation/shared/accommodation-contracting-types";
 import type { RoomType } from "@/modules/accommodation/lib/accommodation-api";
 import { AccommodationContractDialog } from "@/modules/accommodation/ui/components/dialogs/accommodation-contract-dialog";
@@ -31,10 +48,18 @@ import { AccommodationCancellationPolicyDialog } from "@/modules/accommodation/u
 import { AccommodationCancellationPolicyRuleDialog } from "@/modules/accommodation/ui/components/dialogs/accommodation-cancellation-policy-rule-dialog";
 import { AccommodationInventoryDayDialog } from "@/modules/accommodation/ui/components/dialogs/accommodation-inventory-day-dialog";
 
+const MasterBatchImportDialog = dynamic(
+  () =>
+    import("@/components/batch-import/master-batch-import-dialog").then(
+      (module) => module.MasterBatchImportDialog
+    ),
+  { ssr: false }
+);
+
 type ContractingTabProps = {
   hotelId: string;
   loadingDetails: boolean;
-  contracting: HotelContractingBundle | null;
+  initialContracting?: HotelContractingBundle | null;
   roomTypes: RoomType[];
   isReadOnly: boolean;
 };
@@ -78,7 +103,7 @@ function SummaryStat({
 export function ContractingTab({
   hotelId,
   loadingDetails,
-  contracting: initialContracting,
+  initialContracting = null,
   roomTypes,
   isReadOnly,
 }: ContractingTabProps) {
@@ -87,6 +112,12 @@ export function ContractingTab({
     initialContracting,
     isReadOnly,
   });
+  const [contractBatchOpen, setContractBatchOpen] = useState(false);
+  const [ratePlanBatchOpen, setRatePlanBatchOpen] = useState(false);
+  const [roomRateBatchOpen, setRoomRateBatchOpen] = useState(false);
+  const [policyBatchOpen, setPolicyBatchOpen] = useState(false);
+  const [policyRuleBatchOpen, setPolicyRuleBatchOpen] = useState(false);
+  const [restrictionBatchOpen, setRestrictionBatchOpen] = useState(false);
   const contracting = contractingState.contracting;
   const nextInventoryDays = useMemo(
     () =>
@@ -105,6 +136,100 @@ export function ContractingTab({
         value: roomType.id,
         label: `${roomType.code} - ${roomType.name}`,
       })),
+    [roomTypes]
+  );
+  const contractBatchConfig = useMemo(
+    () => ({
+      ...hotelContractImportConfig,
+      fields: hotelContractImportConfig.fields.map((field) =>
+        field.key === "supplierCode"
+          ? {
+              ...field,
+              options: contractingState.supplierOptions
+                .filter((option) => option.code.length > 0)
+                .map((option) => ({
+                  value: option.code,
+                  label: option.label,
+                })),
+            }
+          : field
+      ),
+    }),
+    [contractingState.supplierOptions]
+  );
+  const contractCodes = useMemo(() => contractingState.contractExistingCodes(), [contractingState]);
+  const ratePlanCodes = useMemo(() => contractingState.ratePlanExistingCodes(), [contractingState]);
+  const roomRateCodes = useMemo(() => contractingState.roomRateExistingCodes(), [contractingState]);
+  const policyCodes = useMemo(
+    () => contractingState.cancellationPolicyExistingCodes(),
+    [contractingState]
+  );
+  const policyRuleCodes = useMemo(
+    () => contractingState.cancellationPolicyRuleExistingCodes(),
+    [contractingState]
+  );
+  const restrictionCodes = useMemo(
+    () => contractingState.restrictionExistingCodes(),
+    [contractingState]
+  );
+  const roomTypeByCode = useMemo(
+    () =>
+      new Map(
+        roomTypes.map((roomType) => [roomType.code.trim().toUpperCase(), roomType.id])
+      ),
+    [roomTypes]
+  );
+  const ratePlanBatchConfig = useMemo(
+    () => ({
+      ...hotelRatePlanImportConfig,
+      fields: hotelRatePlanImportConfig.fields.map((field) =>
+        field.key === "cancellationPolicyCode"
+          ? {
+              ...field,
+              options: contractingState.cancellationPolicyOptions
+                .filter((option) => option.code.length > 0)
+                .map((option) => ({
+                  value: option.code,
+                  label: option.label,
+                })),
+            }
+          : field
+      ),
+    }),
+    [contractingState.cancellationPolicyOptions]
+  );
+  const roomRateBatchConfig = useMemo(
+    () => ({
+      ...hotelRoomRateImportConfig,
+      fields: hotelRoomRateImportConfig.fields.map((field) =>
+        field.key === "roomTypeCode"
+          ? {
+              ...field,
+              options: roomTypes.map((roomType) => ({
+                value: roomType.code,
+                label: `${roomType.code} - ${roomType.name}`,
+              })),
+            }
+          : field
+      ),
+    }),
+    [roomTypes]
+  );
+  const restrictionBatchConfig = useMemo(
+    () => ({
+      ...hotelRateRestrictionImportConfig,
+      fields: hotelRateRestrictionImportConfig.fields.map((field) =>
+        field.key === "roomTypeCode"
+          ? {
+              ...field,
+              options: roomTypes.map((roomType) => ({
+                value: roomType.code,
+                label: `${roomType.code} - ${roomType.name}`,
+              })),
+            }
+          : field
+      ),
+    }),
     [roomTypes]
   );
 
@@ -150,6 +275,18 @@ export function ContractingTab({
                 </div>
               </div>
             </AccordionTrigger>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => setRatePlanBatchOpen(true)}
+              disabled={
+                isReadOnly || contractingState.saving || !contractingState.selectedContractId
+              }
+              className="shrink-0"
+            >
+              Batch Upload
+            </Button>
             <Button
               type="button"
               size="sm"
@@ -240,6 +377,15 @@ export function ContractingTab({
                 type="button"
                 size="sm"
                 variant="outline"
+                onClick={() => setRoomRateBatchOpen(true)}
+                disabled={isReadOnly || contractingState.saving || !contractingState.selectedRatePlanId}
+              >
+                Batch Upload
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
                 onClick={() => contractingState.openRoomRateDialog("create")}
                 disabled={isReadOnly || contractingState.saving || !contractingState.selectedRatePlanId}
               >
@@ -313,6 +459,16 @@ export function ContractingTab({
             <AccordionTrigger className="min-w-0 flex-1">
               <span>Hotel Contracts</span>
             </AccordionTrigger>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => setContractBatchOpen(true)}
+              disabled={isReadOnly || contractingState.saving}
+              className="shrink-0"
+            >
+              Batch Upload
+            </Button>
             <Button
               type="button"
               size="sm"
@@ -417,11 +573,29 @@ export function ContractingTab({
                 type="button"
                 size="sm"
                 variant="outline"
+                onClick={() => setPolicyBatchOpen(true)}
+                disabled={isReadOnly || contractingState.saving}
+              >
+                Batch Policies
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
                 onClick={() => contractingState.openCancellationPolicyDialog("create")}
                 disabled={isReadOnly || contractingState.saving}
               >
                 <Plus className="mr-2 size-4" />
                 Add Cancellation Policy
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => setRestrictionBatchOpen(true)}
+                disabled={isReadOnly || contractingState.saving || !contractingState.selectedRatePlanId}
+              >
+                Batch Restrictions
               </Button>
               <Button
                 type="button"
@@ -581,6 +755,19 @@ export function ContractingTab({
                     : "Select a cancellation policy to manage its penalty rules."}
                 </div>
               </div>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => setPolicyRuleBatchOpen(true)}
+                disabled={
+                  isReadOnly ||
+                  contractingState.saving ||
+                  !contractingState.selectedCancellationPolicyId
+                }
+              >
+                Batch Rules
+              </Button>
               <Button
                 type="button"
                 size="sm"
@@ -812,6 +999,147 @@ export function ContractingTab({
           onSubmit={() => void contractingState.submitContract()}
         />
       ) : null}
+
+      <MasterBatchImportDialog
+        open={contractBatchOpen}
+        onOpenChange={setContractBatchOpen}
+        config={contractBatchConfig}
+        readOnly={isReadOnly}
+        context={{
+          locationByCode: new Map(),
+          supplierByCode: contractingState.supplierByCode,
+          currencyByCode: new Map(),
+          vehicleCategoryByCode: new Map(),
+          vehicleTypeByCode: new Map(),
+          vehicleTypeCategoryCodeByCode: new Map(),
+        }}
+        existingCodes={contractCodes}
+        onRefreshExistingCodes={contractingState.refreshContractExistingCodes}
+        onUploadRow={async (payload) => {
+          await createAccommodationHotelContract(hotelId, payload);
+        }}
+        onCompleted={async () => {
+          await contractingState.refresh();
+        }}
+      />
+
+      <MasterBatchImportDialog
+        open={ratePlanBatchOpen}
+        onOpenChange={setRatePlanBatchOpen}
+        config={ratePlanBatchConfig}
+        readOnly={isReadOnly}
+        context={{
+          locationByCode: new Map(),
+          supplierByCode: contractingState.supplierByCode,
+          cancellationPolicyByCode: contractingState.cancellationPolicyByCode,
+          currencyByCode: new Map(),
+          vehicleCategoryByCode: new Map(),
+          vehicleTypeByCode: new Map(),
+          vehicleTypeCategoryCodeByCode: new Map(),
+        }}
+        existingCodes={ratePlanCodes}
+        onRefreshExistingCodes={contractingState.refreshRatePlanExistingCodes}
+        onUploadRow={async (payload) => {
+          await createAccommodationRatePlan(contractingState.selectedContractId, payload);
+        }}
+        onCompleted={async () => {
+          await contractingState.refresh();
+        }}
+      />
+
+      <MasterBatchImportDialog
+        open={roomRateBatchOpen}
+        onOpenChange={setRoomRateBatchOpen}
+        config={roomRateBatchConfig}
+        readOnly={isReadOnly}
+        context={{
+          locationByCode: new Map(),
+          supplierByCode: contractingState.supplierByCode,
+          roomTypeByCode,
+          currencyByCode: new Map(),
+          vehicleCategoryByCode: new Map(),
+          vehicleTypeByCode: new Map(),
+          vehicleTypeCategoryCodeByCode: new Map(),
+        }}
+        existingCodes={roomRateCodes}
+        onRefreshExistingCodes={contractingState.refreshRoomRateExistingCodes}
+        onUploadRow={async (payload) => {
+          await createAccommodationRoomRate(contractingState.selectedRatePlanId, payload);
+        }}
+        onCompleted={async () => {
+          await contractingState.refresh();
+        }}
+      />
+
+      <MasterBatchImportDialog
+        open={policyBatchOpen}
+        onOpenChange={setPolicyBatchOpen}
+        config={hotelCancellationPolicyImportConfig}
+        readOnly={isReadOnly}
+        context={{
+          locationByCode: new Map(),
+          currencyByCode: new Map(),
+          vehicleCategoryByCode: new Map(),
+          vehicleTypeByCode: new Map(),
+          vehicleTypeCategoryCodeByCode: new Map(),
+        }}
+        existingCodes={policyCodes}
+        onRefreshExistingCodes={contractingState.refreshCancellationPolicyExistingCodes}
+        onUploadRow={async (payload) => {
+          await createAccommodationCancellationPolicy(hotelId, payload);
+        }}
+        onCompleted={async () => {
+          await contractingState.refresh();
+        }}
+      />
+
+      <MasterBatchImportDialog
+        open={policyRuleBatchOpen}
+        onOpenChange={setPolicyRuleBatchOpen}
+        config={hotelCancellationPolicyRuleImportConfig}
+        readOnly={isReadOnly}
+        context={{
+          locationByCode: new Map(),
+          currencyByCode: new Map(),
+          vehicleCategoryByCode: new Map(),
+          vehicleTypeByCode: new Map(),
+          vehicleTypeCategoryCodeByCode: new Map(),
+        }}
+        existingCodes={policyRuleCodes}
+        onRefreshExistingCodes={contractingState.refreshCancellationPolicyRuleExistingCodes}
+        onUploadRow={async (payload) => {
+          await createAccommodationCancellationPolicyRule(
+            contractingState.selectedCancellationPolicyId,
+            payload
+          );
+        }}
+        onCompleted={async () => {
+          await contractingState.refresh();
+        }}
+      />
+
+      <MasterBatchImportDialog
+        open={restrictionBatchOpen}
+        onOpenChange={setRestrictionBatchOpen}
+        config={restrictionBatchConfig}
+        readOnly={isReadOnly}
+        context={{
+          locationByCode: new Map(),
+          roomTypeByCode,
+          currencyByCode: new Map(),
+          vehicleCategoryByCode: new Map(),
+          vehicleTypeByCode: new Map(),
+          vehicleTypeCategoryCodeByCode: new Map(),
+        }}
+        existingCodes={restrictionCodes}
+        onRefreshExistingCodes={contractingState.refreshRestrictionExistingCodes}
+        onUploadRow={async (payload) => {
+          await createAccommodationRateRestriction(contractingState.selectedRatePlanId, payload);
+        }}
+        onCompleted={async () => {
+          await contractingState.refresh();
+        }}
+      />
 
       {ratePlanDialogOpen(contractingState) ? (
         <AccommodationRatePlanDialog

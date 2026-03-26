@@ -17,6 +17,7 @@ import {
 import {
   createTaxRecord,
   deleteTaxRecord,
+  listTaxRecordPage,
   listTaxRecords,
   updateTaxRecord,
 } from "@/modules/tax/lib/tax-api";
@@ -40,6 +41,8 @@ type UseTaxManagementOptions = {
 };
 
 const EMPTY_ROWS: Array<Record<string, unknown>> = [];
+const DEFAULT_PAGE_SIZE = 25;
+const LOOKUP_LIMIT = 100;
 
 export function useTaxManagement({
   initialResource = "taxes",
@@ -57,7 +60,7 @@ export function useTaxManagement({
     row: Record<string, unknown> | null;
   }>({ open: false, mode: "create", row: null });
   const [form, setForm] = useState<Record<string, unknown>>({});
-  const [pageSize, setPageSize] = useState(25);
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
   const [currentPage, setCurrentPage] = useState(1);
   const isTaxManageMode = Boolean(managedTaxId);
   const taxScopedResources: TaxResourceKey[] = useMemo(() => ["tax-rates", "tax-rule-taxes"], []);
@@ -77,15 +80,20 @@ export function useTaxManagement({
     const input = buildTaxRecordsParams({
       resource,
       q: query || undefined,
-      limit: 500,
+      page: currentPage,
+      limit: pageSize,
     });
     if (isTaxManageMode && taxScopedResources.includes(resource)) {
       input.taxId = managedTaxId;
     }
     return input;
-  }, [isTaxManageMode, managedTaxId, query, resource, taxScopedResources]);
+  }, [currentPage, isTaxManageMode, managedTaxId, pageSize, query, resource, taxScopedResources]);
 
-  const isDefaultRecordsQuery = resource === initialResource && query.length === 0;
+  const isDefaultRecordsQuery =
+    resource === initialResource &&
+    query.length === 0 &&
+    currentPage === 1 &&
+    pageSize === DEFAULT_PAGE_SIZE;
 
   const {
     data: lookupsData,
@@ -97,12 +105,12 @@ export function useTaxManagement({
     queryFn: async () => {
       const [taxes, jurisdictions, currencies, ruleSets, rules, snapshots] =
         await Promise.all([
-          listTaxRecords("taxes", { limit: 500 }),
-          listTaxRecords("tax-jurisdictions", { limit: 500 }),
-          listCurrencyRecords("currencies", { limit: 500 }),
-          listTaxRecords("tax-rule-sets", { limit: 500 }),
-          listTaxRecords("tax-rules", { limit: 500 }),
-          listTaxRecords("document-tax-snapshots", { limit: 500 }),
+          listTaxRecords("taxes", { limit: LOOKUP_LIMIT }),
+          listTaxRecords("tax-jurisdictions", { limit: LOOKUP_LIMIT }),
+          listCurrencyRecords("currencies", { limit: LOOKUP_LIMIT }),
+          listTaxRecords("tax-rule-sets", { limit: LOOKUP_LIMIT }),
+          listTaxRecords("tax-rules", { limit: LOOKUP_LIMIT }),
+          listTaxRecords("document-tax-snapshots", { limit: LOOKUP_LIMIT }),
         ]);
 
       return {
@@ -115,10 +123,11 @@ export function useTaxManagement({
       };
     },
     initialData: lookupsInitialData,
+    staleTime: 5 * 60 * 1000,
   });
 
   const {
-    data: records = EMPTY_ROWS,
+    data: recordsPage,
     error: recordsError,
     isFetching: recordsLoading,
     refetch: refetchRecords,
@@ -127,10 +136,18 @@ export function useTaxManagement({
       resource,
       q: recordsInput.q,
       taxId: recordsInput.taxId,
+      page: recordsInput.page,
       limit: recordsInput.limit,
     }),
-    queryFn: () => listTaxRecords(resource, recordsInput),
-    initialData: isDefaultRecordsQuery ? initialData?.records ?? undefined : undefined,
+    queryFn: () => listTaxRecordPage(resource, recordsInput),
+    initialData: isDefaultRecordsQuery
+      ? {
+          rows: initialData?.records ?? EMPTY_ROWS,
+          total: initialData?.totalRecords ?? 0,
+          page: 1,
+          limit: DEFAULT_PAGE_SIZE,
+        }
+      : undefined,
     placeholderData: keepPreviousData,
   });
 
@@ -160,6 +177,8 @@ export function useTaxManagement({
   const ruleSets = lookupsData?.ruleSets ?? EMPTY_ROWS;
   const rules = lookupsData?.rules ?? EMPTY_ROWS;
   const snapshots = lookupsData?.snapshots ?? EMPTY_ROWS;
+  const records = recordsPage?.rows ?? EMPTY_ROWS;
+  const totalRecords = recordsPage?.total ?? 0;
   const loading = lookupsLoading || recordsLoading;
   const saving =
     createTaxMutation.isPending ||
@@ -525,13 +544,10 @@ export function useTaxManagement({
   }, [resource, visibleResources]);
 
   const totalPages = useMemo(
-    () => Math.max(1, Math.ceil(records.length / pageSize)),
-    [records.length, pageSize]
+    () => Math.max(1, Math.ceil(totalRecords / pageSize)),
+    [pageSize, totalRecords]
   );
-  const pagedRecords = useMemo(() => {
-    const start = (currentPage - 1) * pageSize;
-    return records.slice(start, start + pageSize);
-  }, [records, currentPage, pageSize]);
+  const pagedRecords = records;
 
   useEffect(() => {
     setCurrentPage(1);
@@ -542,12 +558,24 @@ export function useTaxManagement({
   }, [currentPage, totalPages]);
 
   const refreshAll = useCallback(async () => {
-    await Promise.all([
-      queryClient.invalidateQueries({ queryKey: taxKeys.lookups() }),
-      queryClient.invalidateQueries({ queryKey: taxKeys.recordsRoot() }),
-    ]);
-    await Promise.all([refetchLookups(), refetchRecords()]);
-  }, [queryClient, refetchLookups, refetchRecords]);
+    await queryClient.invalidateQueries({
+      queryKey: taxKeys.recordsByResource(resource),
+    });
+
+    if (
+      resource === "taxes" ||
+      resource === "tax-jurisdictions" ||
+      resource === "tax-rule-sets" ||
+      resource === "tax-rules" ||
+      resource === "document-tax-snapshots"
+    ) {
+      await queryClient.invalidateQueries({ queryKey: taxKeys.lookups() });
+      await Promise.all([refetchLookups(), refetchRecords()]);
+      return;
+    }
+
+    await refetchRecords();
+  }, [queryClient, refetchLookups, refetchRecords, resource]);
 
   const openDialog = useCallback(
     (mode: "create" | "edit", row?: Record<string, unknown>) => {
@@ -669,6 +697,7 @@ export function useTaxManagement({
     query,
     setQuery,
     records,
+    totalRecords,
     pagedRecords,
     loading,
     saving,

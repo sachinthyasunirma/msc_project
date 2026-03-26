@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import {
   createCurrencyRecord,
+  listCurrencyRecordPage,
   listCurrencyRecords,
   toCurrencyErrorResponse,
 } from "@/modules/currency/server/currency-service";
@@ -12,7 +13,9 @@ export async function GET(
   try {
     const params = await context.params;
     const searchParams = new URL(request.url).searchParams;
-    const records = await listCurrencyRecords(params.resource, searchParams, request.headers);
+    const records = searchParams.has("page")
+      ? await listCurrencyRecordPage(params.resource, searchParams, request.headers)
+      : await listCurrencyRecords(params.resource, searchParams, request.headers);
     return NextResponse.json(records);
   } catch (error) {
     const normalized = toCurrencyErrorResponse(error);

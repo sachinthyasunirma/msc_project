@@ -400,7 +400,7 @@ export function PreTourGuideAllocationDialog({
             ) : (
               <Card className="border-border/70">
                 <CardContent className="px-4 py-3 text-sm text-muted-foreground">
-                  Full-tour coverage applies one guide commercial line across the whole itinerary.
+                  Full-tour coverage applies one guide commercial line across the whole trip plan.
                 </CardContent>
               </Card>
             )}

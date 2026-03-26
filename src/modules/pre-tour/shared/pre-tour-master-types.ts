@@ -2,6 +2,7 @@ import type { Row } from "@/modules/pre-tour/shared/pre-tour-management-types";
 
 export type PreTourMastersData = {
   locations: Row[];
+  vehicleCategories: Row[];
   vehicleTypes: Row[];
   activities: Row[];
   guides: Row[];
@@ -14,4 +15,5 @@ export type PreTourMastersData = {
   hotels: Row[];
   tourCategoryRules: Row[];
   companyBaseCurrencyCode: string;
+  transportRateBasis: "VEHICLE_CATEGORY" | "VEHICLE_TYPE";
 };

@@ -17,6 +17,7 @@ type TransportResourceTabProps = {
   query: string;
   records: Array<Record<string, unknown>>;
   pagedRecords: Array<Record<string, unknown>>;
+  totalRecords: number;
   loading: boolean;
   currentPage: number;
   pageSize: number;
@@ -38,6 +39,7 @@ export function TransportResourceTab({
   query,
   records,
   pagedRecords,
+  totalRecords,
   loading,
   currentPage,
   pageSize,
@@ -122,9 +124,9 @@ export function TransportResourceTab({
           )}
         </TableBody>
       </Table>
-      {!loading && records.length > 0 ? (
+      {!loading && totalRecords > 0 ? (
         <TablePagination
-          totalItems={records.length}
+          totalItems={totalRecords}
           page={currentPage}
           pageSize={pageSize}
           onPageChange={onPageChange}

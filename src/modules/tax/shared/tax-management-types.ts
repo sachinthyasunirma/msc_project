@@ -3,6 +3,7 @@ import type { TaxResourceKey } from "@/modules/tax/ui/components/tax-management/
 export type TaxManagementInitialData = {
   resource: TaxResourceKey;
   records: Array<Record<string, unknown>>;
+  totalRecords: number;
   taxes: Array<Record<string, unknown>>;
   jurisdictions: Array<Record<string, unknown>>;
   currencies: Array<Record<string, unknown>>;

@@ -1,13 +1,19 @@
-import { and, eq, inArray } from "drizzle-orm";
+import { getCookieCache, getSessionCookie } from "better-auth/cookies";
+import { constantTimeEqual, makeSignature } from "better-auth/crypto";
+import { and, eq } from "drizzle-orm";
+import { cookies } from "next/headers";
 import { db } from "@/db";
 import {
   company,
   companyRole,
   companyRolePrivilege,
+  session,
   user,
   userCompanyRole,
 } from "@/db/schema";
 import { auth } from "@/lib/auth";
+import { getAuthSecondaryStorage } from "@/lib/auth-secondary-storage";
+import { profileServerOperation } from "@/lib/logging/perf";
 import {
   AppPlan,
   AppPrivilegeCode,
@@ -104,17 +110,250 @@ const SYSTEM_ROLE_CODES: Record<LegacyRole, string> = {
 };
 const ADMIN_PRIVILEGE_CACHE_TTL_MS = 15_000;
 const ROLE_PRIVILEGE_CACHE_TTL_MS = 5_000;
+const LEGACY_FLAG_SYNC_TTL_MS = 60_000;
+const LEGACY_FLAG_SYNC_MAX_ENTRIES = 2_000;
 const adminPrivilegeCache = new Map<
   string,
   { expiresAt: number; privileges: AppPrivilegeCode[] }
 >();
 const userPrivilegeCache = new Map<string, { expiresAt: number; privileges: string[] }>();
+const legacyFlagSyncCache = new Map<string, number>();
 const sessionCache = new WeakMap<Headers, Promise<SessionPayload>>();
 const baseAccessCache = new WeakMap<Headers, Promise<ResolvedAccessContext>>();
+const authSecret = process.env.BETTER_AUTH_SECRET?.trim() || "";
 
 function normalizeLegacyRole(value: string | null | undefined): LegacyRole {
   if (value === "ADMIN" || value === "MANAGER") return value;
   return "USER";
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function asString(value: unknown) {
+  return typeof value === "string" ? value : null;
+}
+
+function normalizeSessionPayload(payload: unknown): SessionPayload {
+  const record = asRecord(payload);
+  const userRecord = asRecord(record?.user);
+  const id = asString(userRecord?.id);
+  if (!id) return null;
+
+  return {
+    user: {
+      id,
+      name: asString(userRecord?.name),
+      email: asString(userRecord?.email),
+      image: asString(userRecord?.image),
+      companyId: asString(userRecord?.companyId),
+    },
+  };
+}
+
+function isValidSessionExpiry(value: unknown) {
+  if (!value) return true;
+  const expiresAt = value instanceof Date ? value : new Date(String(value));
+  return Number.isFinite(expiresAt.getTime()) && expiresAt.getTime() > Date.now();
+}
+
+function readAuthCookieSignals(headers: Headers) {
+  const cookieHeader = headers.get("cookie") || "";
+  return {
+    hasCookieHeader: cookieHeader.length > 0,
+    hasSessionTokenCookie: cookieHeader.includes("better-auth.session_token"),
+    hasSecureSessionTokenCookie: cookieHeader.includes("__Secure-better-auth.session_token"),
+    hasSessionDataCookie: cookieHeader.includes("better-auth.session_data"),
+    hasSecureSessionDataCookie: cookieHeader.includes("__Secure-better-auth.session_data"),
+    host: headers.get("host"),
+    origin: headers.get("origin"),
+    referer: headers.get("referer"),
+    userAgent: headers.get("user-agent"),
+  };
+}
+
+async function buildNormalizedAuthHeaders(inputHeaders: Headers) {
+  const normalizedHeaders = new Headers(inputHeaders);
+  if (normalizedHeaders.get("cookie")) {
+    return normalizedHeaders;
+  }
+
+  try {
+    const cookieStore = await cookies();
+    const cookieHeader = cookieStore
+      .getAll()
+      .map(({ name, value }) => `${name}=${value}`)
+      .join("; ");
+    if (cookieHeader) {
+      normalizedHeaders.set("cookie", cookieHeader);
+    }
+  } catch {
+    // Request cookies are only available inside a Next request context.
+  }
+
+  return normalizedHeaders;
+}
+
+async function resolveSessionFromCookieCache(headers: Headers): Promise<SessionPayload> {
+  if (!authSecret) return null;
+
+  try {
+    const payload = await getCookieCache(headers, {
+      secret: authSecret,
+      strategy: "jwe",
+    });
+    const payloadRecord = asRecord(payload);
+    const sessionRecord = asRecord(payloadRecord?.session);
+    if (!payload || !isValidSessionExpiry(sessionRecord?.expiresAt)) {
+      return null;
+    }
+    return normalizeSessionPayload(payload);
+  } catch {
+    return null;
+  }
+}
+
+async function verifySignedSessionToken(headers: Headers) {
+  if (!authSecret) return null;
+
+  const rawSignedCookie = getSessionCookie(headers);
+  if (!rawSignedCookie) return null;
+
+  let signedCookie: string;
+  try {
+    signedCookie = decodeURIComponent(rawSignedCookie);
+  } catch {
+    signedCookie = rawSignedCookie;
+  }
+
+  if (!signedCookie) return null;
+
+  const separatorIndex = signedCookie.lastIndexOf(".");
+  if (separatorIndex <= 0) return null;
+
+  const token = signedCookie.slice(0, separatorIndex);
+  const signature = signedCookie.slice(separatorIndex + 1);
+  if (!token || !signature) return null;
+
+  const expectedSignature = await makeSignature(token, authSecret);
+  return constantTimeEqual(signature, expectedSignature) ? token : null;
+}
+
+async function resolveSessionFromDatabase(headers: Headers): Promise<SessionPayload> {
+  const sessionToken = await verifySignedSessionToken(headers);
+  if (!sessionToken) return null;
+
+  const [record] = await db
+    .select({
+      expiresAt: session.expiresAt,
+      userId: user.id,
+      userName: user.name,
+      userEmail: user.email,
+      userImage: user.image,
+      userCompanyId: user.companyId,
+      userIsActive: user.isActive,
+    })
+    .from(session)
+    .innerJoin(user, eq(user.id, session.userId))
+    .where(eq(session.token, sessionToken))
+    .limit(1);
+
+  if (!record?.userId || !record.userIsActive || !isValidSessionExpiry(record.expiresAt)) {
+    return null;
+  }
+
+  return {
+    user: {
+      id: record.userId,
+      name: record.userName,
+      email: record.userEmail,
+      image: record.userImage,
+      companyId: record.userCompanyId,
+    },
+  };
+}
+
+async function resolveSessionFromSecondaryStorage(headers: Headers): Promise<SessionPayload> {
+  const sessionToken = await verifySignedSessionToken(headers);
+  if (!sessionToken) return null;
+
+  try {
+    const raw = await getAuthSecondaryStorage().get(sessionToken);
+    if (!raw) return null;
+
+    const parsed = JSON.parse(raw) as {
+      session?: { expiresAt?: string | Date | null } | null;
+      user?: SessionUser | null;
+    };
+
+    if (!parsed?.user?.id || !isValidSessionExpiry(parsed.session?.expiresAt)) {
+      return null;
+    }
+
+    return {
+      user: {
+        id: parsed.user.id,
+        name: parsed.user.name ?? null,
+        email: parsed.user.email ?? null,
+        image: parsed.user.image ?? null,
+        companyId: parsed.user.companyId ?? null,
+      },
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function resolveSession(headers: Headers): Promise<SessionPayload> {
+  const normalizedHeaders = await buildNormalizedAuthHeaders(headers);
+
+  try {
+    const primarySession = normalizeSessionPayload(await auth.api.getSession({ headers: normalizedHeaders }));
+    if (primarySession?.user?.id) {
+      return primarySession;
+    }
+  } catch (error) {
+    logger.warn("auth_session_primary_resolution_failed", {
+      eventType: "error",
+      feature: "access-control",
+      errorMessage: error instanceof Error ? error.message : "Failed to resolve session.",
+    });
+  }
+
+  const cookieCacheSession = await resolveSessionFromCookieCache(normalizedHeaders);
+  if (cookieCacheSession?.user?.id) {
+    logger.info("auth_session_fallback_used", {
+      eventType: "operational",
+      feature: "access-control",
+      strategy: "cookie-cache",
+    });
+    return cookieCacheSession;
+  }
+
+  const secondaryStorageSession = await resolveSessionFromSecondaryStorage(normalizedHeaders);
+  if (secondaryStorageSession?.user?.id) {
+    logger.info("auth_session_fallback_used", {
+      eventType: "operational",
+      feature: "access-control",
+      strategy: "secondary-storage",
+    });
+    return secondaryStorageSession;
+  }
+
+  const databaseSession = await resolveSessionFromDatabase(normalizedHeaders);
+  if (databaseSession?.user?.id) {
+    logger.info("auth_session_fallback_used", {
+      eventType: "operational",
+      feature: "access-control",
+      strategy: "database",
+    });
+    return databaseSession;
+  }
+
+  return null;
 }
 
 function isSubscriptionActive(record: {
@@ -133,28 +372,22 @@ async function getRolePrivileges(companyId: string, userId: string) {
   const cached = userPrivilegeCache.get(cacheKey);
   if (cached && cached.expiresAt > Date.now()) return cached.privileges;
 
-  const assignments = await db
-    .select({ roleId: userCompanyRole.roleId })
+  const privilegeRows = await db
+    .select({ privilegeCode: companyRolePrivilege.privilegeCode })
     .from(userCompanyRole)
+    .innerJoin(
+      companyRolePrivilege,
+      and(
+        eq(companyRolePrivilege.companyId, userCompanyRole.companyId),
+        eq(companyRolePrivilege.roleId, userCompanyRole.roleId)
+      )
+    )
     .where(and(eq(userCompanyRole.companyId, companyId), eq(userCompanyRole.userId, userId)));
 
-  if (assignments.length === 0) {
+  if (privilegeRows.length === 0) {
     userPrivilegeCache.set(cacheKey, { privileges: [], expiresAt: Date.now() + ROLE_PRIVILEGE_CACHE_TTL_MS });
     return [] as string[];
   }
-
-  const privilegeRows = await db
-    .select({ privilegeCode: companyRolePrivilege.privilegeCode })
-    .from(companyRolePrivilege)
-    .where(
-      and(
-        eq(companyRolePrivilege.companyId, companyId),
-        inArray(
-          companyRolePrivilege.roleId,
-          assignments.map((row) => row.roleId)
-        )
-      )
-    );
 
   const privileges = [...new Set(privilegeRows.map((row) => row.privilegeCode))];
   userPrivilegeCache.set(cacheKey, {
@@ -171,29 +404,25 @@ async function getCompanyAdminPrivilegeCeiling(companyId: string) {
     return cached.privileges;
   }
 
-  const [adminRole] = await db
-    .select({ id: companyRole.id })
-    .from(companyRole)
+  const privilegeRows = await db
+    .select({ privilegeCode: companyRolePrivilege.privilegeCode })
+    .from(companyRolePrivilege)
+    .innerJoin(
+      companyRole,
+      and(
+        eq(companyRole.id, companyRolePrivilege.roleId),
+        eq(companyRole.companyId, companyRolePrivilege.companyId)
+      )
+    )
     .where(
       and(
         eq(companyRole.companyId, companyId),
         eq(companyRole.code, SYSTEM_ROLE_CODES.ADMIN),
         eq(companyRole.isActive, true)
       )
-    )
-    .limit(1);
-
-  if (!adminRole) return null;
-
-  const privilegeRows = await db
-    .select({ privilegeCode: companyRolePrivilege.privilegeCode })
-    .from(companyRolePrivilege)
-    .where(
-      and(
-        eq(companyRolePrivilege.companyId, companyId),
-        eq(companyRolePrivilege.roleId, adminRole.id)
-      )
     );
+
+  if (privilegeRows.length === 0) return null;
 
   const privileges = [...new Set(privilegeRows.map((row) => row.privilegeCode))].filter(
     isKnownPrivilegeCode
@@ -222,6 +451,57 @@ function deriveLegacyPrivileges(accessUser: {
   }
 
   return [...new Set([...base, ...extra])];
+}
+
+function pruneLegacyFlagSyncCache(now = Date.now()) {
+  if (legacyFlagSyncCache.size <= LEGACY_FLAG_SYNC_MAX_ENTRIES) return;
+
+  for (const [key, expiresAt] of legacyFlagSyncCache) {
+    if (expiresAt <= now || legacyFlagSyncCache.size > LEGACY_FLAG_SYNC_MAX_ENTRIES) {
+      legacyFlagSyncCache.delete(key);
+    }
+    if (legacyFlagSyncCache.size <= LEGACY_FLAG_SYNC_MAX_ENTRIES) {
+      break;
+    }
+  }
+}
+
+function scheduleLegacyFlagSync(
+  userId: string,
+  nextFlags: {
+    readOnly: boolean;
+    canWriteMasterData: boolean;
+    canWritePreTour: boolean;
+  }
+) {
+  const syncKey = `${userId}:${Number(nextFlags.readOnly)}:${Number(nextFlags.canWriteMasterData)}:${Number(
+    nextFlags.canWritePreTour
+  )}`;
+  const now = Date.now();
+  const throttledUntil = legacyFlagSyncCache.get(syncKey) ?? 0;
+  if (throttledUntil > now) return;
+
+  legacyFlagSyncCache.set(syncKey, now + LEGACY_FLAG_SYNC_TTL_MS);
+  pruneLegacyFlagSyncCache(now);
+
+  void db
+    .update(user)
+    .set({
+      readOnly: nextFlags.readOnly,
+      canWriteMasterData: nextFlags.canWriteMasterData,
+      canWritePreTour: nextFlags.canWritePreTour,
+      updatedAt: new Date(),
+    })
+    .where(eq(user.id, userId))
+    .catch((error) => {
+      legacyFlagSyncCache.delete(syncKey);
+      logger.warn("legacy_user_flag_sync_failed", {
+        eventType: "error",
+        feature: "access-control",
+        userId,
+        errorMessage: error instanceof Error ? error.message : "Legacy user flag sync failed",
+      });
+    });
 }
 
 export async function ensureCompanyDefaultRoles(companyId: string) {
@@ -298,7 +578,7 @@ export function getCachedSession(headers: Headers) {
     return cached;
   }
 
-  const sessionPromise = auth.api.getSession({ headers }) as Promise<SessionPayload>;
+  const sessionPromise = resolveSession(headers);
   sessionCache.set(headers, sessionPromise);
   return sessionPromise;
 }
@@ -333,157 +613,161 @@ function assertRequiredPrivilege(
 }
 
 async function loadBaseAccess(headers: Headers): Promise<ResolvedAccessContext> {
-  const session = await getCachedSession(headers);
-  if (!session?.user?.id) {
-    logger.warn("auth_session_missing", {
-      eventType: "error",
+  return profileServerOperation(
+    {
       feature: "access-control",
-    });
-    throw new AccessControlError(401, "UNAUTHORIZED", "You are not authenticated.");
-  }
-
-  const [currentUser] = await db
-    .select({
-      id: user.id,
-      name: user.name,
-      companyId: user.companyId,
-      role: user.role,
-      readOnly: user.readOnly,
-      canWriteMasterData: user.canWriteMasterData,
-      canWritePreTour: user.canWritePreTour,
-      isActive: user.isActive,
-    })
-    .from(user)
-    .where(eq(user.id, session.user.id))
-    .limit(1);
-
-  if (!currentUser) {
-    throw new AccessControlError(401, "UNAUTHORIZED", "Authenticated user not found.");
-  }
-  if (!currentUser.isActive) {
-    throw new AccessControlError(403, "FORBIDDEN", "Your account is inactive.");
-  }
-  if (!currentUser.companyId) {
-    throw new AccessControlError(403, "COMPANY_REQUIRED", "User is not linked to a company.");
-  }
-
-  const [currentCompany] = await db
-    .select({
-      id: company.id,
-      isActive: company.isActive,
-      subscriptionPlan: company.subscriptionPlan,
-      subscriptionStatus: company.subscriptionStatus,
-      subscriptionStartsAt: company.subscriptionStartsAt,
-      subscriptionEndsAt: company.subscriptionEndsAt,
-    })
-    .from(company)
-    .where(eq(company.id, currentUser.companyId))
-    .limit(1);
-
-  if (!currentCompany) {
-    throw new AccessControlError(404, "COMPANY_NOT_FOUND", "Company not found.");
-  }
-  if (!currentCompany.isActive) {
-    throw new AccessControlError(403, "COMPANY_INACTIVE", "Company is inactive.");
-  }
-
-  const legacyRole = normalizeLegacyRole(currentUser.role);
-  const elevated = legacyRole === "ADMIN" || legacyRole === "MANAGER";
-  const subscriptionLimited = !isSubscriptionActive(currentCompany);
-  const storedReadOnly = Boolean(currentUser.readOnly);
-  const storedCanWriteMasterData = Boolean(currentUser.canWriteMasterData);
-  const storedCanWritePreTour = Boolean(currentUser.canWritePreTour);
-
-  // Keep legacy flags consistent so existing UI and feature checks stay reliable.
-  if (elevated && (storedReadOnly || !storedCanWriteMasterData || !storedCanWritePreTour)) {
-    await db
-      .update(user)
-      .set({
-        readOnly: false,
-        canWriteMasterData: true,
-        canWritePreTour: true,
-        updatedAt: new Date(),
-      })
-      .where(eq(user.id, currentUser.id));
-  }
-
-  if (
-    subscriptionLimited &&
-    !elevated &&
-    (!storedReadOnly || storedCanWriteMasterData || storedCanWritePreTour)
-  ) {
-    await db
-      .update(user)
-      .set({
-        readOnly: true,
-        canWriteMasterData: false,
-        canWritePreTour: false,
-        updatedAt: new Date(),
-      })
-      .where(eq(user.id, currentUser.id));
-  }
-
-  const effectiveReadOnly = subscriptionLimited ? true : elevated ? false : storedReadOnly;
-  const plan = currentCompany.subscriptionPlan ?? "STARTER";
-  const allowedByPlan = new Set(getPrivilegesForPlan(plan));
-  const adminCeiling = await getCompanyAdminPrivilegeCeiling(currentCompany.id);
-  const allowedByCompany = new Set(
-    adminCeiling ? clampPrivilegesToPlan(plan, adminCeiling) : getPrivilegesForPlan(plan)
-  );
-  const assignedPrivileges = await getRolePrivileges(currentCompany.id, currentUser.id);
-
-  const baselinePrivileges = deriveLegacyPrivileges({
-    role: legacyRole,
-    readOnly: effectiveReadOnly,
-    canWriteMasterData: storedCanWriteMasterData || elevated,
-    canWritePreTour: storedCanWritePreTour || elevated,
-  });
-
-  const rawPrivileges = [
-    ...new Set([
-      ...baselinePrivileges,
-      ...assignedPrivileges.filter(isKnownPrivilegeCode),
-    ]),
-  ];
-
-  const privileges = clampPrivilegesToPlan(plan, rawPrivileges).filter((code) =>
-    allowedByCompany.has(code)
-  );
-  const privilegeSet = new Set(privileges);
-  const canWriteMasterData =
-    !subscriptionLimited &&
-    !effectiveReadOnly &&
-    (storedCanWriteMasterData || elevated || privilegeSet.has("MASTER_DATA_WRITE"));
-  const canWritePreTour =
-    !subscriptionLimited &&
-    !effectiveReadOnly &&
-    (storedCanWritePreTour || elevated || privilegeSet.has("PRE_TOUR_WRITE"));
-
-  appendRequestContext({
-    tenantId: currentCompany.id,
-    organizationId: currentCompany.id,
-    companyId: currentCompany.id,
-    userId: currentUser.id,
-  });
-
-  return {
-    access: {
-      userId: currentUser.id,
-      userName: currentUser.name,
-      companyId: currentCompany.id,
-      role: legacyRole,
-      readOnly: effectiveReadOnly,
-      canWriteMasterData,
-      canWritePreTour,
-      plan,
-      subscriptionStatus: currentCompany.subscriptionStatus,
-      subscriptionEndsAt: currentCompany.subscriptionEndsAt,
-      subscriptionLimited,
-      privileges,
+      operation: "load_base_access",
+      warnThresholdMs: 150,
+      getMetadata: (result) => ({
+        role: result.access.role,
+        subscriptionLimited: result.access.subscriptionLimited,
+        privilegeCount: result.access.privileges.length,
+      }),
     },
-    allowedByPlan,
-    allowedByCompany,
-  };
+    async () => {
+      const session = await getCachedSession(headers);
+      if (!session?.user?.id) {
+        logger.warn("auth_session_missing", {
+          eventType: "error",
+          feature: "access-control",
+          ...readAuthCookieSignals(await buildNormalizedAuthHeaders(headers)),
+        });
+        throw new AccessControlError(401, "UNAUTHORIZED", "You are not authenticated.");
+      }
+
+      const [currentRecord] = await db
+        .select({
+          id: user.id,
+          name: user.name,
+          companyId: user.companyId,
+          role: user.role,
+          readOnly: user.readOnly,
+          canWriteMasterData: user.canWriteMasterData,
+          canWritePreTour: user.canWritePreTour,
+          isActive: user.isActive,
+          companyRecordId: company.id,
+          companyIsActive: company.isActive,
+          companySubscriptionPlan: company.subscriptionPlan,
+          companySubscriptionStatus: company.subscriptionStatus,
+          companySubscriptionStartsAt: company.subscriptionStartsAt,
+          companySubscriptionEndsAt: company.subscriptionEndsAt,
+        })
+        .from(user)
+        .leftJoin(company, eq(company.id, user.companyId))
+        .where(eq(user.id, session.user.id))
+        .limit(1);
+
+      if (!currentRecord) {
+        throw new AccessControlError(401, "UNAUTHORIZED", "Authenticated user not found.");
+      }
+      if (!currentRecord.isActive) {
+        throw new AccessControlError(403, "FORBIDDEN", "Your account is inactive.");
+      }
+      if (!currentRecord.companyId) {
+        throw new AccessControlError(403, "COMPANY_REQUIRED", "User is not linked to a company.");
+      }
+      if (!currentRecord.companyRecordId) {
+        throw new AccessControlError(404, "COMPANY_NOT_FOUND", "Company not found.");
+      }
+      if (!currentRecord.companyIsActive) {
+        throw new AccessControlError(403, "COMPANY_INACTIVE", "Company is inactive.");
+      }
+
+      const legacyRole = normalizeLegacyRole(currentRecord.role);
+      const elevated = legacyRole === "ADMIN" || legacyRole === "MANAGER";
+      const subscriptionStatus = currentRecord.companySubscriptionStatus ?? "PENDING";
+      const subscriptionLimited = !isSubscriptionActive({
+        subscriptionStatus,
+        subscriptionEndsAt: currentRecord.companySubscriptionEndsAt,
+      });
+      const storedReadOnly = Boolean(currentRecord.readOnly);
+      const storedCanWriteMasterData = Boolean(currentRecord.canWriteMasterData);
+      const storedCanWritePreTour = Boolean(currentRecord.canWritePreTour);
+
+      // Keep legacy flags consistent for older readers, but do not block protected requests on writes.
+      if (elevated && (storedReadOnly || !storedCanWriteMasterData || !storedCanWritePreTour)) {
+        scheduleLegacyFlagSync(currentRecord.id, {
+          readOnly: false,
+          canWriteMasterData: true,
+          canWritePreTour: true,
+        });
+      }
+
+      if (
+        subscriptionLimited &&
+        !elevated &&
+        (!storedReadOnly || storedCanWriteMasterData || storedCanWritePreTour)
+      ) {
+        scheduleLegacyFlagSync(currentRecord.id, {
+          readOnly: true,
+          canWriteMasterData: false,
+          canWritePreTour: false,
+        });
+      }
+
+      const effectiveReadOnly = subscriptionLimited ? true : elevated ? false : storedReadOnly;
+      const plan = currentRecord.companySubscriptionPlan ?? "STARTER";
+      const allowedByPlan = new Set(getPrivilegesForPlan(plan));
+      const adminCeiling = await getCompanyAdminPrivilegeCeiling(currentRecord.companyRecordId);
+      const allowedByCompany = new Set(
+        adminCeiling ? clampPrivilegesToPlan(plan, adminCeiling) : getPrivilegesForPlan(plan)
+      );
+      const assignedPrivileges = await getRolePrivileges(currentRecord.companyRecordId, currentRecord.id);
+
+      const baselinePrivileges = deriveLegacyPrivileges({
+        role: legacyRole,
+        readOnly: effectiveReadOnly,
+        canWriteMasterData: storedCanWriteMasterData || elevated,
+        canWritePreTour: storedCanWritePreTour || elevated,
+      });
+
+      const rawPrivileges = [
+        ...new Set([
+          ...baselinePrivileges,
+          ...assignedPrivileges.filter(isKnownPrivilegeCode),
+        ]),
+      ];
+
+      const privileges = clampPrivilegesToPlan(plan, rawPrivileges).filter((code) =>
+        allowedByCompany.has(code)
+      );
+      const privilegeSet = new Set(privileges);
+      const canWriteMasterData =
+        !subscriptionLimited &&
+        !effectiveReadOnly &&
+        (storedCanWriteMasterData || elevated || privilegeSet.has("MASTER_DATA_WRITE"));
+      const canWritePreTour =
+        !subscriptionLimited &&
+        !effectiveReadOnly &&
+        (storedCanWritePreTour || elevated || privilegeSet.has("PRE_TOUR_WRITE"));
+
+      appendRequestContext({
+        tenantId: currentRecord.companyRecordId,
+        organizationId: currentRecord.companyRecordId,
+        companyId: currentRecord.companyRecordId,
+        userId: currentRecord.id,
+      });
+
+      return {
+        access: {
+          userId: currentRecord.id,
+          userName: currentRecord.name,
+          companyId: currentRecord.companyRecordId,
+          role: legacyRole,
+          readOnly: effectiveReadOnly,
+          canWriteMasterData,
+          canWritePreTour,
+          plan,
+          subscriptionStatus,
+          subscriptionEndsAt: currentRecord.companySubscriptionEndsAt,
+          subscriptionLimited,
+          privileges,
+        },
+        allowedByPlan,
+        allowedByCompany,
+      };
+    }
+  );
 }
 
 export async function resolveAccess(

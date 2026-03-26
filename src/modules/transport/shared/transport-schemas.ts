@@ -12,7 +12,10 @@ export const transportResourceSchema = z.enum([
 
 export const transportListQuerySchema = z.object({
   q: z.string().trim().max(120).optional(),
+  ids: z.string().trim().optional(),
+  page: z.coerce.number().int().min(1).default(1),
   limit: z.coerce.number().int().min(1).max(500).default(50),
+  codesOnly: z.enum(["true", "false"]).optional().transform((value) => value === "true"),
 });
 
 export const pointGeoSchema = z.object({

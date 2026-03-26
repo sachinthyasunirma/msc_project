@@ -2,19 +2,8 @@ import type { Metadata } from "next";
 import { AppConfirmProvider } from "@/components/app-confirm-provider";
 import { AppQueryProvider } from "@/components/app-query-provider";
 import { ClientLogBootstrap } from "@/components/logging/client-log-bootstrap";
-import { Geist, Geist_Mono } from "next/font/google";
 import { AppToaster } from "@/components/app-toaster";
 import "./globals.css";
-
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-});
-
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
-});
 
 export const metadata: Metadata = {
   title: "Create Next App",
@@ -28,10 +17,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" suppressHydrationWarning>
-      <body
-        suppressHydrationWarning
-        className={`${geistSans.variable} ${geistMono.variable} antialiased`}
-      >
+      <body suppressHydrationWarning className="antialiased">
         <AppQueryProvider>
           <AppConfirmProvider>
             <ClientLogBootstrap />

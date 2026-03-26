@@ -28,13 +28,14 @@ import {
   type SeasonFormState,
 } from "@/modules/accommodation/lib/accommodation-view-helpers";
 import { useAccommodationFormDialog } from "@/modules/accommodation/lib/use-accommodation-form-dialog";
-import type { HotelContractingBundle } from "@/modules/accommodation/shared/accommodation-contracting-types";
-import type { AccommodationHotelDetailData } from "@/modules/accommodation/shared/accommodation-detail-types";
+import type {
+  AccommodationHotelDetailData,
+  AccommodationHotelDetailTab,
+} from "@/modules/accommodation/shared/accommodation-detail-types";
 import {
   createAvailabilitySchema,
   createRoomTypeSchema,
 } from "@/modules/accommodation/shared/accommodation-schemas";
-import { getAccommodationContractingBundle } from "@/modules/accommodation/lib/accommodation-contracting-api";
 import { createSeason, deleteSeason, listSeasons, updateSeason } from "@/modules/season/lib/season-api";
 import type { SeasonOption } from "@/modules/season/lib/season-api";
 import { createSeasonSchema } from "@/modules/season/shared/season-schemas";
@@ -43,6 +44,7 @@ type UseAccommodationHotelDetailOptions = {
   hotelId?: string;
   isReadOnly: boolean;
   initialData?: AccommodationHotelDetailData | null;
+  activeTab: AccommodationHotelDetailTab;
 };
 
 const EMPTY_ROOM_TYPES: RoomType[] = [];
@@ -53,6 +55,7 @@ export function useAccommodationHotelDetail({
   hotelId,
   isReadOnly,
   initialData = null,
+  activeTab,
 }: UseAccommodationHotelDetailOptions) {
   const confirm = useConfirm();
   const queryClient = useQueryClient();
@@ -64,8 +67,9 @@ export function useAccommodationHotelDetail({
     (initialData?.availability as Availability[] | undefined) ?? EMPTY_AVAILABILITY;
   const initialSeasons =
     (initialData?.seasons as SeasonOption[] | undefined) ?? EMPTY_SEASONS;
-  const initialContracting =
-    (initialData?.contracting as HotelContractingBundle | null | undefined) ?? null;
+  const availabilityEnabled = hotelEnabled && activeTab === "availability";
+  const seasonsEnabled =
+    hotelEnabled && (activeTab === "room-rates" || activeTab === "contracting");
 
   const {
     data: selectedHotel = null,
@@ -96,8 +100,8 @@ export function useAccommodationHotelDetail({
   } = useQuery({
     queryKey: hotelId ? accommodationKeys.hotelAvailability(hotelId) : accommodationKeys.hotelDetails(),
     queryFn: () => listAvailability(String(hotelId)),
-    enabled: hotelEnabled,
-    initialData: hotelEnabled && initialAvailability.length > 0 ? initialAvailability : undefined,
+    enabled: availabilityEnabled,
+    initialData: initialAvailability.length > 0 ? initialAvailability : undefined,
   });
 
   const {
@@ -110,23 +114,9 @@ export function useAccommodationHotelDetail({
       const response = await listSeasons({ limit: 100 });
       return response.items;
     },
+    enabled: seasonsEnabled,
     initialData: initialSeasons.length > 0 ? initialSeasons : undefined,
-  });
-
-  const {
-    data: contracting = null,
-    isFetching: contractingLoading,
-    error: contractingError,
-  } = useQuery({
-    queryKey: hotelId
-      ? accommodationKeys.hotelContracting(hotelId)
-      : accommodationKeys.hotelDetails(),
-    queryFn: async () => {
-      const payload = await getAccommodationContractingBundle(String(hotelId));
-      return payload.contracting;
-    },
-    enabled: hotelEnabled,
-    initialData: hotelEnabled ? initialContracting ?? undefined : undefined,
+    staleTime: 5 * 60 * 1000,
   });
 
   const roomTypeDialog = useAccommodationFormDialog<RoomTypeFormState, RoomType>((row) =>
@@ -193,8 +183,7 @@ export function useAccommodationHotelDetail({
     (hotelLoading ||
       roomTypesLoading ||
       availabilityLoading ||
-      seasonsLoading ||
-      contractingLoading);
+      seasonsLoading);
 
   useEffect(() => {
     if (!hotelError) return;
@@ -226,23 +215,11 @@ export function useAccommodationHotelDetail({
     );
   }, [seasonsError]);
 
-  useEffect(() => {
-    if (!contractingError) return;
-    notify.error(
-      contractingError instanceof Error
-        ? contractingError.message
-        : "Failed to load accommodation contracting."
-    );
-  }, [contractingError]);
-
-  const refreshDetail = useCallback(async () => {
+  const refreshRoomTypeData = useCallback(async () => {
     if (!hotelId) return;
     await Promise.all([
-      queryClient.invalidateQueries({ queryKey: accommodationKeys.hotelDetail(hotelId) }),
       queryClient.invalidateQueries({ queryKey: accommodationKeys.hotelRoomTypes(hotelId) }),
-      queryClient.invalidateQueries({ queryKey: accommodationKeys.hotelAvailability(hotelId) }),
       queryClient.invalidateQueries({ queryKey: accommodationKeys.hotelContracting(hotelId) }),
-      queryClient.invalidateQueries({ queryKey: accommodationKeys.seasonOptions() }),
     ]);
   }, [hotelId, queryClient]);
 
@@ -323,17 +300,35 @@ export function useAccommodationHotelDetail({
         rowId: roomTypeDialog.dialog.row?.id,
       });
       roomTypeDialog.closeDialog();
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: accommodationKeys.hotelRoomTypes(hotelId) }),
-        queryClient.invalidateQueries({ queryKey: accommodationKeys.hotelContracting(hotelId) }),
-      ]);
+      await refreshRoomTypeData();
       notify.success(
         roomTypeDialog.dialog.mode === "create" ? "Room type created." : "Room type updated."
       );
     } catch (error) {
       notify.error(error instanceof Error ? error.message : "Failed to save room type.");
     }
-  }, [hotelId, queryClient, roomTypeDialog, roomTypeMutation]);
+  }, [hotelId, refreshRoomTypeData, roomTypeDialog, roomTypeMutation]);
+
+  const roomTypeExistingCodes = useCallback(
+    () =>
+      new Set(
+        roomTypes
+          .map((roomType) => String(roomType.code ?? "").trim().toUpperCase())
+          .filter((value) => value.length > 0)
+      ),
+    [roomTypes]
+  );
+
+  const refreshRoomTypeExistingCodes = useCallback(async () => {
+    if (!hotelId) return new Set<string>();
+
+    const latestRoomTypes = await listRoomTypes(hotelId);
+    return new Set(
+      latestRoomTypes
+        .map((roomType) => String(roomType.code ?? "").trim().toUpperCase())
+        .filter((value) => value.length > 0)
+    );
+  }, [hotelId]);
 
   const submitAvailability = useCallback(async () => {
     if (!hotelId) return;
@@ -404,16 +399,11 @@ export function useAccommodationHotelDetail({
       if (!hotelId) return;
       await withDelete("Delete room type?", async () => {
         await deleteRoomType(hotelId, row.id);
-        await Promise.all([
-          queryClient.invalidateQueries({ queryKey: accommodationKeys.hotelRoomTypes(hotelId) }),
-          queryClient.invalidateQueries({
-            queryKey: accommodationKeys.hotelContracting(hotelId),
-          }),
-        ]);
+        await refreshRoomTypeData();
         notify.success("Room type deleted.");
       });
     },
-    [hotelId, queryClient, withDelete]
+    [hotelId, refreshRoomTypeData, withDelete]
   );
 
   const deleteAvailabilityRecord = useCallback(
@@ -456,7 +446,6 @@ export function useAccommodationHotelDetail({
   return {
     availability,
     availabilityDialog,
-    contracting,
     deleteAvailabilityRecord,
     deleteRoomTypeRecord,
     deleteSeasonRecord,
@@ -464,8 +453,10 @@ export function useAccommodationHotelDetail({
     openAvailabilityDialog,
     openRoomTypeDialog,
     openSeasonDialog,
-    refreshDetail,
+    refreshRoomTypeData,
     roomTypeDialog,
+    roomTypeExistingCodes,
+    refreshRoomTypeExistingCodes,
     roomTypes,
     saving,
     seasonDialog,

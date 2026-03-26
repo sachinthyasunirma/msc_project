@@ -90,6 +90,12 @@ function toPriceNumber(value: string | number | null | undefined) {
   return Number.isFinite(numeric) ? numeric : 0;
 }
 
+function toDecimalValue(value: string | number | null | undefined, scale = 2) {
+  if (value === null || value === undefined || value === "") return null;
+  const numeric = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(numeric) ? numeric.toFixed(scale) : null;
+}
+
 function getNestedErrorCandidates(error: unknown) {
   const queue: unknown[] = [error];
   const seen = new Set<unknown>();
@@ -989,6 +995,7 @@ export async function createHotelCancellationPolicyRule(
       .values({
         ...parsed.data,
         policyId,
+        penaltyValue: toDecimalValue(parsed.data.penaltyValue) ?? "0.00",
       })
       .returning();
     return created;
@@ -1034,6 +1041,10 @@ export async function updateHotelCancellationPolicyRule(
       .update(schema.hotelCancellationPolicyRule)
       .set({
         ...parsed.data,
+        penaltyValue:
+          parsed.data.penaltyValue !== undefined
+            ? (toDecimalValue(parsed.data.penaltyValue) ?? undefined)
+            : undefined,
         updatedAt: new Date(),
       })
       .where(eq(schema.hotelCancellationPolicyRule.id, ruleId))
@@ -1337,6 +1348,15 @@ export async function createHotelRoomRate(
         ...parsed.data,
         ratePlanId,
         hotelId,
+        singleUseRate: toDecimalValue(parsed.data.singleUseRate),
+        doubleRate: toDecimalValue(parsed.data.doubleRate),
+        tripleRate: toDecimalValue(parsed.data.tripleRate),
+        quadRate: toDecimalValue(parsed.data.quadRate),
+        extraAdultRate: toDecimalValue(parsed.data.extraAdultRate),
+        childWithBedRate: toDecimalValue(parsed.data.childWithBedRate),
+        childNoBedRate: toDecimalValue(parsed.data.childNoBedRate),
+        infantRate: toDecimalValue(parsed.data.infantRate),
+        singleSupplementRate: toDecimalValue(parsed.data.singleSupplementRate),
       })
       .returning();
     return created;
@@ -1389,6 +1409,34 @@ export async function updateHotelRoomRate(
       .update(schema.hotelRoomRate)
       .set({
         ...parsed.data,
+        singleUseRate:
+          parsed.data.singleUseRate !== undefined
+            ? toDecimalValue(parsed.data.singleUseRate)
+            : undefined,
+        doubleRate:
+          parsed.data.doubleRate !== undefined ? toDecimalValue(parsed.data.doubleRate) : undefined,
+        tripleRate:
+          parsed.data.tripleRate !== undefined ? toDecimalValue(parsed.data.tripleRate) : undefined,
+        quadRate:
+          parsed.data.quadRate !== undefined ? toDecimalValue(parsed.data.quadRate) : undefined,
+        extraAdultRate:
+          parsed.data.extraAdultRate !== undefined
+            ? toDecimalValue(parsed.data.extraAdultRate)
+            : undefined,
+        childWithBedRate:
+          parsed.data.childWithBedRate !== undefined
+            ? toDecimalValue(parsed.data.childWithBedRate)
+            : undefined,
+        childNoBedRate:
+          parsed.data.childNoBedRate !== undefined
+            ? toDecimalValue(parsed.data.childNoBedRate)
+            : undefined,
+        infantRate:
+          parsed.data.infantRate !== undefined ? toDecimalValue(parsed.data.infantRate) : undefined,
+        singleSupplementRate:
+          parsed.data.singleSupplementRate !== undefined
+            ? toDecimalValue(parsed.data.singleSupplementRate)
+            : undefined,
         updatedAt: new Date(),
       })
       .where(eq(schema.hotelRoomRate.id, roomRateId))
@@ -1604,6 +1652,7 @@ export async function createHotelRateChildPolicy(
       .values({
         ...parsed.data,
         roomRateId,
+        amount: toDecimalValue(parsed.data.amount) ?? "0.00",
       })
       .returning();
     return created;
@@ -1650,6 +1699,10 @@ export async function updateHotelRateChildPolicy(
       .update(schema.hotelRateChildPolicy)
       .set({
         ...parsed.data,
+        amount:
+          parsed.data.amount !== undefined
+            ? (toDecimalValue(parsed.data.amount) ?? undefined)
+            : undefined,
         updatedAt: new Date(),
       })
       .where(eq(schema.hotelRateChildPolicy.id, childPolicyId))
@@ -1955,6 +2008,7 @@ export async function createHotelFeeRule(
       .values({
         ...parsed.data,
         ratePlanId,
+        amount: toDecimalValue(parsed.data.amount) ?? "0.00",
       })
       .returning();
     return created;
@@ -2047,6 +2101,7 @@ export async function createHotelRateAdjustment(
       .values({
         ...parsed.data,
         ratePlanId,
+        amount: toDecimalValue(parsed.data.amount) ?? "0.00",
       })
       .returning();
     return created;
@@ -2112,6 +2167,10 @@ export async function updateHotelRateAdjustment(
       .update(schema.hotelRateAdjustment)
       .set({
         ...parsed.data,
+        amount:
+          parsed.data.amount !== undefined
+            ? (toDecimalValue(parsed.data.amount) ?? undefined)
+            : undefined,
         updatedAt: new Date(),
       })
       .where(eq(schema.hotelRateAdjustment.id, adjustmentId))
@@ -2228,6 +2287,10 @@ export async function createHotelSellRateRule(
       .values({
         ...parsed.data,
         sellRatePlanId,
+        amount: toDecimalValue(parsed.data.amount) ?? "0.00",
+        roundingTo: toDecimalValue(parsed.data.roundingTo),
+        minSellAmount: toDecimalValue(parsed.data.minSellAmount),
+        maxSellAmount: toDecimalValue(parsed.data.maxSellAmount),
       })
       .returning();
     return created;
@@ -2285,6 +2348,20 @@ export async function updateHotelSellRateRule(
       .update(schema.hotelSellRateRule)
       .set({
         ...parsed.data,
+        amount:
+          parsed.data.amount !== undefined
+            ? (toDecimalValue(parsed.data.amount) ?? undefined)
+            : undefined,
+        roundingTo:
+          parsed.data.roundingTo !== undefined ? toDecimalValue(parsed.data.roundingTo) : undefined,
+        minSellAmount:
+          parsed.data.minSellAmount !== undefined
+            ? toDecimalValue(parsed.data.minSellAmount)
+            : undefined,
+        maxSellAmount:
+          parsed.data.maxSellAmount !== undefined
+            ? toDecimalValue(parsed.data.maxSellAmount)
+            : undefined,
         updatedAt: new Date(),
       })
       .where(eq(schema.hotelSellRateRule.id, sellRateRuleId))
@@ -2369,6 +2446,10 @@ export async function updateHotelFeeRule(
       .update(schema.hotelFeeRule)
       .set({
         ...parsed.data,
+        amount:
+          parsed.data.amount !== undefined
+            ? (toDecimalValue(parsed.data.amount) ?? undefined)
+            : undefined,
         updatedAt: new Date(),
       })
       .where(eq(schema.hotelFeeRule.id, feeRuleId))

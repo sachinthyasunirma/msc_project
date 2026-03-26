@@ -1,6 +1,6 @@
 "use client";
 
-import { CarFront, MapPinned } from "lucide-react";
+import { MapPinned, ReceiptText, Truck } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -12,100 +12,162 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import type { PreTourTransportAllocationState } from "@/modules/pre-tour/shared/pre-tour-item-allocation-types";
+import type {
+  PreTourTransportAllocationState,
+  PreTourTransportRateCard,
+} from "@/modules/pre-tour/shared/pre-tour-item-allocation-types";
+import { PreTourItemRateCards } from "@/modules/pre-tour/ui/components/pre-tour-item-rate-cards";
 
 type Option = { value: string; label: string };
 
 type TransportAllocationTabProps = {
   value: PreTourTransportAllocationState;
-  vehicleOptions: Option[];
   locationOptions: Option[];
+  vehicleCategoryOptions: Option[];
+  vehicleTypeOptions: Option[];
+  transportRateBasis: "VEHICLE_CATEGORY" | "VEHICLE_TYPE";
   dayRouteSummary: string;
+  rateOptions: PreTourTransportRateCard[];
+  selectedRateId: string;
+  loadingRates: boolean;
   disabled?: boolean;
   onChange: (patch: Partial<PreTourTransportAllocationState>) => void;
+  onSelectRate: (rateId: string) => void;
 };
+
+const CHARGE_METHOD_OPTIONS: Array<{
+  value: PreTourTransportAllocationState["chargeMethod"];
+  label: string;
+}> = [
+  { value: "PER_TRANSFER", label: "Per Transfer" },
+  { value: "PER_VEHICLE", label: "Per Vehicle" },
+  { value: "PER_PAX", label: "Per Pax" },
+  { value: "PER_HOUR", label: "Per Hour" },
+  { value: "PER_DAY", label: "Per Day" },
+  { value: "PER_KM", label: "Per Km" },
+  { value: "SLAB", label: "Slab" },
+];
 
 export function TransportAllocationTab({
   value,
-  vehicleOptions,
   locationOptions,
+  vehicleCategoryOptions,
+  vehicleTypeOptions,
+  transportRateBasis,
   dayRouteSummary,
+  rateOptions,
+  selectedRateId,
+  loadingRates,
   disabled = false,
   onChange,
+  onSelectRate,
 }: TransportAllocationTabProps) {
+  const requiresPax = value.chargeMethod === "PER_PAX";
+  const vehicleLabel =
+    transportRateBasis === "VEHICLE_CATEGORY" ? "Vehicle category" : "Vehicle type";
+  const vehiclePlaceholder =
+    transportRateBasis === "VEHICLE_CATEGORY"
+      ? "Select vehicle category"
+      : "Select vehicle type";
+  const vehicleOptions =
+    transportRateBasis === "VEHICLE_CATEGORY" ? vehicleCategoryOptions : vehicleTypeOptions;
+
   return (
     <div className="space-y-4">
       <Card className="border-border/70">
         <CardHeader className="pb-3">
           <CardTitle className="flex items-center gap-2 text-base">
-            <CarFront className="size-4" />
-            Transport Service
+            <Truck className="size-4" />
+            Transport Pricing Context
           </CardTitle>
           <p className="text-xs text-muted-foreground">
-            Use the day route as the itinerary reference, then define the actual operational trip for this transport item.
+            Select the quotation charge method first. Matching transport master rates are resolved from the route and vehicle basis.
           </p>
         </CardHeader>
-        <CardContent className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-          <div className="md:col-span-2 xl:col-span-3">
-            <div className="grid gap-2">
-              <Label>Vehicle / transport service</Label>
-              <Select
-                value={value.vehicleTypeId}
-                onValueChange={(vehicleTypeId) => onChange({ vehicleTypeId })}
-                disabled={disabled}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Select transport service" />
-                </SelectTrigger>
-                <SelectContent>
-                  {vehicleOptions.map((option) => (
-                    <SelectItem key={option.value} value={option.value}>
-                      {option.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
+        <CardContent className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
           <div className="grid gap-2">
-            <Label>Trip basis</Label>
+            <Label>Charge method</Label>
             <Select
-              value={value.tripMode}
-              onValueChange={(tripMode) =>
-                onChange({ tripMode: tripMode as PreTourTransportAllocationState["tripMode"] })
+              value={value.chargeMethod}
+              onValueChange={(chargeMethod) =>
+                onChange({
+                  chargeMethod: chargeMethod as PreTourTransportAllocationState["chargeMethod"],
+                })
               }
               disabled={disabled}
             >
               <SelectTrigger>
-                <SelectValue />
+                <SelectValue placeholder="Select charge method" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="TRANSFER">Transfer</SelectItem>
-                <SelectItem value="ROUNDTRIP">Roundtrip</SelectItem>
-                <SelectItem value="CHARTER">Charter</SelectItem>
-                <SelectItem value="DISPOSAL">Disposal / standby</SelectItem>
+                {CHARGE_METHOD_OPTIONS.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {option.label}
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </div>
           <div className="grid gap-2">
-            <Label>Rate basis</Label>
+            <Label>{vehicleLabel}</Label>
+            <Select
+              value={
+                transportRateBasis === "VEHICLE_CATEGORY"
+                  ? value.vehicleCategoryId
+                  : value.vehicleTypeId
+              }
+              onValueChange={(nextValue) =>
+                onChange(
+                  transportRateBasis === "VEHICLE_CATEGORY"
+                    ? { vehicleCategoryId: nextValue, vehicleTypeId: "" }
+                    : { vehicleTypeId: nextValue, vehicleCategoryId: "" }
+                )
+              }
+              disabled={disabled}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder={vehiclePlaceholder} />
+              </SelectTrigger>
+              <SelectContent>
+                {vehicleOptions.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {option.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="grid gap-2">
+            <Label>Commercial note</Label>
             <Input
               value={value.unitBasis}
               onChange={(event) => onChange({ unitBasis: event.target.value })}
-              placeholder="Per transfer / per day / per vehicle"
+              placeholder="Billing note or routing remark"
               disabled={disabled}
             />
           </div>
           <div className="grid gap-2">
-            <Label>Pax</Label>
+            <Label>Vehicles / trips</Label>
             <Input
               type="number"
-              min="0"
-              value={value.pax}
-              onChange={(event) => onChange({ pax: event.target.value })}
+              min="1"
+              value={value.quantity}
+              onChange={(event) => onChange({ quantity: event.target.value })}
               disabled={disabled}
             />
           </div>
+          {requiresPax ? (
+            <div className="grid gap-2">
+              <Label>Quoted pax</Label>
+              <Input
+                type="number"
+                min="1"
+                value={value.pax}
+                onChange={(event) => onChange({ pax: event.target.value })}
+                disabled={disabled}
+              />
+            </div>
+          ) : null}
         </CardContent>
       </Card>
 
@@ -185,16 +247,6 @@ export function TransportAllocationTab({
               disabled={disabled}
             />
           </div>
-          <div className="grid gap-2">
-            <Label>Vehicles / trips</Label>
-            <Input
-              type="number"
-              min="1"
-              value={value.quantity}
-              onChange={(event) => onChange({ quantity: event.target.value })}
-              disabled={disabled}
-            />
-          </div>
           <div className="grid gap-2 md:col-span-2 xl:col-span-4">
             <Label>Driver / dispatch notes</Label>
             <Textarea
@@ -204,6 +256,42 @@ export function TransportAllocationTab({
               disabled={disabled}
             />
           </div>
+        </CardContent>
+      </Card>
+
+      <Card className="border-border/70">
+        <CardHeader className="pb-3">
+          <CardTitle className="flex items-center gap-2 text-base">
+            <ReceiptText className="size-4" />
+            Applicable Transport Master Fees
+          </CardTitle>
+          <p className="text-xs text-muted-foreground">
+            Matching route fees are resolved from transport master data based on the selected charge method and vehicle basis.
+          </p>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {loadingRates ? <p className="text-xs text-muted-foreground">Resolving transport master fees...</p> : null}
+          <PreTourItemRateCards
+            rates={rateOptions}
+            selectedRateId={selectedRateId}
+            disabled={disabled}
+            emptyMessage={
+              value.fromLocationId && value.toLocationId
+                ? "No matching transport master rates were found for the selected route and charge method. You can still price this allocation manually."
+                : "Select route, charge method, and vehicle basis to view matching transport master fees."
+            }
+            renderMeta={(rate) =>
+              [
+                rate.vehicleTypeLabel || rate.vehicleCategoryLabel,
+                rate.distanceKm !== null ? `${rate.distanceKm} km` : null,
+                rate.durationMin !== null ? `${rate.durationMin} min` : null,
+                rate.matchedTierLabel,
+              ]
+                .filter(Boolean)
+                .join(" • ")
+            }
+            onSelect={onSelectRate}
+          />
         </CardContent>
       </Card>
     </div>

@@ -32,6 +32,10 @@ export type ImportFieldConfig = {
 
 type ValidateContext = {
   locationByCode: Map<string, string>;
+  locationDetailsByCode?: Map<string, { city: string; country: string; address?: string }>;
+  supplierByCode?: Map<string, string>;
+  roomTypeByCode?: Map<string, string>;
+  cancellationPolicyByCode?: Map<string, string>;
   currencyByCode: Map<string, string>;
   activityByCode?: Map<string, string>;
   vehicleCategoryByCode: Map<string, string>;
@@ -45,6 +49,13 @@ export type ImportEntityConfig = {
   key:
     | "locations"
     | "hotels"
+    | "hotel-room-types"
+    | "hotel-contracts"
+    | "hotel-rate-plans"
+    | "hotel-room-rates"
+    | "hotel-cancellation-policies"
+    | "hotel-cancellation-policy-rules"
+    | "hotel-rate-restrictions"
     | "activities"
     | "activity-rates"
     | "guides"
@@ -95,6 +106,12 @@ type Props = {
 
 const RETRY_DELAY_MS = 800;
 const CHUNK_SIZE = 25;
+const VALIDATION_CHUNK_SIZE = 250;
+const PREVIEW_ROW_LIMIT = 200;
+
+function yieldToBrowser() {
+  return new Promise((resolve) => window.setTimeout(resolve, 0));
+}
 
 function parseBoolean(input: string): boolean | null {
   const normalized = input.trim().toLowerCase();
@@ -239,20 +256,188 @@ function validateRow(
       };
     } else if (config.key === "hotels") {
       const starRating = Number(values.starRating);
+      const locationCode = toUpperTrim(values.locationCode);
+      const location = locationCode ? context.locationDetailsByCode?.get(locationCode) ?? null : null;
+      if (!locationCode) {
+        errors.push("Location Code is required.");
+      } else if (!location) {
+        errors.push("Location code not found in system locations.");
+      }
       if (starRating < 1 || starRating > 5) {
         errors.push("Star Rating must be between 1 and 5.");
-      } else {
+      } else if (location) {
         payload = {
           code,
           name: values.name,
           description: values.description || null,
-          address: values.address,
-          city: values.city,
-          country: values.country,
+          address: values.address || location.address || "",
+          city: location.city,
+          country: location.country,
           starRating,
           contactEmail: values.contactEmail || null,
           contactPhone: values.contactPhone || null,
           isActive: parseBoolean(values.isActive) ?? true,
+        };
+      }
+    } else if (config.key === "hotel-room-types") {
+      payload = {
+        code,
+        name: values.name,
+        description: values.description || null,
+        maxOccupancy: Number(values.maxOccupancy),
+        bedType: values.bedType,
+        size: values.size || null,
+        amenities: values.amenitiesCsv
+          ? values.amenitiesCsv
+              .split(",")
+              .map((item) => item.trim())
+              .filter(Boolean)
+          : [],
+        totalRooms: Number(values.totalRooms),
+        availableRooms: values.availableRooms ? Number(values.availableRooms) : Number(values.totalRooms),
+        isActive: parseBoolean(values.isActive) ?? true,
+      };
+    } else if (config.key === "hotel-contracts") {
+      const supplierCode = toUpperTrim(values.supplierCode);
+      const supplierOrgId = supplierCode
+        ? context.supplierByCode?.get(supplierCode) ?? null
+        : null;
+      if (supplierCode && !supplierOrgId) {
+        errors.push("Supplier code not found.");
+      }
+      if (errors.length === 0) {
+        payload = {
+          code,
+          name: values.name || null,
+          supplierOrgId,
+          contractRef: values.contractRef || null,
+          contractType: values.contractType || "FIT",
+          currencyCode: values.currencyCode || "USD",
+          validFrom: values.validFrom,
+          validTo: values.validTo,
+          bookingFrom: values.bookingFrom || null,
+          bookingTo: values.bookingTo || null,
+          releaseDaysDefault: values.releaseDaysDefault ? Number(values.releaseDaysDefault) : null,
+          marketScope: values.marketScope || null,
+          guestNationalityScope: values.guestNationalityScope || null,
+          remarks: values.remarks || null,
+          status: values.status || "DRAFT",
+          isActive: parseBoolean(values.isActive) ?? true,
+        };
+      }
+    } else if (config.key === "hotel-rate-plans") {
+      const cancellationPolicyCode = toUpperTrim(values.cancellationPolicyCode);
+      const cancellationPolicyId = cancellationPolicyCode
+        ? context.cancellationPolicyByCode?.get(cancellationPolicyCode) ?? null
+        : null;
+      if (cancellationPolicyCode && !cancellationPolicyId) {
+        errors.push("Cancellation policy code not found.");
+      }
+      if (errors.length === 0) {
+        payload = {
+          code,
+          name: values.name,
+          description: values.description || null,
+          rateType: values.rateType || "CONTRACTED_BUY",
+          boardBasis: values.boardBasis,
+          pricingModel: values.pricingModel || "PER_ROOM_PER_NIGHT",
+          cancellationPolicyId,
+          validFrom: values.validFrom,
+          validTo: values.validTo,
+          bookingFrom: values.bookingFrom || null,
+          bookingTo: values.bookingTo || null,
+          releaseDaysOverride: values.releaseDaysOverride ? Number(values.releaseDaysOverride) : null,
+          marketCode: values.marketCode || null,
+          guestNationalityScope: values.guestNationalityScope || null,
+          isRefundable: parseBoolean(values.isRefundable) ?? true,
+          isCommissionable: parseBoolean(values.isCommissionable) ?? false,
+          isPackageOnly: parseBoolean(values.isPackageOnly) ?? false,
+          priority: values.priority ? Number(values.priority) : 0,
+          status: values.status || "ACTIVE",
+          isActive: parseBoolean(values.isActive) ?? true,
+        };
+      }
+    } else if (config.key === "hotel-room-rates") {
+      const roomTypeCode = toUpperTrim(values.roomTypeCode);
+      const roomTypeId = roomTypeCode ? context.roomTypeByCode?.get(roomTypeCode) ?? null : null;
+      if (!roomTypeCode) {
+        errors.push("Room type code is required.");
+      } else if (!roomTypeId) {
+        errors.push("Room type code not found.");
+      }
+      if (errors.length === 0 && roomTypeId) {
+        payload = {
+          code,
+          roomTypeId,
+          validFrom: values.validFrom,
+          validTo: values.validTo,
+          bookingFrom: values.bookingFrom || null,
+          bookingTo: values.bookingTo || null,
+          marketCode: values.marketCode || null,
+          guestNationalityScope: values.guestNationalityScope || null,
+          baseOccupancyAdults: Number(values.baseOccupancyAdults),
+          baseOccupancyChildren: values.baseOccupancyChildren ? Number(values.baseOccupancyChildren) : 0,
+          maxAdults: Number(values.maxAdults),
+          maxChildren: values.maxChildren ? Number(values.maxChildren) : 0,
+          maxOccupancy: values.maxOccupancy ? Number(values.maxOccupancy) : null,
+          singleUseRate: values.singleUseRate ? Number(values.singleUseRate) : null,
+          doubleRate: values.doubleRate ? Number(values.doubleRate) : null,
+          tripleRate: values.tripleRate ? Number(values.tripleRate) : null,
+          quadRate: values.quadRate ? Number(values.quadRate) : null,
+          extraAdultRate: values.extraAdultRate ? Number(values.extraAdultRate) : null,
+          childWithBedRate: values.childWithBedRate ? Number(values.childWithBedRate) : null,
+          childNoBedRate: values.childNoBedRate ? Number(values.childNoBedRate) : null,
+          infantRate: values.infantRate ? Number(values.infantRate) : null,
+          singleSupplementRate: values.singleSupplementRate ? Number(values.singleSupplementRate) : null,
+          currencyCode: values.currencyCode || "USD",
+          taxMode: values.taxMode || "EXCLUSIVE",
+          remarks: values.remarks || null,
+          status: values.status || "ACTIVE",
+          isActive: parseBoolean(values.isActive) ?? true,
+        };
+      }
+    } else if (config.key === "hotel-cancellation-policies") {
+      payload = {
+        code,
+        name: values.name,
+        description: values.description || null,
+        noShowPolicy: values.noShowPolicy || null,
+        afterCheckInPolicy: values.afterCheckInPolicy || null,
+        isDefault: parseBoolean(values.isDefault) ?? false,
+        isActive: parseBoolean(values.isActive) ?? true,
+      };
+    } else if (config.key === "hotel-cancellation-policy-rules") {
+      payload = {
+        code,
+        fromDaysBefore: values.fromDaysBefore ? Number(values.fromDaysBefore) : null,
+        toDaysBefore: values.toDaysBefore ? Number(values.toDaysBefore) : null,
+        penaltyType: values.penaltyType,
+        penaltyValue: Number(values.penaltyValue),
+        basis: values.basis || null,
+        appliesOnNoShow: parseBoolean(values.appliesOnNoShow) ?? false,
+        appliesAfterCheckIn: parseBoolean(values.appliesAfterCheckIn) ?? false,
+      };
+    } else if (config.key === "hotel-rate-restrictions") {
+      const roomTypeCode = toUpperTrim(values.roomTypeCode);
+      const roomTypeId = roomTypeCode ? context.roomTypeByCode?.get(roomTypeCode) ?? null : null;
+      if (roomTypeCode && !roomTypeId) {
+        errors.push("Room type code not found.");
+      }
+      if (errors.length === 0) {
+        payload = {
+          code,
+          roomTypeId,
+          stayFrom: values.stayFrom,
+          stayTo: values.stayTo,
+          bookingFrom: values.bookingFrom || null,
+          bookingTo: values.bookingTo || null,
+          minStay: values.minStay ? Number(values.minStay) : null,
+          maxStay: values.maxStay ? Number(values.maxStay) : null,
+          closedToArrival: parseBoolean(values.closedToArrival) ?? false,
+          closedToDeparture: parseBoolean(values.closedToDeparture) ?? false,
+          stopSell: parseBoolean(values.stopSell) ?? false,
+          releaseDays: values.releaseDays ? Number(values.releaseDays) : null,
+          notes: values.notes || null,
         };
       }
     } else if (config.key === "activities") {
@@ -587,6 +772,7 @@ export function MasterBatchImportDialog({
 }: Props) {
   const [rows, setRows] = useState<ImportRow[]>([]);
   const [isUploading, setIsUploading] = useState(false);
+  const [isProcessingFile, setIsProcessingFile] = useState(false);
   const [fileName, setFileName] = useState("");
   const [isRefreshingCodes, setIsRefreshingCodes] = useState(false);
   const [localExistingCodes, setLocalExistingCodes] = useState<Set<string>>(existingCodes);
@@ -600,6 +786,13 @@ export function MasterBatchImportDialog({
     const failed = rows.filter((row) => row.status === "failed").length;
     return { total, valid, duplicate, invalid, uploaded, failed };
   }, [rows]);
+
+  const previewRows = useMemo(
+    () => rows.slice(0, PREVIEW_ROW_LIMIT),
+    [rows]
+  );
+
+  const hiddenPreviewCount = Math.max(0, rows.length - previewRows.length);
 
   const getFilteredOptions = (field: ImportFieldConfig, rowValues: Record<string, string>) => {
     const options = field.options ?? [];
@@ -615,6 +808,7 @@ export function MasterBatchImportDialog({
   const resetState = () => {
     setRows([]);
     setIsUploading(false);
+    setIsProcessingFile(false);
     setFileName("");
     setLocalExistingCodes(existingCodes);
   };
@@ -629,6 +823,7 @@ export function MasterBatchImportDialog({
     setRows([]);
     setFileName("");
     setIsUploading(false);
+    setIsProcessingFile(false);
     setLocalExistingCodes(existingCodes);
   }, [config.key, open, existingCodes]);
 
@@ -643,23 +838,32 @@ export function MasterBatchImportDialog({
     URL.revokeObjectURL(url);
   };
 
-  const revalidateRows = (rawRows: Array<{ index: number; values: Record<string, string> }>) => {
+  const revalidateRows = async (rawRows: Array<{ index: number; values: Record<string, string> }>) => {
     const fileCodes = new Set<string>();
-    const updated: ImportRow[] = rawRows.map((raw) => {
-      const validation = validateRow(config, raw.values, context, localExistingCodes, fileCodes);
-      if (validation.duplicateKey) {
-        fileCodes.add(validation.duplicateKey);
+    const updated: ImportRow[] = [];
+    for (let start = 0; start < rawRows.length; start += VALIDATION_CHUNK_SIZE) {
+      const chunk = rawRows.slice(start, start + VALIDATION_CHUNK_SIZE);
+      chunk.forEach((raw) => {
+        const validation = validateRow(config, raw.values, context, localExistingCodes, fileCodes);
+        if (validation.duplicateKey) {
+          fileCodes.add(validation.duplicateKey);
+        }
+        const isDuplicate = validation.errors.some((error) =>
+          error.toLowerCase().includes("duplicate code")
+        );
+        updated.push({
+          index: raw.index,
+          values: raw.values,
+          errors: validation.errors,
+          payload: validation.payload,
+          duplicateKey: validation.duplicateKey,
+          status: validation.errors.length === 0 ? "ready" : isDuplicate ? "duplicate" : "error",
+        });
+      });
+      if (rawRows.length > VALIDATION_CHUNK_SIZE) {
+        await yieldToBrowser();
       }
-      const isDuplicate = validation.errors.some((error) => error.toLowerCase().includes("duplicate code"));
-      return {
-        index: raw.index,
-        values: raw.values,
-        errors: validation.errors,
-        payload: validation.payload,
-        duplicateKey: validation.duplicateKey,
-        status: validation.errors.length === 0 ? "ready" : isDuplicate ? "duplicate" : "error",
-      };
-    });
+    }
     setRows(updated);
   };
 
@@ -670,31 +874,36 @@ export function MasterBatchImportDialog({
       notify.error("Upload a CSV file. Save your Excel sheet as CSV and upload.");
       return;
     }
-    const text = await file.text();
-    const parsed = parseCsv(text);
-    if (parsed.length < 2) {
-      notify.error("Template header and at least one data row are required.");
-      return;
-    }
+    try {
+      setIsProcessingFile(true);
+      const text = await file.text();
+      const parsed = parseCsv(text);
+      if (parsed.length < 2) {
+        notify.error("Template header and at least one data row are required.");
+        return;
+      }
 
-    const headerRow = parsed[0].map((header) => header.trim());
-    const requiredHeaders = config.fields.map((field) => field.key);
-    const missingHeaders = requiredHeaders.filter((header) => !headerRow.includes(header));
-    if (missingHeaders.length > 0) {
-      notify.error(`Missing columns: ${missingHeaders.join(", ")}`);
-      return;
-    }
+      const headerRow = parsed[0].map((header) => header.trim());
+      const requiredHeaders = config.fields.map((field) => field.key);
+      const missingHeaders = requiredHeaders.filter((header) => !headerRow.includes(header));
+      if (missingHeaders.length > 0) {
+        notify.error(`Missing columns: ${missingHeaders.join(", ")}`);
+        return;
+      }
 
-    const records = parsed.slice(1).map((cells, idx) => {
-      const values: Record<string, string> = {};
-      headerRow.forEach((header, colIndex) => {
-        values[header] = (cells[colIndex] ?? "").trim();
+      const records = parsed.slice(1).map((cells, idx) => {
+        const values: Record<string, string> = {};
+        headerRow.forEach((header, colIndex) => {
+          values[header] = (cells[colIndex] ?? "").trim();
+        });
+        return { index: idx + 1, values };
       });
-      return { index: idx + 1, values };
-    });
 
-    setFileName(file.name);
-    revalidateRows(records);
+      setFileName(file.name);
+      await revalidateRows(records);
+    } finally {
+      setIsProcessingFile(false);
+    }
   };
 
   const refreshExistingCodes = async () => {
@@ -703,7 +912,7 @@ export function MasterBatchImportDialog({
       const refreshed = await onRefreshExistingCodes();
       setLocalExistingCodes(refreshed);
       const rawRows = rows.map((row) => ({ index: row.index, values: row.values }));
-      revalidateRows(rawRows);
+      await revalidateRows(rawRows);
       notify.success("Existing codes refreshed.");
     } catch (error) {
       notify.error(error instanceof Error ? error.message : "Failed to refresh codes.");
@@ -712,12 +921,12 @@ export function MasterBatchImportDialog({
     }
   };
 
-  const updateCell = (rowIndex: number, fieldKey: string, value: string) => {
+  const updateCell = async (rowIndex: number, fieldKey: string, value: string) => {
     const rawRows = rows.map((row) => ({
       index: row.index,
       values: row.index === rowIndex ? { ...row.values, [fieldKey]: value } : row.values,
     }));
-    revalidateRows(rawRows);
+    await revalidateRows(rawRows);
   };
 
   const uploadRows = async () => {
@@ -796,16 +1005,19 @@ export function MasterBatchImportDialog({
               onChange={(event) => void onFileSelected(event.target.files?.[0])}
             />
             {fileName ? <p className="text-xs text-muted-foreground">Selected: {fileName}</p> : null}
+            {isProcessingFile ? (
+              <p className="text-xs text-muted-foreground">Validating rows, please wait...</p>
+            ) : null}
           </div>
           <Button variant="outline" onClick={downloadTemplate} className="self-end">
             <Download className="mr-2 size-4" />
             Download Sample Sheet
           </Button>
-          <Button variant="outline" onClick={() => void refreshExistingCodes()} disabled={isRefreshingCodes} className="self-end">
+          <Button variant="outline" onClick={() => void refreshExistingCodes()} disabled={isRefreshingCodes || isProcessingFile} className="self-end">
             <RefreshCw className="mr-2 size-4" />
             {isRefreshingCodes ? "Refreshing..." : "Refresh Duplicates"}
           </Button>
-          <Button onClick={() => void uploadRows()} disabled={isUploading || readOnly} className="self-end master-add-btn">
+          <Button onClick={() => void uploadRows()} disabled={isUploading || isProcessingFile || readOnly} className="self-end master-add-btn">
             <Upload className="mr-2 size-4" />
             {isUploading ? "Uploading..." : "Upload Valid Rows"}
           </Button>
@@ -828,6 +1040,9 @@ export function MasterBatchImportDialog({
           <Badge variant="outline">Invalid: {summary.invalid}</Badge>
           <Badge variant="default">Uploaded: {summary.uploaded}</Badge>
           <Badge variant={summary.failed > 0 ? "destructive" : "secondary"}>Failed: {summary.failed}</Badge>
+          {hiddenPreviewCount > 0 ? (
+            <Badge variant="outline">Previewing first {PREVIEW_ROW_LIMIT} rows</Badge>
+          ) : null}
         </div>
 
         <div className="max-h-[48vh] overflow-auto rounded-md border">
@@ -849,16 +1064,16 @@ export function MasterBatchImportDialog({
                   </TableCell>
                 </TableRow>
               ) : (
-                rows.map((row) => (
+                previewRows.map((row) => (
                   <TableRow key={row.index}>
                     <TableCell>{row.index}</TableCell>
                     {config.fields.map((field) => (
                       <TableCell key={`${row.index}-${field.key}`} className="min-w-[180px]">
                         {field.type === "dropdown" ? (
-                          <Select
-                            value={row.values[field.key] ?? ""}
-                            onValueChange={(value) => updateCell(row.index, field.key, value)}
-                          >
+                              <Select
+                                value={row.values[field.key] ?? ""}
+                                onValueChange={(value) => void updateCell(row.index, field.key, value)}
+                              >
                             <SelectTrigger className="h-8">
                               <SelectValue placeholder="Select..." />
                             </SelectTrigger>
@@ -874,7 +1089,7 @@ export function MasterBatchImportDialog({
                           <Input
                             className="h-8"
                             value={row.values[field.key] ?? ""}
-                            onChange={(event) => updateCell(row.index, field.key, event.target.value)}
+                            onChange={(event) => void updateCell(row.index, field.key, event.target.value)}
                           />
                         )}
                       </TableCell>
@@ -902,6 +1117,13 @@ export function MasterBatchImportDialog({
                   </TableRow>
                 ))
               )}
+              {hiddenPreviewCount > 0 ? (
+                <TableRow>
+                  <TableCell colSpan={config.fields.length + 2} className="text-center text-muted-foreground">
+                    {hiddenPreviewCount} more row(s) are loaded and will still upload, but hidden from preview to keep the screen responsive.
+                  </TableCell>
+                </TableRow>
+              ) : null}
             </TableBody>
           </Table>
         </div>

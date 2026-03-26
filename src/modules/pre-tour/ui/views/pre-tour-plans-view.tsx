@@ -1,35 +1,105 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import dynamic from "next/dynamic";
 import { Plus, RefreshCw } from "lucide-react";
 import { notify } from "@/lib/notify";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { LoadingState } from "@/components/ui/loading-state";
 import {
   createPreTourRecord,
   deletePreTourRecord,
-  listPreTourRecords,
+  listAllPreTourRecords,
+  listPaginatedPreTourRecords,
   updatePreTourRecord,
 } from "@/modules/pre-tour/lib/pre-tour-api";
 import {
   defaultValue,
   getCoordinatesFromGeo,
-  matchesQuery,
   parseFieldValue,
+  validateRequiredFieldValue,
   toLocalDateTime,
   toNightCount,
 } from "@/modules/pre-tour/lib/pre-tour-management-utils";
 import type { PreTourMastersData } from "@/modules/pre-tour/shared/pre-tour-master-types";
 import type { DetailSheetState, PreTourResourceKey, Row } from "@/modules/pre-tour/shared/pre-tour-management-types";
-import { PreTourCopyDialogController } from "@/modules/pre-tour/ui/components/pre-tour-copy-dialog-controller";
-import { PreTourDetailSheet } from "@/modules/pre-tour/ui/components/pre-tour-detail-sheet";
-import { PreTourRecordDialog } from "@/modules/pre-tour/ui/components/pre-tour-record-dialog";
-import { SectionTable } from "@/modules/pre-tour/ui/components/pre-tour-section-table";
 import { usePreTourAccess } from "@/modules/pre-tour/ui/hooks/use-pre-tour-access";
 import { usePreTourMasters } from "@/modules/pre-tour/ui/hooks/use-pre-tour-masters";
 import { usePreTourPlanOperations } from "@/modules/pre-tour/ui/hooks/use-pre-tour-plan-operations";
-import { EMPTY_DAY_TRANSPORT_FORM, getPreTourFields } from "@/modules/pre-tour/ui/lib/pre-tour-form-config";
+import { getPreTourFields } from "@/modules/pre-tour/ui/lib/pre-tour-form-config";
+
+const SectionTable = dynamic(
+  () =>
+    import("@/modules/pre-tour/ui/components/pre-tour-section-table").then(
+      (module) => module.SectionTable
+    ),
+  {
+    loading: () => (
+      <LoadingState
+        compact
+        size="sm"
+        title="Loading plan table"
+        description="Preparing planning records and archive entries."
+      />
+    ),
+  }
+);
+
+const PreTourCopyDialogController = dynamic(
+  () =>
+    import("@/modules/pre-tour/ui/components/pre-tour-copy-dialog-controller").then(
+      (module) => module.PreTourCopyDialogController
+    ),
+  { ssr: false }
+);
+const PreTourDetailSheet = dynamic(
+  () =>
+    import("@/modules/pre-tour/ui/components/pre-tour-detail-sheet").then(
+      (module) => module.PreTourDetailSheet
+    ),
+  { ssr: false }
+);
+const PreTourRecordDialog = dynamic(
+  () =>
+    import("@/modules/pre-tour/ui/components/pre-tour-record-dialog").then(
+      (module) => module.PreTourRecordDialog
+    ),
+  { ssr: false }
+);
+const TRANSPORT_CHARGE_METHODS = new Set([
+  "PER_TRANSFER",
+  "PER_VEHICLE",
+  "PER_PAX",
+  "PER_HOUR",
+  "PER_DAY",
+  "PER_KM",
+  "SLAB",
+]);
+const PRE_TOUR_LIST_PAGE_SIZE = 25;
+
+function readTransportChargeMethodDefault(row: Row | null | undefined) {
+  const pricingPolicy =
+    row?.pricingPolicy && typeof row.pricingPolicy === "object" && !Array.isArray(row.pricingPolicy)
+      ? (row.pricingPolicy as Record<string, unknown>)
+      : null;
+  const value = String(pricingPolicy?.transportChargeMethodDefault || "").toUpperCase();
+  return TRANSPORT_CHARGE_METHODS.has(value) ? value : "PER_KM";
+}
+
+function applyTransportChargeMethodDefaultToPricingPolicy(payload: Record<string, unknown>) {
+  const value = String(payload.transportChargeMethodDefault || "").toUpperCase();
+  delete payload.transportChargeMethodDefault;
+  const currentPricingPolicy =
+    payload.pricingPolicy && typeof payload.pricingPolicy === "object" && !Array.isArray(payload.pricingPolicy)
+      ? (payload.pricingPolicy as Record<string, unknown>)
+      : {};
+  payload.pricingPolicy = {
+    ...currentPricingPolicy,
+    transportChargeMethodDefault: TRANSPORT_CHARGE_METHODS.has(value) ? value : "PER_KM",
+  };
+}
 
 type PreTourPlansViewProps = {
   initialResource?: PreTourResourceKey;
@@ -42,7 +112,7 @@ export function PreTourPlansView({
   showBinOnly = false,
   initialMasters = null,
 }: PreTourPlansViewProps) {
-  const { isReadOnly, isAdmin, canViewRouteMap, canViewCosting } = usePreTourAccess();
+  const { isReadOnly, isAdmin, canViewRouteMap } = usePreTourAccess();
   const {
     locations,
     currencies,
@@ -57,6 +127,11 @@ export function PreTourPlansView({
   const [saving, setSaving] = useState(false);
   const [plans, setPlans] = useState<Row[]>([]);
   const [planBins, setPlanBins] = useState<Row[]>([]);
+  const [debouncedQuery, setDebouncedQuery] = useState("");
+  const [cursorHistory, setCursorHistory] = useState<Array<string | null>>([null]);
+  const [pageIndex, setPageIndex] = useState(0);
+  const [hasNextPage, setHasNextPage] = useState(false);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [detailSheet, setDetailSheet] = useState<DetailSheetState>({
     open: false,
     title: "",
@@ -74,34 +149,73 @@ export function PreTourPlansView({
     resource: PreTourResourceKey;
     row: Row | null;
   }>({ open: false, mode: "create", resource: initialResource, row: null });
+  const activeCursor = cursorHistory[pageIndex] ?? null;
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedQuery(query.trim());
+      setCursorHistory([null]);
+      setPageIndex(0);
+      setHasNextPage(false);
+      setNextCursor(null);
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [query]);
+
+  useEffect(() => {
+    setCursorHistory([null]);
+    setPageIndex(0);
+    setHasNextPage(false);
+    setNextCursor(null);
+  }, [showBinOnly]);
 
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
       if (showBinOnly) {
-        const binRows = await listPreTourRecords("pre-tour-bins", { limit: 200, q: query || undefined });
-        setPlanBins(binRows);
+        const response = await listPaginatedPreTourRecords("pre-tour-bins", {
+          limit: PRE_TOUR_LIST_PAGE_SIZE,
+          q: debouncedQuery || undefined,
+          cursor: activeCursor,
+        });
+        if (response.items.length === 0 && pageIndex > 0) {
+          setCursorHistory((previous) => previous.slice(0, pageIndex));
+          setPageIndex((previous) => Math.max(previous - 1, 0));
+          return;
+        }
+        setPlanBins(response.items);
         setPlans([]);
+        setHasNextPage(response.hasNext);
+        setNextCursor(response.nextCursor);
         return;
       }
 
-      const planRows = await listPreTourRecords("pre-tours", { limit: 400, q: query || undefined });
-      setPlans(planRows);
+      const response = await listPaginatedPreTourRecords("pre-tours", {
+        limit: PRE_TOUR_LIST_PAGE_SIZE,
+        q: debouncedQuery || undefined,
+        cursor: activeCursor,
+      });
+      if (response.items.length === 0 && pageIndex > 0) {
+        setCursorHistory((previous) => previous.slice(0, pageIndex));
+        setPageIndex((previous) => Math.max(previous - 1, 0));
+        return;
+      }
+      setPlans(response.items);
       setPlanBins([]);
+      setHasNextPage(response.hasNext);
+      setNextCursor(response.nextCursor);
     } catch (error) {
       notify.error(error instanceof Error ? error.message : "Failed to load records.");
     } finally {
       setLoading(false);
     }
-  }, [query, showBinOnly]);
+  }, [activeCursor, debouncedQuery, pageIndex, showBinOnly]);
 
   useEffect(() => {
     void loadData();
   }, [loadData]);
 
   const { clonePlanChildren, createVersionFromPlan } = usePreTourPlanOperations({
-    canViewCosting,
-    companyBaseCurrencyCode,
     onSuccess: loadData,
   });
 
@@ -211,7 +325,10 @@ export function PreTourPlansView({
   const dialogInitialForm = useMemo(() => {
     const nextForm: Row = {};
     fields.forEach((field) => {
-      const existing = dialog.row?.[field.key];
+      const existing =
+        field.key === "transportChargeMethodDefault"
+          ? readTransportChargeMethodDefault(dialog.row)
+          : dialog.row?.[field.key];
       if (field.type === "datetime") {
         nextForm[field.key] = existing ? toLocalDateTime(existing) : "";
       } else if (field.type === "json") {
@@ -225,14 +342,28 @@ export function PreTourPlansView({
     return nextForm;
   }, [dialog.row, fields]);
 
-  const filteredPlanRows = useMemo(
-    () => plans.filter((row) => matchesQuery("pre-tours", row, query)),
-    [plans, query]
+  const filteredPlanRows = useMemo(() => plans, [plans]);
+  const filteredBinRows = useMemo(() => planBins, [planBins]);
+
+  const paginationSummaryText = useMemo(
+    () =>
+      `Showing ${showBinOnly ? filteredBinRows.length : filteredPlanRows.length} records | Page ${pageIndex + 1}`,
+    [filteredBinRows.length, filteredPlanRows.length, pageIndex, showBinOnly]
   );
-  const filteredBinRows = useMemo(
-    () => planBins.filter((row) => matchesQuery("pre-tour-bins", row, query)),
-    [planBins, query]
-  );
+
+  const handleNextPage = useCallback(() => {
+    if (!nextCursor) return;
+    setCursorHistory((previous) => {
+      const nextHistory = previous.slice(0, pageIndex + 1);
+      nextHistory[pageIndex + 1] = nextCursor;
+      return nextHistory;
+    });
+    setPageIndex((previous) => previous + 1);
+  }, [nextCursor, pageIndex]);
+
+  const handlePreviousPage = useCallback(() => {
+    setPageIndex((previous) => Math.max(previous - 1, 0));
+  }, []);
 
   const locationCoordinatesById = useMemo(() => {
     const next = new Map<string, { name: string; coordinates: [number, number] }>();
@@ -283,11 +414,22 @@ export function PreTourPlansView({
 
       setDetailPreTourRouteLoading(true);
       try {
-        const dayRows = await listPreTourRecords("pre-tour-days", {
+        const dayRows = await listAllPreTourRecords("pre-tour-days", {
           planId: String(detailSheet.row.id),
-          limit: 500,
+          limit: 100,
+        });
+        const transportRows = await listAllPreTourRecords("pre-tour-items", {
+          planId: String(detailSheet.row.id),
+          itemType: "TRANSPORT",
+          limit: 100,
         });
         const sorted = [...dayRows].sort((a, b) => Number(a.dayNumber ?? 0) - Number(b.dayNumber ?? 0));
+        const transportByDayId = new Map<string, Row[]>();
+        transportRows.forEach((row) => {
+          const dayId = String(row.dayId || "");
+          if (!dayId) return;
+          transportByDayId.set(dayId, [...(transportByDayId.get(dayId) ?? []), row]);
+        });
         const ids: string[] = [];
         const appendDayPath = (path: unknown[]) => {
           const normalized = path
@@ -298,7 +440,14 @@ export function PreTourPlansView({
           if (ids.length > 0 && ids[ids.length - 1] === normalized[0]) normalized.shift();
           ids.push(...normalized);
         };
-        sorted.forEach((day) => appendDayPath([day.startLocationId, day.endLocationId]));
+        sorted.forEach((day) => {
+          const dayTransportItems = transportByDayId.get(String(day.id || "")) ?? [];
+          appendDayPath(
+            dayTransportItems
+              .flatMap((item) => [item.fromLocationId, item.toLocationId])
+              .filter(Boolean)
+          );
+        });
         setDetailPreTourRouteIds(ids);
       } catch {
         setDetailPreTourRouteIds([]);
@@ -333,14 +482,16 @@ export function PreTourPlansView({
     }
   };
 
-  const onSave = async ({ form }: { form: Row }) => {
+  const onSave = async (form: Row) => {
     setSaving(true);
     try {
       const payload: Record<string, unknown> = {};
       fields.forEach((field) => {
+        validateRequiredFieldValue(field, form[field.key]);
         payload[field.key] = parseFieldValue(field, form[field.key]);
       });
       payload.totalNights = toNightCount(String(form.startDate ?? ""), String(form.endDate ?? ""));
+      applyTransportChargeMethodDefaultToPricingPolicy(payload);
 
       if (dialog.mode === "create") {
         await createPreTourRecord("pre-tours", payload);
@@ -404,6 +555,13 @@ export function PreTourPlansView({
             loading={loading}
             isReadOnly={!isAdmin}
             lookups={lookups}
+            serverPagination={{
+              summaryText: paginationSummaryText,
+              canPrevious: !loading && pageIndex > 0,
+              canNext: !loading && hasNextPage,
+              onPrevious: handlePreviousPage,
+              onNext: handleNextPage,
+            }}
             hideAdd
             hideEdit={false}
             editLabel="Restore"
@@ -428,6 +586,13 @@ export function PreTourPlansView({
             loading={loading}
             isReadOnly={isReadOnly}
             lookups={lookups}
+            serverPagination={{
+              summaryText: paginationSummaryText,
+              canPrevious: !loading && pageIndex > 0,
+              canNext: !loading && hasNextPage,
+              onPrevious: handlePreviousPage,
+              onNext: handleNextPage,
+            }}
             embedded
             hideHeader
             hideSummary
@@ -445,73 +610,76 @@ export function PreTourPlansView({
         )}
       </CardContent>
 
-      <PreTourDetailSheet
-        detailSheet={detailSheet}
-        setDetailSheetOpen={(open) => setDetailSheet((prev) => ({ ...prev, open }))}
-        onClose={() => setDetailSheet((prev) => ({ ...prev, open: false }))}
-        isReadOnly={isReadOnly}
-        canViewRouteMap={canViewRouteMap}
-        lookups={lookups}
-        selectedPlan={null}
-        detailPreTourRouteLoading={detailPreTourRouteLoading}
-        detailRouteLocationSequenceIds={detailPreTourRouteIds}
-        detailRoutePathLabel={detailRoutePathLabel}
-        detailRouteMapLocations={detailRouteMapLocations}
-        onCreateVersion={(row) => void createVersionFromPlan(row)}
-        onCopy={(row) => {
-          setCopySourcePlan(row);
-          setCopyDialogOpen(true);
-        }}
-        onEditPreTour={(row) => setDialog({ open: true, mode: "edit", resource: "pre-tours", row })}
-        onDeletePreTour={(row) => void onDelete("pre-tours", row)}
-        onAddAddonFromItem={() => undefined}
-        onShareItem={() => undefined}
-        onEditItem={() => undefined}
-        onDeleteItem={() => undefined}
-      />
+      {detailSheet.open ? (
+        <PreTourDetailSheet
+          detailSheet={detailSheet}
+          setDetailSheetOpen={(open) => setDetailSheet((prev) => ({ ...prev, open }))}
+          onClose={() => setDetailSheet((prev) => ({ ...prev, open: false }))}
+          isReadOnly={isReadOnly}
+          canViewRouteMap={canViewRouteMap}
+          lookups={lookups}
+          selectedPlan={null}
+          detailPreTourRouteLoading={detailPreTourRouteLoading}
+          detailRouteLocationSequenceIds={detailPreTourRouteIds}
+          detailRoutePathLabel={detailRoutePathLabel}
+          detailRouteMapLocations={detailRouteMapLocations}
+          onCreateVersion={(row) => void createVersionFromPlan(row)}
+          onCopy={(row) => {
+            setCopySourcePlan(row);
+            setCopyDialogOpen(true);
+          }}
+          onEditPreTour={(row) => setDialog({ open: true, mode: "edit", resource: "pre-tours", row })}
+          onDeletePreTour={(row) => void onDelete("pre-tours", row)}
+          onAddAddonFromItem={() => undefined}
+          onShareItem={() => undefined}
+          onEditItem={() => undefined}
+          onDeleteItem={() => undefined}
+        />
+      ) : null}
 
-      <PreTourCopyDialogController
-        open={copyDialogOpen}
-        onOpenChange={(open) => {
-          setCopyDialogOpen(open);
-          if (!open) setCopySourcePlan(null);
-        }}
-        sourcePlan={copySourcePlan}
-        companyBaseCurrencyCode={companyBaseCurrencyCode}
-        operatorIdsByMarketId={operatorIdsByMarketId}
-        operatorOrganizationOptions={operatorOrganizationOptions}
-        marketOrganizationOptions={marketOrganizationOptions}
-        allTourCategoryOptions={allTourCategoryOptions}
-        currencyOptions={currencyOptions}
-        isReadOnly={isReadOnly}
-        clonePlanChildren={clonePlanChildren}
-        onSuccess={loadData}
-      />
+      {copyDialogOpen ? (
+        <PreTourCopyDialogController
+          open={copyDialogOpen}
+          onOpenChange={(open) => {
+            setCopyDialogOpen(open);
+            if (!open) setCopySourcePlan(null);
+          }}
+          sourcePlan={copySourcePlan}
+          companyBaseCurrencyCode={companyBaseCurrencyCode}
+          operatorIdsByMarketId={operatorIdsByMarketId}
+          operatorOrganizationOptions={operatorOrganizationOptions}
+          marketOrganizationOptions={marketOrganizationOptions}
+          allTourCategoryOptions={allTourCategoryOptions}
+          currencyOptions={currencyOptions}
+          isReadOnly={isReadOnly}
+          clonePlanChildren={clonePlanChildren}
+          onSuccess={loadData}
+        />
+      ) : null}
 
-      <PreTourRecordDialog
-        open={dialog.open}
-        onOpenChange={(open) => setDialog((prev) => ({ ...prev, open, row: open ? prev.row : null }))}
-        mode={dialog.mode}
-        resource={dialog.resource}
-        row={dialog.row}
-        isReadOnly={isReadOnly}
-        saving={saving}
-        visibleFields={fields}
-        buildVisibleFields={() => fields}
-        initialForm={dialogInitialForm}
-        initialDayTransportForm={EMPTY_DAY_TRANSPORT_FORM}
-        selectedDialogMarketOrgId={selectedDialogMarketOrgId}
-        hasContractForSelectedDialogMarket={hasContractForSelectedDialogMarket}
-        getHasContractForSelectedDialogMarket={(form) => {
-          const marketOrgId = String(form.marketOrgId ?? "");
-          if (!marketOrgId) return true;
-          return (operatorIdsByMarketId.get(marketOrgId)?.length ?? 0) > 0;
-        }}
-        selectedPreTourItemType=""
-        lookupLabel={(id) => (typeof id === "string" ? lookups[id] ?? id : "-")}
-        transportVehicleOptions={[]}
-        onSubmit={(payload) => void onSave(payload)}
-      />
+      {dialog.open ? (
+        <PreTourRecordDialog
+          open={dialog.open}
+          onOpenChange={(open) => setDialog((prev) => ({ ...prev, open, row: open ? prev.row : null }))}
+          mode={dialog.mode}
+          resource={dialog.resource}
+          row={dialog.row}
+          isReadOnly={isReadOnly}
+          saving={saving}
+          visibleFields={fields}
+          buildVisibleFields={() => fields}
+          initialForm={dialogInitialForm}
+          selectedDialogMarketOrgId={selectedDialogMarketOrgId}
+          hasContractForSelectedDialogMarket={hasContractForSelectedDialogMarket}
+          getHasContractForSelectedDialogMarket={(form) => {
+            const marketOrgId = String(form.marketOrgId ?? "");
+            if (!marketOrgId) return true;
+            return (operatorIdsByMarketId.get(marketOrgId)?.length ?? 0) > 0;
+          }}
+          selectedPreTourItemType=""
+          onSubmit={(form) => void onSave(form)}
+        />
+      ) : null}
     </Card>
   );
 }

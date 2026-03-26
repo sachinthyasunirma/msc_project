@@ -27,14 +27,14 @@ function toPlainRows(rows: Array<Record<string, unknown>>) {
 export async function loadPreTourMastersData(): Promise<PreTourMastersData | null> {
   try {
     const requestHeaders = await headers();
-    const transportParams = new URLSearchParams({ limit: "300" });
-    const activityParams = new URLSearchParams({ limit: "300" });
-    const guidesParams = new URLSearchParams({ limit: "300" });
-    const currencyParams = new URLSearchParams({ limit: "200" });
-    const organizationParams = new URLSearchParams({ limit: "400" });
-    const contractParams = new URLSearchParams({ limit: "400" });
-    const tourCategoryParams = new URLSearchParams({ limit: "500" });
-    const technicalVisitParams = new URLSearchParams({ limit: "500" });
+    const transportParams = new URLSearchParams({ limit: "100" });
+    const activityParams = new URLSearchParams({ limit: "100" });
+    const guidesParams = new URLSearchParams({ limit: "100" });
+    const currencyParams = new URLSearchParams({ limit: "100" });
+    const organizationParams = new URLSearchParams({ limit: "100" });
+    const contractParams = new URLSearchParams({ limit: "100" });
+    const tourCategoryParams = new URLSearchParams({ limit: "100" });
+    const technicalVisitParams = new URLSearchParams({ limit: "100" });
     const hotelParams = new URLSearchParams({ limit: "100" });
 
     const optionalMaster = async <T,>(loader: () => Promise<T>, fallback: T) => {
@@ -54,6 +54,7 @@ export async function loadPreTourMastersData(): Promise<PreTourMastersData | nul
 
     const [
       locations,
+      vehicleCategories,
       vehicleTypes,
       activities,
       guides,
@@ -68,6 +69,7 @@ export async function loadPreTourMastersData(): Promise<PreTourMastersData | nul
       shellData,
     ] = await Promise.all([
       listTransportRecords("locations", transportParams, requestHeaders),
+      listTransportRecords("vehicle-categories", transportParams, requestHeaders),
       listTransportRecords("vehicle-types", transportParams, requestHeaders),
       listActivityRecords("activities", activityParams, requestHeaders),
       listGuideRecords("guides", guidesParams, requestHeaders),
@@ -94,8 +96,9 @@ export async function loadPreTourMastersData(): Promise<PreTourMastersData | nul
     ]);
 
     return {
-      locations: toPlainRows(locations),
-      vehicleTypes: toPlainRows(vehicleTypes),
+      locations: toPlainRows(locations.rows),
+      vehicleCategories: toPlainRows(vehicleCategories.rows),
+      vehicleTypes: toPlainRows(vehicleTypes.rows),
       activities: toPlainRows(activities),
       guides: toPlainRows(guides),
       currencies: toPlainRows(currencies as Array<Record<string, unknown>>),
@@ -109,6 +112,10 @@ export async function loadPreTourMastersData(): Promise<PreTourMastersData | nul
       hotels: toPlainRows(hotels.items),
       tourCategoryRules: toPlainRows(tourCategoryRules),
       companyBaseCurrencyCode: shellData.company?.baseCurrencyCode ?? "USD",
+      transportRateBasis:
+        shellData.company?.transportRateBasis === "VEHICLE_CATEGORY"
+          ? "VEHICLE_CATEGORY"
+          : "VEHICLE_TYPE",
     };
   } catch {
     return null;

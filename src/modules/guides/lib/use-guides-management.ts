@@ -16,6 +16,8 @@ import {
 import {
   createGuideRecord,
   deleteGuideRecord,
+  listAllGuideCodes,
+  listGuideRecordPage,
   listGuideRecords,
   updateGuideRecord,
 } from "@/modules/guides/lib/guides-api";
@@ -42,6 +44,8 @@ type UseGuidesManagementOptions = {
 };
 
 const EMPTY_ROWS: Array<Record<string, unknown>> = [];
+const DEFAULT_PAGE_SIZE = 25;
+const LOOKUP_LIMIT = 100;
 
 function defaultValue(field: Field) {
   if (field.defaultValue !== undefined) return field.defaultValue;
@@ -118,15 +122,20 @@ export function useGuidesManagement({
     const input = buildGuideRecordsParams({
       resource,
       q: query || undefined,
-      limit: 200,
+      page: currentPage,
+      limit: pageSize,
     });
     if (isGuideManageMode && guideScopedResources.includes(resource)) {
       input.guideId = managedGuideId;
     }
     return input;
-  }, [guideScopedResources, isGuideManageMode, managedGuideId, query, resource]);
+  }, [currentPage, guideScopedResources, isGuideManageMode, managedGuideId, pageSize, query, resource]);
 
-  const isDefaultRecordsQuery = resource === initialResource && query.length === 0;
+  const isDefaultRecordsQuery =
+    resource === initialResource &&
+    query.length === 0 &&
+    currentPage === 1 &&
+    pageSize === DEFAULT_PAGE_SIZE;
 
   const {
     data: lookupsData,
@@ -134,26 +143,33 @@ export function useGuidesManagement({
     isFetching: lookupsLoading,
     refetch: refetchLookups,
   } = useQuery({
-    queryKey: guideKeys.lookups(),
+    queryKey: guideKeys.lookups({
+      guideId: isGuideManageMode ? managedGuideId : undefined,
+      scoped: isGuideManageMode,
+    }),
     queryFn: async () => {
       const [guides, languages, locations, currencies] = await Promise.all([
-        listGuideRecords("guides", { limit: 200 }),
-        listGuideRecords("languages", { limit: 200 }),
-        listTransportRecords("locations", { limit: 200 }),
-        listCurrencyRecords("currencies", { limit: 200 }),
+        listGuideRecords("guides", {
+          limit: isGuideManageMode ? 25 : LOOKUP_LIMIT,
+          guideId: isGuideManageMode ? managedGuideId : undefined,
+        }),
+        listGuideRecords("languages", { limit: LOOKUP_LIMIT }),
+        listTransportRecords("locations", { limit: LOOKUP_LIMIT }),
+        listCurrencyRecords("currencies", { limit: LOOKUP_LIMIT }),
       ]);
       return {
         guides,
         languages,
-        locations,
+        locations: locations.rows,
         currencies,
       };
     },
     initialData: lookupsInitialData,
+    staleTime: 5 * 60 * 1000,
   });
 
   const {
-    data: records = EMPTY_ROWS,
+    data: recordsPage,
     error: recordsError,
     isFetching: recordsLoading,
     refetch: refetchRecords,
@@ -162,10 +178,18 @@ export function useGuidesManagement({
       resource,
       q: recordsInput.q,
       guideId: recordsInput.guideId,
+      page: recordsInput.page,
       limit: recordsInput.limit,
     }),
-    queryFn: () => listGuideRecords(resource, recordsInput),
-    initialData: isDefaultRecordsQuery ? initialData?.records ?? undefined : undefined,
+    queryFn: () => listGuideRecordPage(resource, recordsInput),
+    initialData: isDefaultRecordsQuery
+      ? {
+          rows: initialData?.records ?? EMPTY_ROWS,
+          total: initialData?.totalRecords ?? 0,
+          page: 1,
+          limit: DEFAULT_PAGE_SIZE,
+        }
+      : undefined,
     placeholderData: keepPreviousData,
   });
 
@@ -193,6 +217,8 @@ export function useGuidesManagement({
   const languages = lookupsData?.languages ?? EMPTY_ROWS;
   const locations = lookupsData?.locations ?? EMPTY_ROWS;
   const currencies = lookupsData?.currencies ?? EMPTY_ROWS;
+  const records = recordsPage?.rows ?? EMPTY_ROWS;
+  const totalRecords = recordsPage?.total ?? 0;
   const loading = lookupsLoading || recordsLoading;
   const saving =
     createGuideMutation.isPending ||
@@ -424,13 +450,10 @@ export function useGuidesManagement({
   }, [resource, visibleResources]);
 
   const totalPages = useMemo(
-    () => Math.max(1, Math.ceil(records.length / pageSize)),
-    [records.length, pageSize]
+    () => Math.max(1, Math.ceil(totalRecords / pageSize)),
+    [pageSize, totalRecords]
   );
-  const pagedRecords = useMemo(() => {
-    const start = (currentPage - 1) * pageSize;
-    return records.slice(start, start + pageSize);
-  }, [records, currentPage, pageSize]);
+  const pagedRecords = records;
 
   useEffect(() => {
     setCurrentPage(1);
@@ -441,12 +464,18 @@ export function useGuidesManagement({
   }, [currentPage, totalPages]);
 
   const refreshAll = useCallback(async () => {
-    await Promise.all([
-      queryClient.invalidateQueries({ queryKey: guideKeys.lookups() }),
-      queryClient.invalidateQueries({ queryKey: guideKeys.recordsRoot() }),
-    ]);
-    await Promise.all([refetchLookups(), refetchRecords()]);
-  }, [queryClient, refetchLookups, refetchRecords]);
+    await queryClient.invalidateQueries({
+      queryKey: guideKeys.recordsByResource(resource),
+    });
+
+    if (resource === "guides" || resource === "languages") {
+      await queryClient.invalidateQueries({ queryKey: guideKeys.lookupsRoot() });
+      await Promise.all([refetchLookups(), refetchRecords()]);
+      return;
+    }
+
+    await refetchRecords();
+  }, [queryClient, refetchLookups, refetchRecords, resource]);
 
   const openDialog = useCallback(
     (mode: "create" | "edit", row?: Record<string, unknown>) => {
@@ -564,7 +593,7 @@ export function useGuidesManagement({
   );
 
   const refreshGuideExistingCodes = useCallback(async () => {
-    const rows = await listGuideRecords("guides", { limit: 500 });
+    const rows = await listAllGuideCodes("guides", { limit: 100 });
     return new Set(
       rows
         .map((row) => String(row.code ?? "").trim().toUpperCase())
@@ -578,6 +607,7 @@ export function useGuidesManagement({
     query,
     setQuery,
     records,
+    totalRecords,
     pagedRecords,
     loading,
     saving,

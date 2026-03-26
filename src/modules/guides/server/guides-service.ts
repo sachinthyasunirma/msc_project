@@ -1,4 +1,4 @@
-import { and, desc, eq, ilike, or } from "drizzle-orm";
+import { and, count, desc, eq, ilike, or } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
 import * as schema from "@/db/schema";
@@ -35,6 +35,7 @@ import {
   updateGuideWeeklyAvailabilitySchema,
   updateLanguageSchema,
 } from "@/modules/guides/shared/guides-schemas";
+import type { PaginatedRecordsResponse } from "@/lib/types/paginated-records";
 
 class GuideError extends Error {
   constructor(
@@ -158,10 +159,70 @@ async function ensureCurrency(companyId: string, currencyId: string) {
   }
 }
 
-export async function listGuideRecords(
+async function paginateGuideTable<TTable>(
+  table: TTable,
+  whereClause: ReturnType<typeof and>,
+  page: number,
+  limit: number,
+  orderByClauses: Array<unknown>
+): Promise<PaginatedRecordsResponse> {
+  const offset = (page - 1) * limit;
+  const [totalRow] = (await db
+    .select({ count: count() })
+    .from(table as never)
+    .where(whereClause)) as Array<{ count: number | string }>;
+
+  const rows = await db
+    .select()
+    .from(table as never)
+    .where(whereClause)
+    .orderBy(...(orderByClauses as []))
+    .limit(limit)
+    .offset(offset);
+
+  return {
+    rows,
+    total: Number(totalRow?.count ?? 0),
+    page,
+    limit,
+  };
+}
+
+async function paginateGuideCodeTable<TTable>(
+  table: TTable,
+  whereClause: ReturnType<typeof and>,
+  page: number,
+  limit: number,
+  orderByClauses: Array<unknown>,
+  columns: { id: unknown; code: unknown }
+): Promise<PaginatedRecordsResponse> {
+  const offset = (page - 1) * limit;
+  const [totalRow] = (await db
+    .select({ count: count() })
+    .from(table as never)
+    .where(whereClause)) as Array<{ count: number | string }>;
+
+  const rows = await db
+    .select({ id: columns.id as never, code: columns.code as never })
+    .from(table as never)
+    .where(whereClause)
+    .orderBy(...(orderByClauses as []))
+    .limit(limit)
+    .offset(offset);
+
+  return {
+    rows: rows as Array<Record<string, unknown>>,
+    total: Number(totalRow?.count ?? 0),
+    page,
+    limit,
+  };
+}
+
+async function listGuideRecordsInternal(
   resourceInput: string,
   searchParams: URLSearchParams,
-  headers: Headers
+  headers: Headers,
+  paginated: boolean
 ) {
   const resource = parseResource(resourceInput);
   const parsed = guideListQuerySchema.safeParse(Object.fromEntries(searchParams));
@@ -171,8 +232,14 @@ export async function listGuideRecords(
   const { companyId } = await getAccess(headers);
   const q = parsed.data.q ? `%${parsed.data.q}%` : null;
   const limit = parsed.data.limit;
+  const page = parsed.data.page ?? 1;
   const guideId = parsed.data.guideId;
-  const cacheKey = masterDataListCacheKey("guides", companyId, resource, parsed.data);
+  const codesOnly = parsed.data.codesOnly;
+  const cacheKey = masterDataListCacheKey("guides", companyId, resource, {
+    ...parsed.data,
+    paginated,
+    page,
+  });
   return getOrSetMasterDataCache(cacheKey, async () => {
     switch (resource) {
     case "guides": {
@@ -182,7 +249,26 @@ export async function listGuideRecords(
         const searchClause = or(ilike(schema.guide.code, q), ilike(schema.guide.fullName, q));
         if (searchClause) clauses.push(searchClause);
       }
-      return db.select().from(schema.guide).where(and(...clauses)).orderBy(desc(schema.guide.createdAt)).limit(limit);
+      const whereClause = and(...clauses);
+      return paginated
+        ? codesOnly
+          ? paginateGuideCodeTable(
+              schema.guide,
+              whereClause,
+              page,
+              limit,
+              [desc(schema.guide.createdAt)],
+              { id: schema.guide.id, code: schema.guide.code }
+            )
+          : paginateGuideTable(schema.guide, whereClause, page, limit, [
+              desc(schema.guide.createdAt),
+            ])
+        : db
+            .select()
+            .from(schema.guide)
+            .where(whereClause)
+            .orderBy(desc(schema.guide.createdAt))
+            .limit(limit);
     }
     case "languages": {
       const clauses = [eq(schema.guideLanguageMaster.companyId, companyId)];
@@ -193,12 +279,21 @@ export async function listGuideRecords(
         );
         if (searchClause) clauses.push(searchClause);
       }
-      return db
-        .select()
-        .from(schema.guideLanguageMaster)
-        .where(and(...clauses))
-        .orderBy(desc(schema.guideLanguageMaster.createdAt))
-        .limit(limit);
+      const whereClause = and(...clauses);
+      return paginated
+        ? paginateGuideTable(
+            schema.guideLanguageMaster,
+            whereClause,
+            page,
+            limit,
+            [desc(schema.guideLanguageMaster.createdAt)]
+          )
+        : db
+            .select()
+            .from(schema.guideLanguageMaster)
+            .where(whereClause)
+            .orderBy(desc(schema.guideLanguageMaster.createdAt))
+            .limit(limit);
     }
     case "guide-languages": {
       const clauses = [eq(schema.guideLanguage.companyId, companyId)];
@@ -210,7 +305,10 @@ export async function listGuideRecords(
         );
         if (searchClause) clauses.push(searchClause);
       }
-      return db.select().from(schema.guideLanguage).where(and(...clauses)).limit(limit);
+      const whereClause = and(...clauses);
+      return paginated
+        ? paginateGuideTable(schema.guideLanguage, whereClause, page, limit, [])
+        : db.select().from(schema.guideLanguage).where(whereClause).limit(limit);
     }
     case "guide-coverage-areas": {
       const clauses = [eq(schema.guideCoverageArea.companyId, companyId)];
@@ -222,7 +320,10 @@ export async function listGuideRecords(
         );
         if (searchClause) clauses.push(searchClause);
       }
-      return db.select().from(schema.guideCoverageArea).where(and(...clauses)).limit(limit);
+      const whereClause = and(...clauses);
+      return paginated
+        ? paginateGuideTable(schema.guideCoverageArea, whereClause, page, limit, [])
+        : db.select().from(schema.guideCoverageArea).where(whereClause).limit(limit);
     }
     case "guide-licenses": {
       const clauses = [eq(schema.guideLicense.companyId, companyId)];
@@ -235,12 +336,21 @@ export async function listGuideRecords(
         );
         if (searchClause) clauses.push(searchClause);
       }
-      return db
-        .select()
-        .from(schema.guideLicense)
-        .where(and(...clauses))
-        .orderBy(desc(schema.guideLicense.createdAt))
-        .limit(limit);
+      const whereClause = and(...clauses);
+      return paginated
+        ? paginateGuideTable(
+            schema.guideLicense,
+            whereClause,
+            page,
+            limit,
+            [desc(schema.guideLicense.createdAt)]
+          )
+        : db
+            .select()
+            .from(schema.guideLicense)
+            .where(whereClause)
+            .orderBy(desc(schema.guideLicense.createdAt))
+            .limit(limit);
     }
     case "guide-certifications": {
       const clauses = [eq(schema.guideCertification.companyId, companyId)];
@@ -253,12 +363,21 @@ export async function listGuideRecords(
         );
         if (searchClause) clauses.push(searchClause);
       }
-      return db
-        .select()
-        .from(schema.guideCertification)
-        .where(and(...clauses))
-        .orderBy(desc(schema.guideCertification.createdAt))
-        .limit(limit);
+      const whereClause = and(...clauses);
+      return paginated
+        ? paginateGuideTable(
+            schema.guideCertification,
+            whereClause,
+            page,
+            limit,
+            [desc(schema.guideCertification.createdAt)]
+          )
+        : db
+            .select()
+            .from(schema.guideCertification)
+            .where(whereClause)
+            .orderBy(desc(schema.guideCertification.createdAt))
+            .limit(limit);
     }
     case "guide-documents": {
       const clauses = [eq(schema.guideDocument.companyId, companyId)];
@@ -271,12 +390,21 @@ export async function listGuideRecords(
         );
         if (searchClause) clauses.push(searchClause);
       }
-      return db
-        .select()
-        .from(schema.guideDocument)
-        .where(and(...clauses))
-        .orderBy(desc(schema.guideDocument.createdAt))
-        .limit(limit);
+      const whereClause = and(...clauses);
+      return paginated
+        ? paginateGuideTable(
+            schema.guideDocument,
+            whereClause,
+            page,
+            limit,
+            [desc(schema.guideDocument.createdAt)]
+          )
+        : db
+            .select()
+            .from(schema.guideDocument)
+            .where(whereClause)
+            .orderBy(desc(schema.guideDocument.createdAt))
+            .limit(limit);
     }
     case "guide-weekly-availability": {
       const clauses = [eq(schema.guideWeeklyAvailability.companyId, companyId)];
@@ -289,7 +417,10 @@ export async function listGuideRecords(
         );
         if (searchClause) clauses.push(searchClause);
       }
-      return db.select().from(schema.guideWeeklyAvailability).where(and(...clauses)).limit(limit);
+      const whereClause = and(...clauses);
+      return paginated
+        ? paginateGuideTable(schema.guideWeeklyAvailability, whereClause, page, limit, [])
+        : db.select().from(schema.guideWeeklyAvailability).where(whereClause).limit(limit);
     }
     case "guide-blackout-dates": {
       const clauses = [eq(schema.guideBlackoutDate.companyId, companyId)];
@@ -298,12 +429,21 @@ export async function listGuideRecords(
         const searchClause = or(ilike(schema.guideBlackoutDate.code, q), ilike(schema.guideBlackoutDate.reason, q));
         if (searchClause) clauses.push(searchClause);
       }
-      return db
-        .select()
-        .from(schema.guideBlackoutDate)
-        .where(and(...clauses))
-        .orderBy(desc(schema.guideBlackoutDate.createdAt))
-        .limit(limit);
+      const whereClause = and(...clauses);
+      return paginated
+        ? paginateGuideTable(
+            schema.guideBlackoutDate,
+            whereClause,
+            page,
+            limit,
+            [desc(schema.guideBlackoutDate.createdAt)]
+          )
+        : db
+            .select()
+            .from(schema.guideBlackoutDate)
+            .where(whereClause)
+            .orderBy(desc(schema.guideBlackoutDate.createdAt))
+            .limit(limit);
     }
     case "guide-rates": {
       const clauses = [eq(schema.guideRate.companyId, companyId)];
@@ -316,12 +456,21 @@ export async function listGuideRecords(
         );
         if (searchClause) clauses.push(searchClause);
       }
-      return db
-        .select()
-        .from(schema.guideRate)
-        .where(and(...clauses))
-        .orderBy(desc(schema.guideRate.createdAt))
-        .limit(limit);
+      const whereClause = and(...clauses);
+      return paginated
+        ? paginateGuideTable(
+            schema.guideRate,
+            whereClause,
+            page,
+            limit,
+            [desc(schema.guideRate.createdAt)]
+          )
+        : db
+            .select()
+            .from(schema.guideRate)
+            .where(whereClause)
+            .orderBy(desc(schema.guideRate.createdAt))
+            .limit(limit);
     }
     case "guide-assignments": {
       const clauses = [eq(schema.guideAssignment.companyId, companyId)];
@@ -334,17 +483,52 @@ export async function listGuideRecords(
         );
         if (searchClause) clauses.push(searchClause);
       }
-      return db
-        .select()
-        .from(schema.guideAssignment)
-        .where(and(...clauses))
-        .orderBy(desc(schema.guideAssignment.createdAt))
-        .limit(limit);
+      const whereClause = and(...clauses);
+      return paginated
+        ? paginateGuideTable(
+            schema.guideAssignment,
+            whereClause,
+            page,
+            limit,
+            [desc(schema.guideAssignment.createdAt)]
+          )
+        : db
+            .select()
+            .from(schema.guideAssignment)
+            .where(whereClause)
+            .orderBy(desc(schema.guideAssignment.createdAt))
+            .limit(limit);
     }
       default:
         throw new GuideError(404, "RESOURCE_NOT_FOUND", "Guide resource not found.");
     }
   });
+}
+
+export async function listGuideRecords(
+  resourceInput: string,
+  searchParams: URLSearchParams,
+  headers: Headers
+): Promise<Array<Record<string, unknown>>> {
+  return (await listGuideRecordsInternal(
+    resourceInput,
+    searchParams,
+    headers,
+    false
+  )) as Array<Record<string, unknown>>;
+}
+
+export async function listGuideRecordPage(
+  resourceInput: string,
+  searchParams: URLSearchParams,
+  headers: Headers
+): Promise<PaginatedRecordsResponse> {
+  return (await listGuideRecordsInternal(
+    resourceInput,
+    searchParams,
+    headers,
+    true
+  )) as PaginatedRecordsResponse;
 }
 
 export async function createGuideRecord(resourceInput: string, payload: unknown, headers: Headers) {

@@ -1,4 +1,4 @@
-import { and, desc, eq, ilike, isNull, ne, or } from "drizzle-orm";
+import { and, count, desc, eq, ilike, isNull, ne, or } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
 import * as schema from "@/db/schema";
@@ -21,6 +21,7 @@ import {
   updateFxProviderSchema,
   updateMoneySettingSchema,
 } from "@/modules/currency/shared/currency-schemas";
+import type { PaginatedRecordsResponse } from "@/lib/types/paginated-records";
 
 class CurrencyError extends Error {
   constructor(
@@ -172,10 +173,70 @@ async function ensureNoDuplicateExchangeRate(
   }
 }
 
-export async function listCurrencyRecords(
+async function paginateCurrencyTable<TTable>(
+  table: TTable,
+  whereClause: ReturnType<typeof and>,
+  page: number,
+  limit: number,
+  orderByClauses: Array<unknown>
+): Promise<PaginatedRecordsResponse> {
+  const offset = (page - 1) * limit;
+  const [totalRow] = (await db
+    .select({ count: count() })
+    .from(table as never)
+    .where(whereClause)) as Array<{ count: number | string }>;
+
+  const rows = await db
+    .select()
+    .from(table as never)
+    .where(whereClause)
+    .orderBy(...(orderByClauses as []))
+    .limit(limit)
+    .offset(offset);
+
+  return {
+    rows,
+    total: Number(totalRow?.count ?? 0),
+    page,
+    limit,
+  };
+}
+
+async function paginateCurrencyCodeTable<TTable>(
+  table: TTable,
+  whereClause: ReturnType<typeof and>,
+  page: number,
+  limit: number,
+  orderByClauses: Array<unknown>,
+  columns: { id: unknown; code: unknown }
+): Promise<PaginatedRecordsResponse> {
+  const offset = (page - 1) * limit;
+  const [totalRow] = (await db
+    .select({ count: count() })
+    .from(table as never)
+    .where(whereClause)) as Array<{ count: number | string }>;
+
+  const rows = await db
+    .select({ id: columns.id as never, code: columns.code as never })
+    .from(table as never)
+    .where(whereClause)
+    .orderBy(...(orderByClauses as []))
+    .limit(limit)
+    .offset(offset);
+
+  return {
+    rows: rows as Array<Record<string, unknown>>,
+    total: Number(totalRow?.count ?? 0),
+    page,
+    limit,
+  };
+}
+
+async function listCurrencyRecordsInternal(
   resourceInput: string,
   searchParams: URLSearchParams,
-  headers: Headers
+  headers: Headers,
+  paginated: boolean
 ) {
   const resource = parseResource(resourceInput);
   const parsed = currencyListQuerySchema.safeParse(Object.fromEntries(searchParams));
@@ -186,80 +247,135 @@ export async function listCurrencyRecords(
   const { companyId } = await getAccess(headers);
   const q = parsed.data.q ? `%${parsed.data.q}%` : null;
   const limit = parsed.data.limit;
+  const page = parsed.data.page ?? 1;
   const currencyId = parsed.data.currencyId;
-  const cacheKey = masterDataListCacheKey("currency", companyId, resource, parsed.data);
+  const codesOnly = parsed.data.codesOnly;
+  const cacheKey = masterDataListCacheKey("currency", companyId, resource, {
+    ...parsed.data,
+    paginated,
+    page,
+  });
   return getOrSetMasterDataCache(cacheKey, async () => {
     switch (resource) {
-    case "currencies":
-      return db
-        .select()
-        .from(schema.currency)
-        .where(
-          and(
-            eq(schema.currency.companyId, companyId),
-            q ? or(ilike(schema.currency.code, q), ilike(schema.currency.name, q)) : undefined
-          )
-        )
-        .orderBy(desc(schema.currency.createdAt))
-        .limit(limit);
-    case "fx-providers":
-      return db
-        .select()
-        .from(schema.fxProvider)
-        .where(
-          and(
-            eq(schema.fxProvider.companyId, companyId),
-            q ? or(ilike(schema.fxProvider.code, q), ilike(schema.fxProvider.name, q)) : undefined
-          )
-        )
-        .orderBy(desc(schema.fxProvider.createdAt))
-        .limit(limit);
-    case "exchange-rates":
-      return db
-        .select()
-        .from(schema.exchangeRate)
-        .where(
-          and(
-            eq(schema.exchangeRate.companyId, companyId),
-            currencyId
-              ? or(
-                  eq(schema.exchangeRate.baseCurrencyId, currencyId),
-                  eq(schema.exchangeRate.quoteCurrencyId, currencyId)
-                )
-              : undefined,
-            q
-              ? or(
-                  ilike(schema.exchangeRate.code, q),
-                  ilike(schema.exchangeRate.rateType, q)
-                )
-              : undefined
-          )
-        )
-        .orderBy(desc(schema.exchangeRate.asOf), desc(schema.exchangeRate.createdAt))
-        .limit(limit);
-    case "money-settings":
-      return db
-        .select()
-        .from(schema.moneySetting)
-        .where(
-          and(
-            eq(schema.moneySetting.companyId, companyId),
-            currencyId ? eq(schema.moneySetting.baseCurrencyId, currencyId) : undefined,
-            q
-              ? or(
-                  ilike(schema.moneySetting.code, q),
-                  ilike(schema.moneySetting.priceMode, q),
-                  ilike(schema.moneySetting.fxRateSource, q)
-                )
-              : undefined
-          )
-        )
-        .orderBy(desc(schema.moneySetting.createdAt))
-        .limit(limit);
+    case "currencies": {
+      const whereClause = and(
+        eq(schema.currency.companyId, companyId),
+        q ? or(ilike(schema.currency.code, q), ilike(schema.currency.name, q)) : undefined
+      );
+      return paginated
+        ? codesOnly
+          ? paginateCurrencyCodeTable(
+              schema.currency,
+              whereClause,
+              page,
+              limit,
+              [desc(schema.currency.createdAt)],
+              { id: schema.currency.id, code: schema.currency.code }
+            )
+          : paginateCurrencyTable(schema.currency, whereClause, page, limit, [
+              desc(schema.currency.createdAt),
+            ])
+        : db
+            .select()
+            .from(schema.currency)
+            .where(whereClause)
+            .orderBy(desc(schema.currency.createdAt))
+            .limit(limit);
+    }
+    case "fx-providers": {
+      const whereClause = and(
+        eq(schema.fxProvider.companyId, companyId),
+        q ? or(ilike(schema.fxProvider.code, q), ilike(schema.fxProvider.name, q)) : undefined
+      );
+      return paginated
+        ? paginateCurrencyTable(schema.fxProvider, whereClause, page, limit, [
+            desc(schema.fxProvider.createdAt),
+          ])
+        : db
+            .select()
+            .from(schema.fxProvider)
+            .where(whereClause)
+            .orderBy(desc(schema.fxProvider.createdAt))
+            .limit(limit);
+    }
+    case "exchange-rates": {
+      const whereClause = and(
+        eq(schema.exchangeRate.companyId, companyId),
+        currencyId
+          ? or(
+              eq(schema.exchangeRate.baseCurrencyId, currencyId),
+              eq(schema.exchangeRate.quoteCurrencyId, currencyId)
+            )
+          : undefined,
+        q
+          ? or(ilike(schema.exchangeRate.code, q), ilike(schema.exchangeRate.rateType, q))
+          : undefined
+      );
+      return paginated
+        ? paginateCurrencyTable(schema.exchangeRate, whereClause, page, limit, [
+            desc(schema.exchangeRate.asOf),
+            desc(schema.exchangeRate.createdAt),
+          ])
+        : db
+            .select()
+            .from(schema.exchangeRate)
+            .where(whereClause)
+            .orderBy(desc(schema.exchangeRate.asOf), desc(schema.exchangeRate.createdAt))
+            .limit(limit);
+    }
+    case "money-settings": {
+      const whereClause = and(
+        eq(schema.moneySetting.companyId, companyId),
+        currencyId ? eq(schema.moneySetting.baseCurrencyId, currencyId) : undefined,
+        q
+          ? or(
+              ilike(schema.moneySetting.code, q),
+              ilike(schema.moneySetting.priceMode, q),
+              ilike(schema.moneySetting.fxRateSource, q)
+            )
+          : undefined
+      );
+      return paginated
+        ? paginateCurrencyTable(schema.moneySetting, whereClause, page, limit, [
+            desc(schema.moneySetting.createdAt),
+          ])
+        : db
+            .select()
+            .from(schema.moneySetting)
+            .where(whereClause)
+            .orderBy(desc(schema.moneySetting.createdAt))
+            .limit(limit);
+    }
       default:
         throw new CurrencyError(404, "RESOURCE_NOT_FOUND", "Currency resource not found.");
     }
   });
+}
+
+export async function listCurrencyRecords(
+  resourceInput: string,
+  searchParams: URLSearchParams,
+  headers: Headers
+): Promise<Array<Record<string, unknown>>> {
+  return (await listCurrencyRecordsInternal(
+    resourceInput,
+    searchParams,
+    headers,
+    false
+  )) as Array<Record<string, unknown>>;
+}
+
+export async function listCurrencyRecordPage(
+  resourceInput: string,
+  searchParams: URLSearchParams,
+  headers: Headers
+): Promise<PaginatedRecordsResponse> {
+  return (await listCurrencyRecordsInternal(
+    resourceInput,
+    searchParams,
+    headers,
+    true
+  )) as PaginatedRecordsResponse;
 }
 
 export async function createCurrencyRecord(

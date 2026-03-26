@@ -1,4 +1,4 @@
-import { and, desc, eq, ilike, or } from "drizzle-orm";
+import { and, count, desc, eq, ilike, inArray, or } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
 import * as schema from "@/db/schema";
@@ -200,6 +200,63 @@ async function enforceVehicleBasis(
   await ensureVehicleTypeInCompany(companyId, typeId);
 }
 
+async function paginateTransportTable<TTable>(
+  table: TTable,
+  whereClause: ReturnType<typeof and>,
+  page: number,
+  limit: number,
+  orderByClauses: Array<unknown>
+) {
+  const offset = (page - 1) * limit;
+  const [totalRow] = (await db
+    .select({ count: count() })
+    .from(table as never)
+    .where(whereClause)) as Array<{ count: number | string }>;
+  const rows = await db
+    .select()
+    .from(table as never)
+    .where(whereClause)
+    .orderBy(...(orderByClauses as []))
+    .limit(limit)
+    .offset(offset);
+
+  return {
+    rows,
+    total: Number(totalRow?.count ?? 0),
+    page,
+    limit,
+  };
+}
+
+async function paginateTransportCodeTable<TTable>(
+  table: TTable,
+  whereClause: ReturnType<typeof and>,
+  page: number,
+  limit: number,
+  orderByClauses: Array<unknown>,
+  columns: { id: unknown; code: unknown }
+) {
+  const offset = (page - 1) * limit;
+  const [totalRow] = (await db
+    .select({ count: count() })
+    .from(table as never)
+    .where(whereClause)) as Array<{ count: number | string }>;
+  const rows = await db
+    .select({ id: columns.id as never, code: columns.code as never })
+    .from(table as never)
+    .where(whereClause)
+    .orderBy(...(orderByClauses as []))
+    .limit(limit)
+    .offset(offset);
+
+  return {
+    rows: rows as Array<Record<string, unknown>>,
+    total: Number(totalRow?.count ?? 0),
+    page,
+    limit,
+  };
+}
+
 function parseResource(input: string): TransportResource {
   const parsed = transportResourceSchema.safeParse(input);
   if (!parsed.success) {
@@ -221,138 +278,232 @@ export async function listTransportRecords(
   const { companyId } = await getAccess(headers);
   const query = parsed.data;
   const term = query.q ? `%${query.q}%` : null;
+  const ids = query.ids
+    ? query.ids
+        .split(",")
+        .map((value) => value.trim())
+        .filter((value) => value.length > 0)
+        .slice(0, 100)
+    : [];
+  const codesOnly = query.codesOnly;
   const cacheKey = masterDataListCacheKey("transport", companyId, resource, query);
   return getOrSetMasterDataCache(cacheKey, async () => {
     switch (resource) {
-      case "locations":
-        return db
-          .select()
-          .from(schema.transportLocation)
-          .where(
-            and(
-              eq(schema.transportLocation.companyId, companyId),
-              term
-                ? or(
-                    ilike(schema.transportLocation.code, term),
-                    ilike(schema.transportLocation.name, term),
-                    ilike(schema.transportLocation.country, term),
-                    ilike(schema.transportLocation.region, term)
-                  )
-                : undefined
+      case "locations": {
+        const whereClause = and(
+          eq(schema.transportLocation.companyId, companyId),
+          ids.length > 0 ? inArray(schema.transportLocation.id, ids) : undefined,
+          term
+            ? or(
+                ilike(schema.transportLocation.code, term),
+                ilike(schema.transportLocation.name, term),
+                ilike(schema.transportLocation.country, term),
+                ilike(schema.transportLocation.region, term)
+              )
+            : undefined
+        );
+        return codesOnly
+          ? paginateTransportCodeTable(
+              schema.transportLocation,
+              whereClause,
+              query.page,
+              query.limit,
+              [desc(schema.transportLocation.createdAt)],
+              { id: schema.transportLocation.id, code: schema.transportLocation.code }
             )
-          )
-          .orderBy(desc(schema.transportLocation.createdAt))
-          .limit(query.limit);
-      case "vehicle-categories":
-        return db
-          .select()
-          .from(schema.transportVehicleCategory)
-          .where(
-            and(
-              eq(schema.transportVehicleCategory.companyId, companyId),
-              term
-                ? or(
-                    ilike(schema.transportVehicleCategory.code, term),
-                    ilike(schema.transportVehicleCategory.name, term)
-                  )
-                : undefined
+          : paginateTransportTable(
+              schema.transportLocation,
+              whereClause,
+              query.page,
+              query.limit,
+              [desc(schema.transportLocation.createdAt)]
+            );
+      }
+      case "vehicle-categories": {
+        const whereClause = and(
+          eq(schema.transportVehicleCategory.companyId, companyId),
+          ids.length > 0 ? inArray(schema.transportVehicleCategory.id, ids) : undefined,
+          term
+            ? or(
+                ilike(schema.transportVehicleCategory.code, term),
+                ilike(schema.transportVehicleCategory.name, term)
+              )
+            : undefined
+        );
+        return codesOnly
+          ? paginateTransportCodeTable(
+              schema.transportVehicleCategory,
+              whereClause,
+              query.page,
+              query.limit,
+              [
+                desc(schema.transportVehicleCategory.sortOrder),
+                desc(schema.transportVehicleCategory.createdAt),
+              ],
+              {
+                id: schema.transportVehicleCategory.id,
+                code: schema.transportVehicleCategory.code,
+              }
             )
-          )
-          .orderBy(
-            desc(schema.transportVehicleCategory.sortOrder),
-            desc(schema.transportVehicleCategory.createdAt)
-          )
-          .limit(query.limit);
-      case "vehicle-types":
-        return db
-          .select()
-          .from(schema.transportVehicleType)
-          .where(
-            and(
-              eq(schema.transportVehicleType.companyId, companyId),
-              term
-                ? or(
-                    ilike(schema.transportVehicleType.code, term),
-                    ilike(schema.transportVehicleType.name, term)
-                  )
-                : undefined
+          : paginateTransportTable(
+              schema.transportVehicleCategory,
+              whereClause,
+              query.page,
+              query.limit,
+              [
+                desc(schema.transportVehicleCategory.sortOrder),
+                desc(schema.transportVehicleCategory.createdAt),
+              ]
+            );
+      }
+      case "vehicle-types": {
+        const whereClause = and(
+          eq(schema.transportVehicleType.companyId, companyId),
+          ids.length > 0 ? inArray(schema.transportVehicleType.id, ids) : undefined,
+          term
+            ? or(
+                ilike(schema.transportVehicleType.code, term),
+                ilike(schema.transportVehicleType.name, term)
+              )
+            : undefined
+        );
+        return codesOnly
+          ? paginateTransportCodeTable(
+              schema.transportVehicleType,
+              whereClause,
+              query.page,
+              query.limit,
+              [desc(schema.transportVehicleType.createdAt)],
+              { id: schema.transportVehicleType.id, code: schema.transportVehicleType.code }
             )
-          )
-          .orderBy(desc(schema.transportVehicleType.createdAt))
-          .limit(query.limit);
-      case "location-rates":
-        return db
-          .select()
-          .from(schema.transportLocationRate)
-          .where(
-            and(
-              eq(schema.transportLocationRate.companyId, companyId),
-              term
-                ? or(
-                    ilike(schema.transportLocationRate.code, term),
-                    ilike(schema.transportLocationRate.currency, term),
-                    ilike(schema.transportLocationRate.pricingModel, term)
-                  )
-                : undefined
+          : paginateTransportTable(
+              schema.transportVehicleType,
+              whereClause,
+              query.page,
+              query.limit,
+              [desc(schema.transportVehicleType.createdAt)]
+            );
+      }
+      case "location-rates": {
+        const whereClause = and(
+          eq(schema.transportLocationRate.companyId, companyId),
+          ids.length > 0 ? inArray(schema.transportLocationRate.id, ids) : undefined,
+          term
+            ? or(
+                ilike(schema.transportLocationRate.code, term),
+                ilike(schema.transportLocationRate.currency, term),
+                ilike(schema.transportLocationRate.pricingModel, term)
+              )
+            : undefined
+        );
+        return codesOnly
+          ? paginateTransportCodeTable(
+              schema.transportLocationRate,
+              whereClause,
+              query.page,
+              query.limit,
+              [desc(schema.transportLocationRate.createdAt)],
+              { id: schema.transportLocationRate.id, code: schema.transportLocationRate.code }
             )
-          )
-          .orderBy(desc(schema.transportLocationRate.createdAt))
-          .limit(query.limit);
-      case "location-expenses":
-        return db
-          .select()
-          .from(schema.transportLocationExpense)
-          .where(
-            and(
-              eq(schema.transportLocationExpense.companyId, companyId),
-              term
-                ? or(
-                    ilike(schema.transportLocationExpense.code, term),
-                    ilike(schema.transportLocationExpense.name, term),
-                    ilike(schema.transportLocationExpense.expenseType, term)
-                  )
-                : undefined
+          : paginateTransportTable(
+              schema.transportLocationRate,
+              whereClause,
+              query.page,
+              query.limit,
+              [desc(schema.transportLocationRate.createdAt)]
+            );
+      }
+      case "location-expenses": {
+        const whereClause = and(
+          eq(schema.transportLocationExpense.companyId, companyId),
+          ids.length > 0 ? inArray(schema.transportLocationExpense.id, ids) : undefined,
+          term
+            ? or(
+                ilike(schema.transportLocationExpense.code, term),
+                ilike(schema.transportLocationExpense.name, term),
+                ilike(schema.transportLocationExpense.expenseType, term)
+              )
+            : undefined
+        );
+        return codesOnly
+          ? paginateTransportCodeTable(
+              schema.transportLocationExpense,
+              whereClause,
+              query.page,
+              query.limit,
+              [desc(schema.transportLocationExpense.createdAt)],
+              {
+                id: schema.transportLocationExpense.id,
+                code: schema.transportLocationExpense.code,
+              }
             )
-          )
-          .orderBy(desc(schema.transportLocationExpense.createdAt))
-          .limit(query.limit);
-      case "pax-vehicle-rates":
-        return db
-          .select()
-          .from(schema.transportPaxVehicleRate)
-          .where(
-            and(
-              eq(schema.transportPaxVehicleRate.companyId, companyId),
-              term
-                ? or(
-                    ilike(schema.transportPaxVehicleRate.code, term),
-                    ilike(schema.transportPaxVehicleRate.currency, term),
-                    ilike(schema.transportPaxVehicleRate.pricingModel, term)
-                  )
-                : undefined
+          : paginateTransportTable(
+              schema.transportLocationExpense,
+              whereClause,
+              query.page,
+              query.limit,
+              [desc(schema.transportLocationExpense.createdAt)]
+            );
+      }
+      case "pax-vehicle-rates": {
+        const whereClause = and(
+          eq(schema.transportPaxVehicleRate.companyId, companyId),
+          ids.length > 0 ? inArray(schema.transportPaxVehicleRate.id, ids) : undefined,
+          term
+            ? or(
+                ilike(schema.transportPaxVehicleRate.code, term),
+                ilike(schema.transportPaxVehicleRate.currency, term),
+                ilike(schema.transportPaxVehicleRate.pricingModel, term)
+              )
+            : undefined
+        );
+        return codesOnly
+          ? paginateTransportCodeTable(
+              schema.transportPaxVehicleRate,
+              whereClause,
+              query.page,
+              query.limit,
+              [desc(schema.transportPaxVehicleRate.createdAt)],
+              { id: schema.transportPaxVehicleRate.id, code: schema.transportPaxVehicleRate.code }
             )
-          )
-          .orderBy(desc(schema.transportPaxVehicleRate.createdAt))
-          .limit(query.limit);
-      case "baggage-rates":
-        return db
-          .select()
-          .from(schema.transportBaggageRate)
-          .where(
-            and(
-              eq(schema.transportBaggageRate.companyId, companyId),
-              term
-                ? or(
-                    ilike(schema.transportBaggageRate.code, term),
-                    ilike(schema.transportBaggageRate.currency, term),
-                    ilike(schema.transportBaggageRate.pricingModel, term),
-                    ilike(schema.transportBaggageRate.unit, term)
-                  )
-                : undefined
+          : paginateTransportTable(
+              schema.transportPaxVehicleRate,
+              whereClause,
+              query.page,
+              query.limit,
+              [desc(schema.transportPaxVehicleRate.createdAt)]
+            );
+      }
+      case "baggage-rates": {
+        const whereClause = and(
+          eq(schema.transportBaggageRate.companyId, companyId),
+          ids.length > 0 ? inArray(schema.transportBaggageRate.id, ids) : undefined,
+          term
+            ? or(
+                ilike(schema.transportBaggageRate.code, term),
+                ilike(schema.transportBaggageRate.currency, term),
+                ilike(schema.transportBaggageRate.pricingModel, term),
+                ilike(schema.transportBaggageRate.unit, term)
+              )
+            : undefined
+        );
+        return codesOnly
+          ? paginateTransportCodeTable(
+              schema.transportBaggageRate,
+              whereClause,
+              query.page,
+              query.limit,
+              [desc(schema.transportBaggageRate.createdAt)],
+              { id: schema.transportBaggageRate.id, code: schema.transportBaggageRate.code }
             )
-          )
-          .orderBy(desc(schema.transportBaggageRate.createdAt))
-          .limit(query.limit);
+          : paginateTransportTable(
+              schema.transportBaggageRate,
+              whereClause,
+              query.page,
+              query.limit,
+              [desc(schema.transportBaggageRate.createdAt)]
+            );
+      }
       default:
         throw new TransportError(404, "RESOURCE_NOT_FOUND", "Transport resource not found.");
     }

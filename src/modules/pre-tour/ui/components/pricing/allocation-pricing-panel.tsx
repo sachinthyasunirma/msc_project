@@ -47,8 +47,12 @@ export function AllocationPricingPanel({
           <p className="text-xs font-medium text-foreground">Source buying</p>
           <p className="mt-1 text-xs text-muted-foreground">
             {sourceRate
-              ? `Using ${sourceRate.sourceLabel}. Contracted buy values stay locked unless an authorized override is applied.`
-              : "No contracted rate selected. Enter the operational buy cost manually for this allocation."}
+              ? `Using ${sourceRate.sourceLabel}. ${
+                  sourceRate.sourceType === "MASTER_RATE"
+                    ? "Master-data buy values stay locked unless an authorized override is applied."
+                    : "Contracted buy values stay locked unless an authorized override is applied."
+                }`
+              : "No master or contracted rate selected. Enter the operational buy cost manually for this allocation."}
           </p>
         </div>
 
@@ -90,7 +94,7 @@ export function AllocationPricingPanel({
                   Contracted rate control
                 </p>
                 <p className="text-xs text-muted-foreground">
-                  Override only when supplier confirmation differs from the resolved contract or master rate.
+                  Override only when supplier confirmation differs from the resolved contract or transport/accommodation master rate.
                 </p>
               </div>
               <Switch

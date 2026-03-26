@@ -118,7 +118,10 @@ export async function loadCompanyConfigurationInitialData(): Promise<CompanyConf
         name: companyRecord.name ?? "",
         email: companyRecord.email ?? "",
         baseCurrencyCode: companyRecord.baseCurrencyCode ?? "USD",
-        transportRateBasis: companyRecord.transportRateBasis ?? "VEHICLE_TYPE",
+        transportRateBasis:
+          companyRecord.transportRateBasis === "VEHICLE_CATEGORY"
+            ? "VEHICLE_CATEGORY"
+            : "VEHICLE_TYPE",
         helpEnabled: companyRecord.helpEnabled ?? true,
         joinSecretCode: companyRecord.joinSecretCode ?? null,
         managerPrivilegeCode: companyRecord.managerPrivilegeCode ?? null,
@@ -141,7 +144,7 @@ export async function loadCompanyConfigurationInitialData(): Promise<CompanyConf
     const currencyOptions: CurrencyOption[] = currencies
       .map((row) => ({
         code: String(row.code ?? ""),
-        name: String(row.name ?? ""),
+        name: "name" in row ? String(row.name ?? "") : "",
       }))
       .filter((row) => row.code);
 

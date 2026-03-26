@@ -8,6 +8,8 @@ import { Button } from "@/components/ui/button";
 import { LoadingState } from "@/components/ui/loading-state";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { PreTourRouteMap } from "@/modules/pre-tour/ui/components/pre-tour-route-map";
+import { PreTourCostingSheetView } from "@/modules/pre-tour/ui/components/pre-tour-costing-sheet-view";
+import type { PreTourCostingSheetSnapshot } from "@/modules/pre-tour/shared/pre-tour-costing-types";
 import type { DetailSheetState, Row } from "@/modules/pre-tour/shared/pre-tour-management-types";
 import { formatCell, formatDate } from "@/modules/pre-tour/lib/pre-tour-management-utils";
 
@@ -69,6 +71,14 @@ export function PreTourDetailSheet({
       setDrawerRouteMeta({ distanceKm: null, durationMin: null });
     }
   }, [detailRouteMapLocations.length, detailSheet.open]);
+
+  const costingSheetSnapshot = (() => {
+    const snapshot = detailSheet.row?.snapshot;
+    if (!snapshot || typeof snapshot !== "object" || Array.isArray(snapshot)) return null;
+    const candidate = snapshot as Record<string, unknown>;
+    if (candidate.costingSheetVersion !== 1) return null;
+    return candidate as unknown as PreTourCostingSheetSnapshot;
+  })();
 
   return (
     <Sheet open={detailSheet.open} onOpenChange={setDetailSheetOpen}>
@@ -394,8 +404,12 @@ export function PreTourDetailSheet({
             </div>
           ) : null}
 
+          {costingSheetSnapshot ? <PreTourCostingSheetView snapshot={costingSheetSnapshot} /> : null}
+
           {detailSheet.row && detailSheet.kind !== "pre-tour" ? (
-            Object.entries(detailSheet.row).map(([key, value]) => (
+            Object.entries(detailSheet.row)
+              .filter(([key]) => !(costingSheetSnapshot && key === "snapshot"))
+              .map(([key, value]) => (
               <div key={key} className="flex items-start justify-between gap-3 rounded-md border px-3 py-2 text-sm">
                 <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{key}</span>
                 <span className="max-w-[70%] text-right text-foreground">{formatCell(value, lookups)}</span>

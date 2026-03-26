@@ -1,6 +1,8 @@
 import { transportResourceSchema } from "@/modules/transport/shared/transport-schemas";
+import type { TransportListPage } from "@/modules/transport/shared/transport-management-types";
 
 export type TransportResource = ReturnType<typeof transportResourceSchema.parse>;
+export type TransportCodeRecord = { id: string; code: string | null };
 
 type TransportErrorShape = {
   message?: string;
@@ -32,16 +34,58 @@ function ensureResource(resource: string) {
 
 export async function listTransportRecords(
   resource: string,
-  params?: { q?: string; limit?: number }
+  params?: { q?: string; ids?: string[]; page?: number; limit?: number; codesOnly?: boolean }
 ) {
   const validated = ensureResource(resource);
   const search = new URLSearchParams();
   if (params?.q) search.set("q", params.q);
+  if (params?.ids && params.ids.length > 0) search.set("ids", params.ids.join(","));
+  if (params?.page) search.set("page", String(params.page));
   if (params?.limit) search.set("limit", String(params.limit));
+  if (params?.codesOnly) search.set("codesOnly", "true");
   const response = await fetch(`/api/transports/${validated}?${search.toString()}`, {
     cache: "no-store",
   });
-  return parseResponse<Array<Record<string, unknown>>>(response);
+  return parseResponse<TransportListPage>(response);
+}
+
+export async function listAllTransportRecords(resource: string, params?: { q?: string; limit?: number }) {
+  const pageSize = params?.limit ?? 500;
+  let page = 1;
+  let collected: Array<Record<string, unknown>> = [];
+
+  while (true) {
+    const payload = await listTransportRecords(resource, {
+      q: params?.q,
+      page,
+      limit: pageSize,
+    });
+    collected = collected.concat(payload.rows);
+    if (collected.length >= payload.total || payload.rows.length === 0) {
+      return collected;
+    }
+    page += 1;
+  }
+}
+
+export async function listAllTransportCodes(resource: string, params?: { q?: string; limit?: number }) {
+  const pageSize = params?.limit ?? 100;
+  let page = 1;
+  let collected: TransportCodeRecord[] = [];
+
+  while (true) {
+    const payload = await listTransportRecords(resource, {
+      q: params?.q,
+      page,
+      limit: pageSize,
+      codesOnly: true,
+    });
+    collected = collected.concat(payload.rows as TransportCodeRecord[]);
+    if (collected.length >= payload.total || payload.rows.length === 0) {
+      return collected;
+    }
+    page += 1;
+  }
 }
 
 export async function createTransportRecord(

@@ -33,6 +33,15 @@ export const accommodationKeys = {
   hotelContracting: (hotelId: string) =>
     [...accommodationKeys.hotelDetail(hotelId), "contracting"] as const,
   seasonOptions: () => [...accommodationKeys.all, "season-options"] as const,
+  systemLocations: (input?: { mode?: "idle" | "dialog" | "batch"; q?: string }) =>
+    [
+      ...accommodationKeys.hotels(),
+      "system-locations",
+      {
+        mode: input?.mode ?? "idle",
+        q: input?.q ?? "",
+      },
+    ] as const,
   supplierOrganizations: () => [...accommodationKeys.all, "supplier-organizations"] as const,
 };
 

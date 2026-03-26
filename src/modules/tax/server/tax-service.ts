@@ -1,4 +1,4 @@
-import { and, desc, eq, ilike, ne, or } from "drizzle-orm";
+import { and, count, desc, eq, ilike, ne, or } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
 import * as schema from "@/db/schema";
@@ -31,6 +31,7 @@ import {
   updateTaxRuleTaxSchema,
   updateTaxSchema,
 } from "@/modules/tax/shared/tax-schemas";
+import type { PaginatedRecordsResponse } from "@/lib/types/paginated-records";
 
 class TaxError extends Error {
   constructor(
@@ -264,10 +265,40 @@ function validateTaxRatePayload(payload: {
   }
 }
 
-export async function listTaxRecords(
+async function paginateTaxTable<TTable>(
+  table: TTable,
+  whereClause: ReturnType<typeof and>,
+  page: number,
+  limit: number,
+  orderByClauses: Array<unknown>
+): Promise<PaginatedRecordsResponse> {
+  const offset = (page - 1) * limit;
+  const [totalRow] = (await db
+    .select({ count: count() })
+    .from(table as never)
+    .where(whereClause)) as Array<{ count: number | string }>;
+
+  const rows = await db
+    .select()
+    .from(table as never)
+    .where(whereClause)
+    .orderBy(...(orderByClauses as []))
+    .limit(limit)
+    .offset(offset);
+
+  return {
+    rows,
+    total: Number(totalRow?.count ?? 0),
+    page,
+    limit,
+  };
+}
+
+async function listTaxRecordsInternal(
   resourceInput: string,
   searchParams: URLSearchParams,
-  headers: Headers
+  headers: Headers,
+  paginated: boolean
 ) {
   const resource = parseResource(resourceInput);
   const parsed = taxListQuerySchema.safeParse(Object.fromEntries(searchParams));
@@ -279,181 +310,253 @@ export async function listTaxRecords(
   const q = parsed.data.q ? `%${parsed.data.q}%` : null;
   const limit = parsed.data.limit;
   const taxId = parsed.data.taxId;
-  const cacheKey = masterDataListCacheKey("tax", companyId, resource, parsed.data);
+  const page = parsed.data.page ?? 1;
+  const cacheKey = masterDataListCacheKey("tax", companyId, resource, {
+    ...parsed.data,
+    paginated,
+    page,
+  });
 
   return getOrSetMasterDataCache(cacheKey, async () => {
     switch (resource) {
-      case "tax-jurisdictions":
-        return db
-          .select()
-          .from(schema.taxJurisdiction)
-          .where(
-            and(
-              eq(schema.taxJurisdiction.companyId, companyId),
-              q
-                ? or(
-                    ilike(schema.taxJurisdiction.code, q),
-                    ilike(schema.taxJurisdiction.name, q),
-                    ilike(schema.taxJurisdiction.countryCode, q)
-                  )
-                : undefined
+      case "tax-jurisdictions": {
+        const whereClause = and(
+          eq(schema.taxJurisdiction.companyId, companyId),
+          q
+            ? or(
+                ilike(schema.taxJurisdiction.code, q),
+                ilike(schema.taxJurisdiction.name, q),
+                ilike(schema.taxJurisdiction.countryCode, q)
+              )
+            : undefined
+        );
+        return paginated
+          ? paginateTaxTable(
+              schema.taxJurisdiction,
+              whereClause,
+              page,
+              limit,
+              [desc(schema.taxJurisdiction.createdAt)]
             )
-          )
-          .orderBy(desc(schema.taxJurisdiction.createdAt))
-          .limit(limit);
-
-      case "taxes":
-        return db
-          .select()
-          .from(schema.tax)
-          .where(
-            and(
-              eq(schema.tax.companyId, companyId),
-              taxId ? eq(schema.tax.id, taxId) : undefined,
-              q ? or(ilike(schema.tax.code, q), ilike(schema.tax.name, q)) : undefined
+          : db
+              .select()
+              .from(schema.taxJurisdiction)
+              .where(whereClause)
+              .orderBy(desc(schema.taxJurisdiction.createdAt))
+              .limit(limit);
+      }
+      case "taxes": {
+        const whereClause = and(
+          eq(schema.tax.companyId, companyId),
+          taxId ? eq(schema.tax.id, taxId) : undefined,
+          q ? or(ilike(schema.tax.code, q), ilike(schema.tax.name, q)) : undefined
+        );
+        return paginated
+          ? paginateTaxTable(schema.tax, whereClause, page, limit, [desc(schema.tax.createdAt)])
+          : db.select().from(schema.tax).where(whereClause).orderBy(desc(schema.tax.createdAt)).limit(limit);
+      }
+      case "tax-rates": {
+        const whereClause = and(
+          eq(schema.taxRate.companyId, companyId),
+          taxId ? eq(schema.taxRate.taxId, taxId) : undefined,
+          q
+            ? or(
+                ilike(schema.taxRate.code, q),
+                ilike(schema.taxRate.rateType, q),
+                ilike(schema.taxRate.taxId, q)
+              )
+            : undefined
+        );
+        return paginated
+          ? paginateTaxTable(
+              schema.taxRate,
+              whereClause,
+              page,
+              limit,
+              [desc(schema.taxRate.effectiveFrom), desc(schema.taxRate.createdAt)]
             )
-          )
-          .orderBy(desc(schema.tax.createdAt))
-          .limit(limit);
-
-      case "tax-rates":
-        return db
-          .select()
-          .from(schema.taxRate)
-          .where(
-            and(
-              eq(schema.taxRate.companyId, companyId),
-              taxId ? eq(schema.taxRate.taxId, taxId) : undefined,
-              q
-                ? or(
-                    ilike(schema.taxRate.code, q),
-                    ilike(schema.taxRate.rateType, q),
-                    ilike(schema.taxRate.taxId, q)
-                  )
-                : undefined
+          : db
+              .select()
+              .from(schema.taxRate)
+              .where(whereClause)
+              .orderBy(desc(schema.taxRate.effectiveFrom), desc(schema.taxRate.createdAt))
+              .limit(limit);
+      }
+      case "tax-rule-sets": {
+        const whereClause = and(
+          eq(schema.taxRuleSet.companyId, companyId),
+          q ? or(ilike(schema.taxRuleSet.code, q), ilike(schema.taxRuleSet.name, q)) : undefined
+        );
+        return paginated
+          ? paginateTaxTable(
+              schema.taxRuleSet,
+              whereClause,
+              page,
+              limit,
+              [desc(schema.taxRuleSet.createdAt)]
             )
-          )
-          .orderBy(desc(schema.taxRate.effectiveFrom), desc(schema.taxRate.createdAt))
-          .limit(limit);
-
-      case "tax-rule-sets":
-        return db
-          .select()
-          .from(schema.taxRuleSet)
-          .where(
-            and(
-              eq(schema.taxRuleSet.companyId, companyId),
-              q
-                ? or(ilike(schema.taxRuleSet.code, q), ilike(schema.taxRuleSet.name, q))
-                : undefined
+          : db
+              .select()
+              .from(schema.taxRuleSet)
+              .where(whereClause)
+              .orderBy(desc(schema.taxRuleSet.createdAt))
+              .limit(limit);
+      }
+      case "tax-rules": {
+        const whereClause = and(
+          eq(schema.taxRule.companyId, companyId),
+          q
+            ? or(
+                ilike(schema.taxRule.code, q),
+                ilike(schema.taxRule.name, q),
+                ilike(schema.taxRule.serviceType, q)
+              )
+            : undefined
+        );
+        return paginated
+          ? paginateTaxTable(
+              schema.taxRule,
+              whereClause,
+              page,
+              limit,
+              [desc(schema.taxRule.effectiveFrom), desc(schema.taxRule.createdAt)]
             )
-          )
-          .orderBy(desc(schema.taxRuleSet.createdAt))
-          .limit(limit);
-
-      case "tax-rules":
-        return db
-          .select()
-          .from(schema.taxRule)
-          .where(
-            and(
-              eq(schema.taxRule.companyId, companyId),
-              q
-                ? or(
-                    ilike(schema.taxRule.code, q),
-                    ilike(schema.taxRule.name, q),
-                    ilike(schema.taxRule.serviceType, q)
-                  )
-                : undefined
+          : db
+              .select()
+              .from(schema.taxRule)
+              .where(whereClause)
+              .orderBy(desc(schema.taxRule.effectiveFrom), desc(schema.taxRule.createdAt))
+              .limit(limit);
+      }
+      case "tax-rule-taxes": {
+        const whereClause = and(
+          eq(schema.taxRuleTax.companyId, companyId),
+          taxId ? eq(schema.taxRuleTax.taxId, taxId) : undefined,
+          q
+            ? or(
+                ilike(schema.taxRuleTax.code, q),
+                ilike(schema.taxRuleTax.applyOn, q),
+                ilike(schema.taxRuleTax.ruleId, q)
+              )
+            : undefined
+        );
+        return paginated
+          ? paginateTaxTable(
+              schema.taxRuleTax,
+              whereClause,
+              page,
+              limit,
+              [desc(schema.taxRuleTax.createdAt)]
             )
-          )
-          .orderBy(desc(schema.taxRule.effectiveFrom), desc(schema.taxRule.createdAt))
-          .limit(limit);
-
-      case "tax-rule-taxes":
-        return db
-          .select()
-          .from(schema.taxRuleTax)
-          .where(
-            and(
-              eq(schema.taxRuleTax.companyId, companyId),
-              taxId ? eq(schema.taxRuleTax.taxId, taxId) : undefined,
-              q
-                ? or(
-                    ilike(schema.taxRuleTax.code, q),
-                    ilike(schema.taxRuleTax.applyOn, q),
-                    ilike(schema.taxRuleTax.ruleId, q)
-                  )
-                : undefined
+          : db
+              .select()
+              .from(schema.taxRuleTax)
+              .where(whereClause)
+              .orderBy(desc(schema.taxRuleTax.createdAt))
+              .limit(limit);
+      }
+      case "document-fx-snapshots": {
+        const whereClause = and(
+          eq(schema.documentFxSnapshot.companyId, companyId),
+          q
+            ? or(
+                ilike(schema.documentFxSnapshot.code, q),
+                ilike(schema.documentFxSnapshot.documentType, q),
+                ilike(schema.documentFxSnapshot.documentId, q)
+              )
+            : undefined
+        );
+        return paginated
+          ? paginateTaxTable(
+              schema.documentFxSnapshot,
+              whereClause,
+              page,
+              limit,
+              [desc(schema.documentFxSnapshot.asOf), desc(schema.documentFxSnapshot.createdAt)]
             )
-          )
-          .orderBy(desc(schema.taxRuleTax.createdAt))
-          .limit(limit);
-
-      case "document-fx-snapshots":
-        return db
-          .select()
-          .from(schema.documentFxSnapshot)
-          .where(
-            and(
-              eq(schema.documentFxSnapshot.companyId, companyId),
-              q
-                ? or(
-                    ilike(schema.documentFxSnapshot.code, q),
-                    ilike(schema.documentFxSnapshot.documentType, q),
-                    ilike(schema.documentFxSnapshot.documentId, q)
-                  )
-                : undefined
+          : db
+              .select()
+              .from(schema.documentFxSnapshot)
+              .where(whereClause)
+              .orderBy(desc(schema.documentFxSnapshot.asOf), desc(schema.documentFxSnapshot.createdAt))
+              .limit(limit);
+      }
+      case "document-tax-snapshots": {
+        const whereClause = and(
+          eq(schema.documentTaxSnapshot.companyId, companyId),
+          q
+            ? or(
+                ilike(schema.documentTaxSnapshot.code, q),
+                ilike(schema.documentTaxSnapshot.documentType, q),
+                ilike(schema.documentTaxSnapshot.documentId, q)
+              )
+            : undefined
+        );
+        return paginated
+          ? paginateTaxTable(
+              schema.documentTaxSnapshot,
+              whereClause,
+              page,
+              limit,
+              [desc(schema.documentTaxSnapshot.createdAt)]
             )
-          )
-          .orderBy(
-            desc(schema.documentFxSnapshot.asOf),
-            desc(schema.documentFxSnapshot.createdAt)
-          )
-          .limit(limit);
-
-      case "document-tax-snapshots":
-        return db
-          .select()
-          .from(schema.documentTaxSnapshot)
-          .where(
-            and(
-              eq(schema.documentTaxSnapshot.companyId, companyId),
-              q
-                ? or(
-                    ilike(schema.documentTaxSnapshot.code, q),
-                    ilike(schema.documentTaxSnapshot.documentType, q),
-                    ilike(schema.documentTaxSnapshot.documentId, q)
-                  )
-                : undefined
+          : db
+              .select()
+              .from(schema.documentTaxSnapshot)
+              .where(whereClause)
+              .orderBy(desc(schema.documentTaxSnapshot.createdAt))
+              .limit(limit);
+      }
+      case "document-tax-lines": {
+        const whereClause = and(
+          eq(schema.documentTaxLine.companyId, companyId),
+          q
+            ? or(
+                ilike(schema.documentTaxLine.code, q),
+                ilike(schema.documentTaxLine.taxCode, q),
+                ilike(schema.documentTaxLine.taxName, q)
+              )
+            : undefined
+        );
+        return paginated
+          ? paginateTaxTable(
+              schema.documentTaxLine,
+              whereClause,
+              page,
+              limit,
+              [desc(schema.documentTaxLine.createdAt)]
             )
-          )
-          .orderBy(desc(schema.documentTaxSnapshot.createdAt))
-          .limit(limit);
-
-      case "document-tax-lines":
-        return db
-          .select()
-          .from(schema.documentTaxLine)
-          .where(
-            and(
-              eq(schema.documentTaxLine.companyId, companyId),
-              q
-                ? or(
-                    ilike(schema.documentTaxLine.code, q),
-                    ilike(schema.documentTaxLine.taxCode, q),
-                    ilike(schema.documentTaxLine.taxName, q)
-                  )
-                : undefined
-            )
-          )
-          .orderBy(desc(schema.documentTaxLine.createdAt))
-          .limit(limit);
-
+          : db
+              .select()
+              .from(schema.documentTaxLine)
+              .where(whereClause)
+              .orderBy(desc(schema.documentTaxLine.createdAt))
+              .limit(limit);
+      }
       default:
         throw new TaxError(404, "RESOURCE_NOT_FOUND", "Tax resource not found.");
     }
   });
+}
+
+export async function listTaxRecords(
+  resourceInput: string,
+  searchParams: URLSearchParams,
+  headers: Headers
+) {
+  return listTaxRecordsInternal(resourceInput, searchParams, headers, false) as Promise<
+    Array<Record<string, unknown>>
+  >;
+}
+
+export async function listTaxRecordPage(
+  resourceInput: string,
+  searchParams: URLSearchParams,
+  headers: Headers
+) {
+  return listTaxRecordsInternal(resourceInput, searchParams, headers, true) as Promise<
+    PaginatedRecordsResponse
+  >;
 }
 
 export async function createTaxRecord(
