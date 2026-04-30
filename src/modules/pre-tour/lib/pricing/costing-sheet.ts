@@ -296,7 +296,8 @@ export function buildPreTourCostingSheet({
     const buy = readBuyAmounts(snapshot, line);
     const sell = readSellAmounts(snapshot, line);
     const text = getLineText(line, snapshot);
-    const normalizedType = String(line.itemType || "").trim().toUpperCase();
+    const rawType = String(line.itemType || "").trim().toUpperCase();
+    const normalizedType = rawType === "CEREMONY" ? "ACTIVITY" : rawType;
 
     if (normalizedType === "ACCOMMODATION") {
       addSectionValue(buySections, "accommodation", buy.total);

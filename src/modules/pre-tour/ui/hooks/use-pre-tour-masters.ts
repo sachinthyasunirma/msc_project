@@ -7,10 +7,10 @@ import { listHotels } from "@/modules/accommodation/lib/accommodation-api";
 import { listBusinessNetworkRecords } from "@/modules/business-network/lib/business-network-api";
 import { listCurrencyRecords } from "@/modules/currency/lib/currency-api";
 import { listGuideRecords } from "@/modules/guides/lib/guides-api";
+import { listPreTourCategoryLookups } from "@/modules/pre-tour/lib/pre-tour-category-lookups-api";
 import type { CompanySettingsResponse, Row } from "@/modules/pre-tour/shared/pre-tour-management-types";
 import type { PreTourMastersData } from "@/modules/pre-tour/shared/pre-tour-master-types";
 import { listTechnicalVisitRecords } from "@/modules/technical-visit/lib/technical-visit-api";
-import { listTourCategoryRecords } from "@/modules/tour-category/lib/tour-category-api";
 import { listTransportRecords } from "@/modules/transport/lib/transport-api";
 
 const INITIAL_STATE: PreTourMastersData = {
@@ -73,9 +73,7 @@ export function usePreTourMasters({ initialData = null }: UsePreTourMastersOptio
         currencies,
         organizations,
         operatorMarketContracts,
-        tourCategoryTypes,
-        tourCategories,
-        tourCategoryRules,
+        categoryLookups,
         technicalVisits,
         hotelResponse,
         companyResponse,
@@ -91,9 +89,7 @@ export function usePreTourMasters({ initialData = null }: UsePreTourMastersOptio
           () => listBusinessNetworkRecords("operator-market-contracts", { limit: 100 }),
           [] as Row[]
         ),
-        listTourCategoryRecords("tour-category-types", { limit: 100 }),
-        listTourCategoryRecords("tour-categories", { limit: 100 }),
-        listTourCategoryRecords("tour-category-rules", { limit: 100 }),
+        listPreTourCategoryLookups({ limit: 500 }),
         listTechnicalVisitRecords("technical-visits", { limit: 100 }),
         listHotels(new URLSearchParams({ limit: "100" })),
         fetch("/api/companies/me", { cache: "no-store" }),
@@ -120,11 +116,11 @@ export function usePreTourMasters({ initialData = null }: UsePreTourMastersOptio
         currencies,
         organizations,
         operatorMarketContracts,
-        tourCategoryTypes,
-        tourCategories,
+        tourCategoryTypes: categoryLookups.tourCategoryTypes,
+        tourCategories: categoryLookups.tourCategories,
         technicalVisits,
         hotels: hotelResponse.items ?? [],
-        tourCategoryRules,
+        tourCategoryRules: categoryLookups.tourCategoryRules,
         companyBaseCurrencyCode,
         transportRateBasis,
       } satisfies PreTourMastersData;

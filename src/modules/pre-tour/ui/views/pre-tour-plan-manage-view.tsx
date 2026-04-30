@@ -135,6 +135,13 @@ const PreTourShareDialogController = dynamic(
     ),
   { ssr: false }
 );
+const PreTourAIPlannerDialog = dynamic(
+  () =>
+    import("@/modules/pre-tour/ui/components/pre-tour-ai-planner-dialog").then(
+      (module) => module.PreTourAIPlannerDialog
+    ),
+  { ssr: false }
+);
 
 type PreTourPlanManageViewProps = {
   planId: string;
@@ -242,6 +249,7 @@ export function PreTourPlanManageView({
   const [sharingItem, setSharingItem] = useState<Row | null>(null);
   const [copyDialogOpen, setCopyDialogOpen] = useState(false);
   const [copySourcePlan, setCopySourcePlan] = useState<Row | null>(null);
+  const [aiPlannerOpen, setAiPlannerOpen] = useState(false);
   const [detailSheet, setDetailSheet] = useState<DetailSheetState>({
     open: false,
     title: "",
@@ -372,11 +380,15 @@ export function PreTourPlanManageView({
     if (!selectedDayId) {
       setItems([]);
       setAddons([]);
+      setSelectedItemId("");
       setDayDataLoading(false);
       return;
     }
 
     const requestId = ++dayDataRequestIdRef.current;
+    setItems([]);
+    setAddons([]);
+    setSelectedItemId("");
     setDayDataLoading(true);
 
     void (async () => {
@@ -438,6 +450,45 @@ export function PreTourPlanManageView({
   const selectedPlan = useMemo(
     () => plans.find((row) => String(row.id) === planId) ?? null,
     [planId, plans]
+  );
+  const aiPlannerInitialRequest = useMemo(
+    () =>
+      selectedPlan
+        ? {
+            mode: "REVISE" as const,
+            sourcePlanId: String(selectedPlan.id || ""),
+            prompt: String(selectedPlan.notes || ""),
+            categoryId: String(selectedPlan.categoryId || ""),
+            operatorOrgId: String(selectedPlan.operatorOrgId || ""),
+            marketOrgId: String(selectedPlan.marketOrgId || ""),
+            startDate: String(selectedPlan.startDate || ""),
+            endDate: String(selectedPlan.endDate || ""),
+            adults: Number(selectedPlan.adults ?? 2),
+            children: Number(selectedPlan.children ?? 0),
+            infants: Number(selectedPlan.infants ?? 0),
+            currencyCode: String(selectedPlan.currencyCode || companyBaseCurrencyCode),
+            preferredLanguage: String(selectedPlan.preferredLanguage || ""),
+            roomPreference: selectedPlan.roomPreference
+              ? (String(selectedPlan.roomPreference) as "DOUBLE" | "TWIN" | "MIXED")
+              : null,
+            mealPreference: selectedPlan.mealPreference
+              ? (String(selectedPlan.mealPreference) as "BB" | "HB" | "FB" | "AI")
+              : null,
+            priceMode:
+              String(selectedPlan.priceMode || "EXCLUSIVE") === "INCLUSIVE"
+                ? ("INCLUSIVE" as const)
+                : ("EXCLUSIVE" as const),
+            exchangeRateMode:
+              String(selectedPlan.exchangeRateMode || "AUTO") === "MANUAL"
+                ? ("MANUAL" as const)
+                : ("AUTO" as const),
+            exchangeRate: Number(selectedPlan.exchangeRate ?? 0),
+            exchangeRateDate: selectedPlan.exchangeRateDate
+              ? String(selectedPlan.exchangeRateDate)
+              : null,
+          }
+        : null,
+    [companyBaseCurrencyCode, selectedPlan]
   );
 
   const { clonePlanChildren, createVersionFromPlan } = usePreTourPlanOperations({
@@ -1203,6 +1254,14 @@ export function PreTourPlanManageView({
               <RefreshCw className="mr-2 size-4" />
               Refresh
             </Button>
+            {isAdmin ? (
+              <Button variant="outline" asChild>
+                <Link href="/master-data/pre-tours/ai-evaluations">AI Dashboard</Link>
+              </Button>
+            ) : null}
+            <Button variant="outline" onClick={() => setAiPlannerOpen(true)} disabled={isReadOnly}>
+              AI Revision
+            </Button>
             <Button variant="outline" onClick={() => void syncDaysFromRange()} disabled={isReadOnly || syncingDays}>
               {syncingDays ? "Syncing..." : "Sync Days From Range"}
             </Button>
@@ -1255,6 +1314,7 @@ export function PreTourPlanManageView({
         <ManagedDayEditor
           selectedDay={selectedManagedDay}
           selectedDayItems={selectedManagedDayItems}
+          loading={dayDataLoading}
           query={deferredQuery}
           isReadOnly={isReadOnly}
           addonsByItemId={addonsByItemId}
@@ -1364,6 +1424,8 @@ export function PreTourPlanManageView({
           selectedPlan={selectedPlan}
           routePathLabel={routePathLabel}
           routeMapLocations={routeMapLocations}
+          routeDataLoading={routeDataLoading}
+          routeTransportLoaded={routeTransportLoaded}
         />
       ) : null}
 
@@ -1439,6 +1501,31 @@ export function PreTourPlanManageView({
           isReadOnly={isReadOnly}
           clonePlanChildren={clonePlanChildren}
           onSuccess={loadData}
+        />
+      ) : null}
+
+      {aiPlannerOpen ? (
+        <PreTourAIPlannerDialog
+          open={aiPlannerOpen}
+          onOpenChange={setAiPlannerOpen}
+          initialRequest={aiPlannerInitialRequest}
+          currencies={currencies}
+          organizations={organizations}
+          operatorMarketContracts={operatorMarketContracts}
+          tourCategories={tourCategories}
+          companyBaseCurrencyCode={companyBaseCurrencyCode}
+          sourcePlan={
+            selectedPlan
+              ? {
+                  id: String(selectedPlan.id),
+                  planCode: String(selectedPlan.planCode || selectedPlan.code || ""),
+                  title: String(selectedPlan.title || ""),
+                }
+              : null
+          }
+          onApplied={(applied) => {
+            router.push(`/master-data/pre-tours/${applied.planId}`);
+          }}
         />
       ) : null}
 

@@ -166,9 +166,9 @@ export function CompanySetupGate() {
             baseCurrencyCode: form.baseCurrencyCode.trim().toUpperCase() || "USD",
             transportRateBasis: "VEHICLE_TYPE" as const,
             helpEnabled: form.helpEnabled,
-            subscriptionPlan: null,
-            subscriptionStatus: "PENDING" as const,
-            subscriptionStartsAt: null,
+            subscriptionPlan: "STARTER" as const,
+            subscriptionStatus: "ACTIVE" as const,
+            subscriptionStartsAt: new Date().toISOString(),
             subscriptionEndsAt: null,
             country: form.country.trim() || null,
             image: form.image.trim() || null,
@@ -187,7 +187,7 @@ export function CompanySetupGate() {
         return;
       }
 
-      router.replace("/billing/plans");
+      router.replace("/");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to save company settings.");
     } finally {

@@ -22,6 +22,8 @@ import {
   Users,
   CalendarRange,
   Bell,
+  Mail,
+  Sparkles,
 } from "lucide-react";
 
 import {
@@ -145,6 +147,14 @@ const navigationItems = [
     group: "Tours",
     icon: CalendarRange,
     keywords: "pre tour pre-tour plan day plan items addons totals reference number versions on-tour",
+  },
+  {
+    title: "AI Evaluations",
+    href: "/master-data/pre-tours/ai-evaluations",
+    group: "Tours",
+    icon: Sparkles,
+    keywords:
+      "ai evaluation prompt review accuracy coverage audit revisions llm pre tour quality dashboard",
   },
   {
     title: "On-Tours",
@@ -302,6 +312,13 @@ const navigationItems = [
     keywords: "company configuration users roles privileges",
   },
   {
+    title: "AI Email Intake",
+    href: "/master-data/ai-email",
+    group: "Master Data",
+    icon: Mail,
+    keywords: "imap email mailbox inbox ai pre-tour prompt intake master data filters keywords sender emails",
+  },
+  {
     title: "Plans & Billing",
     href: "/billing/plans",
     group: "Billing",
@@ -375,7 +392,7 @@ const navigationItems = [
 
 export const DashboardCommands = ({ open, setOpen }: Props) => {
   const router = useRouter();
-  const { privileges } = useDashboardAccessState();
+  const { privileges, isAdmin } = useDashboardAccessState();
 
   const goTo = (href: string) => {
     setOpen(false);
@@ -385,6 +402,13 @@ export const DashboardCommands = ({ open, setOpen }: Props) => {
   const has = useCallback((code: string) => privileges.includes(code), [privileges]);
 
   const canAccessHref = useCallback((href: string) => {
+    if (
+      href === "/master-data/pre-tours/ai-evaluations" ||
+      href.startsWith("/master-data/pre-tours/ai-evaluations/")
+    ) {
+      return has("SCREEN_PRE_TOURS") && isAdmin;
+    }
+
     const byUrl: Record<string, string> = {
       "/": "NAV_DASHBOARD",
       "/master-data/accommodations": "SCREEN_MASTER_ACCOMMODATIONS",
@@ -396,10 +420,12 @@ export const DashboardCommands = ({ open, setOpen }: Props) => {
       "/master-data/taxes": "SCREEN_MASTER_TAXES",
       "/master-data/tour-categories": "SCREEN_MASTER_TOUR_CATEGORIES",
       "/master-data/business-network": "SCREEN_MASTER_BUSINESS_NETWORK",
+      "/master-data/ai-email": "SCREEN_CONFIGURATION_COMPANY",
       "/master-data/pre-tours": "SCREEN_PRE_TOURS",
       "/tours/on-tours": "SCREEN_PRE_TOURS",
       "/master-data/technical-visits": "SCREEN_TECHNICAL_VISITS",
       "/configuration/company": "SCREEN_CONFIGURATION_COMPANY",
+      "/configuration/ai-email": "SCREEN_CONFIGURATION_COMPANY",
       "/billing/plans": "SUBSCRIPTION_MANAGE",
       "/billing/checkout": "SUBSCRIPTION_MANAGE",
       "/bin": "SCREEN_BIN",
@@ -411,7 +437,7 @@ export const DashboardCommands = ({ open, setOpen }: Props) => {
       if (href === path || href.startsWith(`${path}/`)) return has(code);
     }
     return true;
-  }, [has]);
+  }, [has, isAdmin]);
 
   const toSearchValue = (item: (typeof navigationItems)[number]) => {
     const compactTitle = item.title.replace(/\s+/g, "").toLowerCase();

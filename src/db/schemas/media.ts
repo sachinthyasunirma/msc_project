@@ -40,6 +40,11 @@ export const mediaAsset = pgTable(
     derivativesAllowed: boolean("derivatives_allowed"),
     reviewStatus: text("review_status").notNull().default("PENDING"),
     reviewNotes: text("review_notes"),
+    useInItinerary: boolean("use_in_itinerary").notNull().default(false),
+    eligibleForItineraryHero: boolean("eligible_for_itinerary_hero").notNull().default(false),
+    eligibleForItineraryGallery: boolean("eligible_for_itinerary_gallery").notNull().default(false),
+    itineraryPriority: integer("itinerary_priority").notNull().default(0),
+    safeForCustomerShare: boolean("safe_for_customer_share").notNull().default(false),
     isActive: boolean("is_active").notNull().default(true),
     createdBy: text("created_by").references(() => user.id, { onDelete: "set null" }),
     reviewedBy: text("reviewed_by").references(() => user.id, { onDelete: "set null" }),
@@ -55,5 +60,13 @@ export const mediaAsset = pgTable(
     index("idx_media_asset_entity").on(table.entityType, table.entityId),
     index("idx_media_asset_primary").on(table.entityType, table.entityId, table.isPrimary),
     index("idx_media_asset_review").on(table.reviewStatus),
+    index("idx_media_asset_itinerary_eligibility").on(
+      table.entityType,
+      table.entityId,
+      table.useInItinerary,
+      table.eligibleForItineraryHero,
+      table.eligibleForItineraryGallery,
+      table.itineraryPriority
+    ),
   ]
 );

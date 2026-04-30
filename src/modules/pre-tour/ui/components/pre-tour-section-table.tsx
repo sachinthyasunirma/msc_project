@@ -2,7 +2,16 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { CalendarDays, CopyPlus, PanelLeftOpen, Pencil, Plus, Settings2, Trash2 } from "lucide-react";
+import {
+  CalendarDays,
+  CopyPlus,
+  FileStack,
+  PanelLeftOpen,
+  Pencil,
+  Plus,
+  Settings2,
+  Trash2,
+} from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -34,6 +43,7 @@ type SectionTableProps = {
   showManage?: boolean;
   onCreateVersion?: (row: Row) => void;
   onCopyPlan?: (row: Row) => void;
+  onCreateItinerary?: (row: Row) => void;
   onAdd?: () => void;
   addLabel?: string;
   addDisabled?: boolean;
@@ -66,6 +76,7 @@ export function SectionTable({
   showManage,
   onCreateVersion,
   onCopyPlan,
+  onCreateItinerary,
   onAdd,
   addLabel,
   addDisabled = false,
@@ -82,6 +93,8 @@ export function SectionTable({
   const isPreTourPlans = resource === "pre-tours";
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
+  const DEFAULT_TEXT_TRUNCATE_LENGTH = 40;
+  const PLAN_TITLE_TRUNCATE_LENGTH = 48;
 
   useEffect(() => {
     const totalPages = Math.max(1, Math.ceil(rows.length / pageSize));
@@ -125,6 +138,66 @@ export function SectionTable({
     const date = new Date(String(value));
     if (Number.isNaN(date.getTime())) return "-";
     return date.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+  };
+
+  const truncateText = (value: unknown, maxLength = DEFAULT_TEXT_TRUNCATE_LENGTH) => {
+    const text = String(value ?? "").trim();
+    if (!text || text === "-") return "-";
+    if (text.length <= maxLength) return text;
+    return `${text.slice(0, Math.max(0, maxLength - 3)).trimEnd()}...`;
+  };
+
+  const renderTruncatedText = (
+    value: unknown,
+    options?: { maxLength?: number; className?: string }
+  ) => {
+    const text = String(value ?? "").trim();
+    const displayText = truncateText(value, options?.maxLength);
+    return (
+      <span
+        className={cn("block w-full max-w-full truncate", options?.className)}
+        title={text && text !== "-" ? text : undefined}
+      >
+        {displayText}
+      </span>
+    );
+  };
+
+  const getColumnWidthClassName = (columnKey: string) => {
+    if (["status", "isActive"].includes(columnKey)) return "w-[120px]";
+    if (
+      [
+        "title",
+        "notes",
+        "serviceId",
+        "planItemId",
+        "technicalVisitId",
+        "categoryId",
+        "typeId",
+        "programCode",
+        "planCode",
+        "referenceNo",
+        "updatedByName",
+        "deletedByName",
+      ].includes(columnKey)
+    ) {
+      return "w-[220px]";
+    }
+    if (
+      [
+        "updatedAt",
+        "deletedAt",
+        "date",
+        "dayId",
+        "totalAmount",
+        "baseTotal",
+        "taxTotal",
+        "grandTotal",
+      ].includes(columnKey)
+    ) {
+      return "w-[150px]";
+    }
+    return "w-[140px]";
   };
 
   const renderActions = (row: Row, compact = false) => (
@@ -192,6 +265,25 @@ export function SectionTable({
           </Button>
         )
       ) : null}
+      {/* {resource === "pre-tours" && onCreateItinerary ? (
+        compact ? (
+          <Button
+            size="icon"
+            variant="outline"
+            className="size-7"
+            title="Create Itinerary"
+            onClick={() => onCreateItinerary(row)}
+            disabled={isReadOnly}
+          >
+            <FileStack className="size-4" />
+          </Button>
+        ) : (
+          <Button size="sm" variant="outline" onClick={() => onCreateItinerary(row)} disabled={isReadOnly}>
+            <FileStack className="mr-1 size-4" />
+            Itinerary
+          </Button>
+        )
+      ) : null} */}
       {!hideEdit ? (
         compact ? (
           <Button
@@ -274,15 +366,15 @@ export function SectionTable({
         {isPreTourPlans ? (
           <div className="space-y-2">
             <div className="hidden overflow-x-auto lg:block">
-              <Table className="min-w-[980px]">
+              <Table className="min-w-[980px] table-fixed">
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Reference No</TableHead>
-                    <TableHead>Plan</TableHead>
-                    <TableHead>Travel Window</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Updated</TableHead>
-                    <TableHead className="text-right">Actions</TableHead>
+                    <TableHead className="w-[150px]">Reference No</TableHead>
+                    <TableHead className="w-[360px]">Plan</TableHead>
+                    <TableHead className="w-[200px]">Travel Window</TableHead>
+                    <TableHead className="w-[120px]">Status</TableHead>
+                    <TableHead className="w-[170px]">Updated</TableHead>
+                    <TableHead className="w-[220px] text-right">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -302,12 +394,21 @@ export function SectionTable({
                     paginatedRows.map((row) => (
                       <TableRow key={String(row.id)} className="h-11 align-middle">
                         <TableCell className="py-1.5">
-                          <span className="text-xs font-semibold">{String(row.referenceNo || "-")}</span>
+                          {renderTruncatedText(row.referenceNo || "-", {
+                            maxLength: 22,
+                            className: "text-xs font-semibold",
+                          })}
                         </TableCell>
                         <TableCell className="py-1.5">
-                          <div className="flex items-center gap-2 text-xs">
-                            <span className="font-semibold">{String(row.planCode || "-")}</span>
-                            <span className="truncate text-muted-foreground">{String(row.title || "-")}</span>
+                          <div className="flex min-w-0 items-center gap-2 text-xs">
+                            {renderTruncatedText(row.planCode || "-", {
+                              maxLength: 18,
+                              className: "max-w-[110px] font-semibold",
+                            })}
+                            {renderTruncatedText(row.title || "-", {
+                              maxLength: PLAN_TITLE_TRUNCATE_LENGTH,
+                              className: "min-w-0 flex-1 max-w-[190px] text-muted-foreground",
+                            })}
                             <span className="text-muted-foreground">{`V${String(row.version || 1)}`}</span>
                           </div>
                         </TableCell>
@@ -326,10 +427,12 @@ export function SectionTable({
                           </Badge>
                         </TableCell>
                         <TableCell className="py-1.5">
-                          <div className="truncate text-xs text-muted-foreground">
+                          <div className="max-w-[160px] truncate text-xs text-muted-foreground">
                             <span>{formatDate(row.updatedAt)}</span>
                             <span className="mx-1">•</span>
-                            <span>{String(row.updatedByName || "-")}</span>
+                            <span title={String(row.updatedByName || "")}>
+                              {truncateText(row.updatedByName || "-", 18)}
+                            </span>
                           </div>
                         </TableCell>
                         <TableCell className="py-1.5 text-right">{renderActions(row, true)}</TableCell>
@@ -358,8 +461,17 @@ export function SectionTable({
                     <div className="mb-2 flex items-start justify-between gap-2">
                       <div>
                         <p className="text-xs font-semibold">{`Ref: ${String(row.referenceNo || "-")}`}</p>
-                        <p className="text-sm font-semibold">{String(row.planCode || "-")}</p>
-                        <p className="text-xs text-muted-foreground">{String(row.title || "-")}</p>
+                        <div className="max-w-[220px]">
+                          {renderTruncatedText(row.planCode || "-", {
+                            maxLength: 18,
+                            className: "text-sm font-semibold",
+                          })}
+                        </div>
+                        <div className="max-w-[240px] text-xs text-muted-foreground">
+                          {renderTruncatedText(row.title || "-", {
+                            maxLength: PLAN_TITLE_TRUNCATE_LENGTH,
+                          })}
+                        </div>
                       </div>
                       <Badge variant="outline" className={cn("font-medium", statusClassName(row.status))}>
                         {String(row.status || "-")}
@@ -379,13 +491,15 @@ export function SectionTable({
           </div>
         ) : (
         <div className="overflow-x-auto">
-          <Table className="min-w-[920px]">
+          <Table className="min-w-[920px] table-fixed">
             <TableHeader>
               <TableRow>
                 {COLUMNS[resource].map((column) => (
-                  <TableHead key={column.key}>{column.label}</TableHead>
+                  <TableHead key={column.key} className={getColumnWidthClassName(column.key)}>
+                    {column.label}
+                  </TableHead>
                 ))}
-                <TableHead className="text-right">Actions</TableHead>
+                <TableHead className="w-[220px] text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -408,11 +522,13 @@ export function SectionTable({
                 paginatedRows.map((row) => (
                   <TableRow key={String(row.id)}>
                     {COLUMNS[resource].map((column) => (
-                      <TableCell key={column.key}>
+                      <TableCell key={column.key} className="max-w-0">
                         {column.key === "status" ? (
                           <Badge variant="outline">{String(row[column.key] || "-")}</Badge>
                         ) : (
-                          formatCell(row[column.key], lookups)
+                          renderTruncatedText(formatCell(row[column.key], lookups), {
+                            className: "max-w-[220px]",
+                          })
                         )}
                       </TableCell>
                     ))}

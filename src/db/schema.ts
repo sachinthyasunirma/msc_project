@@ -12,7 +12,9 @@ export * from "@/db/schemas/guides";
 export * from "@/db/schemas/tax";
 export * from "@/db/schemas/tour-category";
 export * from "@/db/schemas/technical-visit";
+export * from "@/db/schemas/itinerary";
 
 export * from "@/db/schemas/pre-tour";
 export * from "@/db/schemas/on-tour";
 export * from "@/db/schemas/notification";
+export * from "@/db/schemas/email-integration";

@@ -28,6 +28,7 @@ export const createHotelSchema = z.object({
   address: z.string().trim().min(2).max(255),
   city: z.string().trim().min(2).max(120),
   country: z.string().trim().min(2).max(120),
+  locationId: z.string().trim().min(1).optional().nullable(),
   starRating: z.coerce.number().int().min(1).max(5),
   contactEmail: z.string().trim().email().optional().nullable(),
   contactPhone: z.string().trim().max(40).optional().nullable(),

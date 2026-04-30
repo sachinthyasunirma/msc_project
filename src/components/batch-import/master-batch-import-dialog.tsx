@@ -257,20 +257,27 @@ function validateRow(
     } else if (config.key === "hotels") {
       const starRating = Number(values.starRating);
       const locationCode = toUpperTrim(values.locationCode);
+      const locationId = locationCode ? context.locationByCode.get(locationCode) ?? null : null;
       const location = locationCode ? context.locationDetailsByCode?.get(locationCode) ?? null : null;
       if (!locationCode) {
         errors.push("Location Code is required.");
-      } else if (!location) {
+      } else if (!locationId || !location) {
         errors.push("Location code not found in system locations.");
       }
       if (starRating < 1 || starRating > 5) {
         errors.push("Star Rating must be between 1 and 5.");
-      } else if (location) {
+      } else if (locationId && location) {
+        const resolvedAddress = values.address || location.address || "";
+        if (!resolvedAddress.trim()) {
+          errors.push("Address is required either in the upload row or in the selected master location.");
+          return { errors, payload: null, duplicateKey: code };
+        }
         payload = {
           code,
           name: values.name,
           description: values.description || null,
-          address: values.address || location.address || "",
+          locationId,
+          address: resolvedAddress,
           city: location.city,
           country: location.country,
           starRating,
