@@ -432,3 +432,67 @@ export const preTourPlanTechnicalVisit = pgTable(
     index("idx_pre_tour_plan_technical_visit_visit").on(table.technicalVisitId),
   ]
 );
+
+export const preTourAiRun = pgTable(
+  "pre_tour_ai_run",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => nanoid()),
+    companyId: text("company_id")
+      .notNull()
+      .references(() => company.id, { onDelete: "cascade" }),
+    code: text("code").notNull(),
+    mode: text("mode").notNull().default("CREATE"),
+    sourcePlanId: text("source_plan_id").references(() => preTourPlan.id, {
+      onDelete: "set null",
+    }),
+    resultingPlanId: text("resulting_plan_id").references(() => preTourPlan.id, {
+      onDelete: "set null",
+    }),
+    prompt: text("prompt").notNull(),
+    travelStartDate: timestamp("travel_start_date").notNull(),
+    travelEndDate: timestamp("travel_end_date").notNull(),
+    model: text("model").notNull(),
+    requestSnapshot: jsonb("request_snapshot").$type<Record<string, unknown> | null>().notNull(),
+    draftSnapshot: jsonb("draft_snapshot").$type<Record<string, unknown> | null>().notNull(),
+    validationSnapshot: jsonb("validation_snapshot")
+      .$type<Record<string, unknown> | null>()
+      .notNull(),
+    draftTitle: text("draft_title").notNull(),
+    draftDayCount: integer("draft_day_count").notNull().default(0),
+    overallAccuracy: text("overall_accuracy").notNull().default("low"),
+    masterCoveragePercent: integer("master_coverage_percent").notNull().default(0),
+    resolvedReferenceCount: integer("resolved_reference_count").notNull().default(0),
+    unresolvedReferenceCount: integer("unresolved_reference_count").notNull().default(0),
+    blockingIssueCount: integer("blocking_issue_count").notNull().default(0),
+    mediumIssueCount: integer("medium_issue_count").notNull().default(0),
+    lowIssueCount: integer("low_issue_count").notNull().default(0),
+    canApply: boolean("can_apply").notNull().default(false),
+    reviewStatus: text("review_status").notNull().default("PENDING"),
+    reviewScore: integer("review_score"),
+    reviewNotes: text("review_notes"),
+    createdByUserId: text("created_by_user_id"),
+    createdByName: text("created_by_name"),
+    appliedAt: timestamp("applied_at"),
+    appliedByUserId: text("applied_by_user_id"),
+    appliedByName: text("applied_by_name"),
+    reviewedAt: timestamp("reviewed_at"),
+    reviewedByUserId: text("reviewed_by_user_id"),
+    reviewedByName: text("reviewed_by_name"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (table) => [
+    unique("uq_pre_tour_ai_run_company_code").on(table.companyId, table.code),
+    index("idx_pre_tour_ai_run_company").on(table.companyId),
+    index("idx_pre_tour_ai_run_company_created").on(table.companyId, table.createdAt, table.id),
+    index("idx_pre_tour_ai_run_mode").on(table.mode),
+    index("idx_pre_tour_ai_run_accuracy").on(table.overallAccuracy),
+    index("idx_pre_tour_ai_run_can_apply").on(table.canApply),
+    index("idx_pre_tour_ai_run_review_status").on(table.reviewStatus),
+    index("idx_pre_tour_ai_run_source_plan").on(table.sourcePlanId),
+    index("idx_pre_tour_ai_run_result_plan").on(table.resultingPlanId),
+    index("idx_pre_tour_ai_run_applied_at").on(table.appliedAt),
+  ]
+);

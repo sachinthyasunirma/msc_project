@@ -419,6 +419,15 @@ export function useAccommodationContractingTab({
   );
 
   useEffect(() => {
+    setSelectedContractId((current) => {
+      if (current && (contracting?.contracts ?? []).some((row) => row.id === current)) {
+        return current;
+      }
+      return contracting?.contracts[0]?.id ?? "";
+    });
+  }, [contracting]);
+
+  useEffect(() => {
     setSelectedRatePlanId((current) => {
       if (current && selectedRatePlans.some((row) => row.id === current)) {
         return current;

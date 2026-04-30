@@ -90,7 +90,7 @@ export function getInitialHotelForm(row: Hotel | null = null): HotelFormState {
     code: row?.code ?? "",
     name: row?.name ?? "",
     description: row?.description ?? "",
-    locationId: "",
+    locationId: row?.locationId ?? "",
     address: row?.address ?? "",
     city: row?.city ?? "",
     country: row?.country ?? "",

@@ -5,12 +5,14 @@ import { CopyPlus, GripVertical, PanelLeftOpen, Plus, Settings2, Trash2 } from "
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader } from "@/components/ui/card";
+import { LoadingState } from "@/components/ui/loading-state";
 import type { Row } from "@/modules/pre-tour/shared/pre-tour-management-types";
 import { formatDate, itemTypeAccentClass, matchesQuery } from "@/modules/pre-tour/lib/pre-tour-management-utils";
 
 type ManagedDayEditorProps = {
   selectedDay: Row | null;
   selectedDayItems: Row[];
+  loading: boolean;
   query: string;
   isReadOnly: boolean;
   addonsByItemId: Map<string, Row[]>;
@@ -29,6 +31,7 @@ type ManagedDayEditorProps = {
 function ManagedDayEditorComponent({
   selectedDay,
   selectedDayItems,
+  loading,
   query,
   isReadOnly,
   addonsByItemId,
@@ -105,7 +108,16 @@ function ManagedDayEditorComponent({
         </div>
       </CardHeader>
       <CardContent className="space-y-2 px-3 pb-2.5 pt-0">
-        {selectedDayItems.length === 0 ? (
+        {loading ? (
+          <div className="rounded-md border border-dashed bg-muted/20 px-3 py-6">
+            <LoadingState
+              compact
+              title="Loading day services"
+              description="Fetching items, addons, and service details for the selected day."
+              className="justify-center"
+            />
+          </div>
+        ) : selectedDayItems.length === 0 ? (
           <div className="rounded-md border border-dashed bg-muted/20 px-3 py-4 text-center text-xs text-muted-foreground">
             {query.trim() ? "No matching plan items found for this day." : "No plan items for this day."}
           </div>

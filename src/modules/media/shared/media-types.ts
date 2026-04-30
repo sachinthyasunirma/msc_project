@@ -1,4 +1,9 @@
-export const MEDIA_ENTITY_TYPES = ["ACTIVITY", "TRANSPORT_LOCATION", "ACCOMMODATION_HOTEL"] as const;
+export const MEDIA_ENTITY_TYPES = [
+  "ACTIVITY",
+  "TRANSPORT_LOCATION",
+  "ACCOMMODATION_HOTEL",
+  "ITINERARY",
+] as const;
 export type MediaEntityType = (typeof MEDIA_ENTITY_TYPES)[number];
 
 export const MEDIA_SOURCE_TYPES = [
@@ -88,6 +93,11 @@ export type MediaAssetRecord = {
   derivativesAllowed: boolean | null;
   reviewStatus: MediaReviewStatus;
   reviewNotes: string | null;
+  useInItinerary: boolean;
+  eligibleForItineraryHero: boolean;
+  eligibleForItineraryGallery: boolean;
+  itineraryPriority: number;
+  safeForCustomerShare: boolean;
   isActive: boolean;
   createdBy: string | null;
   reviewedBy: string | null;

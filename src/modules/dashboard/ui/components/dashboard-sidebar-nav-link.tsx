@@ -2,7 +2,6 @@
 
 import type { MouseEvent, ReactNode } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { LoaderCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useDashboardNavigationState } from "@/modules/dashboard/ui/components/dashboard-navigation-provider";
@@ -26,19 +25,13 @@ export function DashboardSidebarNavLink({
   className,
   onNavigate,
 }: DashboardSidebarNavLinkProps) {
-  const router = useRouter();
   const { beginNavigation, isPendingHref } = useDashboardNavigationState();
   const isPending = isPendingHref(href);
 
   return (
     <Link
       href={href}
-      onMouseEnter={() => {
-        router.prefetch(href);
-      }}
-      onFocus={() => {
-        router.prefetch(href);
-      }}
+      prefetch={false}
       aria-disabled={isPending}
       onClick={(event) => {
         if (event.defaultPrevented || isModifiedEvent(event)) return;

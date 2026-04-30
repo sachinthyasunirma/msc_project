@@ -9,13 +9,6 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { TableLoadingRow } from "@/components/ui/table-loading-row";
 import { TablePagination } from "@/components/ui/table-pagination";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import type { Hotel } from "@/modules/accommodation/lib/accommodation-api";
 
@@ -99,19 +92,18 @@ function AccommodationHotelListCardComponent({
             value={hotelFilters.country}
             onChange={(event) => onFiltersChange({ ...hotelFilters, country: event.target.value })}
           />
-          <Select
+          <select
+            aria-label="Filter hotels by status"
+            className="border-input bg-background focus-visible:border-ring focus-visible:ring-ring/50 h-9 w-full rounded-md border px-3 py-2 text-sm shadow-xs outline-none focus-visible:ring-[3px] disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50"
             value={hotelFilters.isActive}
-            onValueChange={(value) => onFiltersChange({ ...hotelFilters, isActive: value })}
+            onChange={(event) =>
+              onFiltersChange({ ...hotelFilters, isActive: event.target.value })
+            }
           >
-            <SelectTrigger>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All</SelectItem>
-              <SelectItem value="true">Active</SelectItem>
-              <SelectItem value="false">Inactive</SelectItem>
-            </SelectContent>
-          </Select>
+            <option value="all">All</option>
+            <option value="true">Active</option>
+            <option value="false">Inactive</option>
+          </select>
         </div>
 
         <Table>

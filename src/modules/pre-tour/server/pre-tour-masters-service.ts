@@ -5,9 +5,9 @@ import { listBusinessNetworkRecords } from "@/modules/business-network/server/bu
 import { listCurrencyRecords } from "@/modules/currency/server/currency-service";
 import { loadDashboardShellData } from "@/modules/dashboard/server/dashboard-shell-service";
 import { listGuideRecords } from "@/modules/guides/server/guides-service";
+import { listPreTourCategoryLookups } from "@/modules/pre-tour/server/pre-tour-category-lookup-service";
 import type { PreTourMastersData } from "@/modules/pre-tour/shared/pre-tour-master-types";
 import { listTechnicalVisitRecords } from "@/modules/technical-visit/server/technical-visit-service";
-import { listTourCategoryRecords } from "@/modules/tour-category/server/tour-category-service";
 import { listTransportRecords } from "@/modules/transport/server/transport-service";
 
 function toPlainRow<T extends Record<string, unknown>>(row: T): T {
@@ -33,7 +33,6 @@ export async function loadPreTourMastersData(): Promise<PreTourMastersData | nul
     const currencyParams = new URLSearchParams({ limit: "100" });
     const organizationParams = new URLSearchParams({ limit: "100" });
     const contractParams = new URLSearchParams({ limit: "100" });
-    const tourCategoryParams = new URLSearchParams({ limit: "100" });
     const technicalVisitParams = new URLSearchParams({ limit: "100" });
     const hotelParams = new URLSearchParams({ limit: "100" });
 
@@ -61,9 +60,7 @@ export async function loadPreTourMastersData(): Promise<PreTourMastersData | nul
       currencies,
       organizations,
       operatorMarketContracts,
-      tourCategoryTypes,
-      tourCategories,
-      tourCategoryRules,
+      categoryLookups,
       technicalVisits,
       hotels,
       shellData,
@@ -87,9 +84,7 @@ export async function loadPreTourMastersData(): Promise<PreTourMastersData | nul
           ),
         []
       ),
-      listTourCategoryRecords("tour-category-types", tourCategoryParams, requestHeaders),
-      listTourCategoryRecords("tour-categories", tourCategoryParams, requestHeaders),
-      listTourCategoryRecords("tour-category-rules", tourCategoryParams, requestHeaders),
+      listPreTourCategoryLookups({ limit: 500 }, requestHeaders),
       listTechnicalVisitRecords("technical-visits", technicalVisitParams, requestHeaders),
       listHotels(hotelParams, requestHeaders),
       loadDashboardShellData(requestHeaders),
@@ -106,11 +101,11 @@ export async function loadPreTourMastersData(): Promise<PreTourMastersData | nul
       operatorMarketContracts: toPlainRows(
         operatorMarketContracts as Array<Record<string, unknown>>
       ),
-      tourCategoryTypes: toPlainRows(tourCategoryTypes),
-      tourCategories: toPlainRows(tourCategories),
+      tourCategoryTypes: toPlainRows(categoryLookups.tourCategoryTypes),
+      tourCategories: toPlainRows(categoryLookups.tourCategories),
       technicalVisits: toPlainRows(technicalVisits),
       hotels: toPlainRows(hotels.items),
-      tourCategoryRules: toPlainRows(tourCategoryRules),
+      tourCategoryRules: toPlainRows(categoryLookups.tourCategoryRules),
       companyBaseCurrencyCode: shellData.company?.baseCurrencyCode ?? "USD",
       transportRateBasis:
         shellData.company?.transportRateBasis === "VEHICLE_CATEGORY"

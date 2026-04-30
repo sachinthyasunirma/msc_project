@@ -1,4 +1,4 @@
-import { and, asc, count, eq } from "drizzle-orm";
+import { and, asc, count, desc, eq } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
 import * as schema from "@/db/schema";
@@ -50,7 +50,9 @@ async function resolveMediaAccess(headers: Headers, entityType: MediaEntityType)
       ? "SCREEN_MASTER_ACTIVITIES"
       : entityType === "TRANSPORT_LOCATION"
         ? "SCREEN_MASTER_TRANSPORTS"
-        : "SCREEN_MASTER_ACCOMMODATIONS";
+        : entityType === "ITINERARY"
+          ? "SCREEN_PRE_TOURS"
+          : "SCREEN_MASTER_ACCOMMODATIONS";
 
   try {
     return await resolveAccess(headers, {
@@ -98,6 +100,18 @@ async function ensureEntity(companyId: string, entityType: MediaEntityType, enti
       .limit(1);
     if (!record) {
       throw new MediaError(404, "ENTITY_NOT_FOUND", "Hotel not found.");
+    }
+    return;
+  }
+
+  if (entityType === "ITINERARY") {
+    const [record] = await db
+      .select({ id: schema.itinerary.id })
+      .from(schema.itinerary)
+      .where(and(eq(schema.itinerary.id, entityId), eq(schema.itinerary.companyId, companyId)))
+      .limit(1);
+    if (!record) {
+      throw new MediaError(404, "ENTITY_NOT_FOUND", "Itinerary not found.");
     }
     return;
   }
@@ -189,7 +203,12 @@ export async function listMediaAssets(searchParams: URLSearchParams, headers: He
     .select()
     .from(schema.mediaAsset)
     .where(and(...clauses))
-    .orderBy(asc(schema.mediaAsset.isPrimary), asc(schema.mediaAsset.createdAt));
+    .orderBy(
+      asc(schema.mediaAsset.isPrimary),
+      desc(schema.mediaAsset.useInItinerary),
+      desc(schema.mediaAsset.itineraryPriority),
+      asc(schema.mediaAsset.createdAt)
+    );
 
   return rows.map((row) => toPlainRecord(row));
 }

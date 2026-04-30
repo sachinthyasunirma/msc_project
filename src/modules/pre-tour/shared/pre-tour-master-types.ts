@@ -1,5 +1,11 @@
 import type { Row } from "@/modules/pre-tour/shared/pre-tour-management-types";
 
+export type PreTourCategoryLookups = {
+  tourCategoryTypes: Row[];
+  tourCategories: Row[];
+  tourCategoryRules: Row[];
+};
+
 export type PreTourMastersData = {
   locations: Row[];
   vehicleCategories: Row[];

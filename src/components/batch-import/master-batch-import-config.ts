@@ -40,12 +40,12 @@ export const hotelImportConfig: ImportEntityConfig = {
   key: "hotels",
   title: "Hotels",
   description:
-    "Upload accommodation hotels in bulk using a system location code. Star rating must be 1-5 and duplicate hotel codes are blocked.",
+    "Upload accommodation hotels in bulk using a system location code from master locations. If address is left blank, the selected master location address will be used.",
   fields: [
     { key: "code", label: "Code", required: true, type: "text" },
     { key: "name", label: "Name", required: true, type: "text" },
     { key: "description", label: "Description", type: "text" },
-    { key: "address", label: "Address", required: true, type: "text" },
+    { key: "address", label: "Address", type: "text" },
     { key: "locationCode", label: "Location Code", required: true, type: "dropdown", options: [] },
     { key: "starRating", label: "Star Rating", required: true, type: "number" },
     { key: "contactEmail", label: "Contact Email", type: "text" },
