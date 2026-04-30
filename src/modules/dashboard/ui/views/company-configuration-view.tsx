@@ -235,7 +235,7 @@ export function CompanyConfigurationView({
           baseCurrencyCode,
           transportRateBasis,
           helpEnabled,
-          subscriptionPlan,
+          ...(canManageSubscription ? { subscriptionPlan } : {}),
         }),
       });
       const body = (await response.json()) as { message?: string };

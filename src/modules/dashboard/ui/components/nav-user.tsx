@@ -55,7 +55,6 @@ function toCompanyForm(company: DashboardCompany | null) {
     email: company?.email ?? "",
     country: company?.country ?? "",
     image: company?.image ?? "",
-    subscriptionPlan: company?.subscriptionPlan ?? "STARTER",
   };
 }
 
@@ -116,7 +115,6 @@ export function NavUser() {
           email: companyForm.email.trim(),
           country: companyForm.country.trim() || null,
           image: companyForm.image.trim() || null,
-          subscriptionPlan: companyForm.subscriptionPlan,
         }),
       });
       const body = (await response.json()) as { message?: string };
@@ -136,7 +134,6 @@ export function NavUser() {
               email: companyForm.email.trim(),
               country: companyForm.country.trim() || null,
               image: companyForm.image.trim() || null,
-              subscriptionPlan: companyForm.subscriptionPlan,
             }
           : company,
       });

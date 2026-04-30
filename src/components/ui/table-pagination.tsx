@@ -1,13 +1,6 @@
 "use client";
 
 import { Button } from "@/components/ui/button";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 
 type Props = {
   totalItems?: number;
@@ -84,24 +77,22 @@ export function TablePagination({
       </p>
       <div className="flex items-center gap-2">
         {!hidePageSize ? (
-          <Select
+          <select
+            aria-label="Rows per page"
+            className="border-input bg-background text-foreground focus-visible:border-ring focus-visible:ring-ring/50 h-9 w-[90px] rounded-md border px-3 py-2 text-sm shadow-xs outline-none focus-visible:ring-[3px] disabled:cursor-not-allowed disabled:opacity-50"
             value={String(pageSize)}
-            onValueChange={(value) => {
+            onChange={(event) => {
+              const value = event.target.value;
               onPageSizeChange(Number(value));
               onPageChange(1);
             }}
           >
-            <SelectTrigger className="w-[90px]">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {PAGE_SIZE_OPTIONS.map((size) => (
-                <SelectItem key={size} value={String(size)}>
-                  {size}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+            {PAGE_SIZE_OPTIONS.map((size) => (
+              <option key={size} value={String(size)}>
+                {size}
+              </option>
+            ))}
+          </select>
         ) : null}
         <Button
           variant="outline"

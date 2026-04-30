@@ -13,6 +13,7 @@ import { nanoid } from "nanoid";
 import { businessOrganization } from "@/db/schemas/business-network";
 import { season } from "@/db/schemas/season";
 import { company } from "@/db/schemas/company";
+import { transportLocation } from "@/db/schemas/transport";
 
 export const hotel = pgTable(
   "hotel",
@@ -27,6 +28,9 @@ export const hotel = pgTable(
     address: text("address").notNull(),
     city: text("city").notNull(),
     country: text("country").notNull(),
+    locationId: text("location_id").references(() => transportLocation.id, {
+      onDelete: "set null",
+    }),
     starRating: integer("star_rating").notNull(),
     contactEmail: text("contact_email"),
     contactPhone: text("contact_phone"),
@@ -42,6 +46,7 @@ export const hotel = pgTable(
   (table) => [
     index("idx_hotel_name").on(table.name),
     index("idx_hotel_location").on(table.city, table.country),
+    index("idx_hotel_system_location").on(table.locationId),
     index("idx_hotel_star_rating").on(table.starRating),
     index("idx_hotel_company").on(table.companyId),
     index("idx_hotel_active").on(table.isActive),

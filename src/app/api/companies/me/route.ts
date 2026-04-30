@@ -286,6 +286,7 @@ export async function PATCH(request: Request) {
     }
 
     const managerPrivilegeCode = parsed.data.privilegeCode || generateSecret("MGR");
+    const starterActivatedAt = new Date();
     const [created] = await db
       .insert(company)
       .values({
@@ -299,9 +300,9 @@ export async function PATCH(request: Request) {
         helpEnabled: parsed.data.helpEnabled ?? true,
         country: parsed.data.country ?? null,
         image: parsed.data.image ?? null,
-        subscriptionPlan: null,
-        subscriptionStatus: "PENDING",
-        subscriptionStartsAt: null,
+        subscriptionPlan: "STARTER",
+        subscriptionStatus: "ACTIVE",
+        subscriptionStartsAt: starterActivatedAt,
         subscriptionEndsAt: null,
       })
       .returning({ id: company.id });

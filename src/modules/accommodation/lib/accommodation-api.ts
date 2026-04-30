@@ -17,6 +17,7 @@ export type Hotel = {
   code: string;
   name: string;
   description: string | null;
+  locationId: string | null;
   address: string;
   city: string;
   country: string;

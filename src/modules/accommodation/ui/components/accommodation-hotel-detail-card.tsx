@@ -76,6 +76,8 @@ function AccommodationHotelDetailCardComponent({
   onEditAvailability,
   onDeleteAvailability,
 }: AccommodationHotelDetailCardProps) {
+  const tabsIdBase = selectedHotel ? `accommodation-hotel-tabs-${selectedHotel.id}` : "accommodation-hotel-tabs";
+
   const handleTabChange = (value: string) => {
     switch (value) {
       case "room-types":
@@ -89,6 +91,9 @@ function AccommodationHotelDetailCardComponent({
         onActiveTabChange("room-types");
     }
   };
+
+  const getTabTriggerId = (value: AccommodationHotelDetailTab) => `${tabsIdBase}-trigger-${value}`;
+  const getTabContentId = (value: AccommodationHotelDetailTab) => `${tabsIdBase}-content-${value}`;
 
   return (
     <Card>
@@ -110,15 +115,54 @@ function AccommodationHotelDetailCardComponent({
           <Tabs value={activeTab} onValueChange={handleTabChange}>
             <div className="master-tabs-scroll">
               <TabsList className="master-tabs-list">
-                <TabsTrigger value="room-types" className="master-tab-trigger">Room Types</TabsTrigger>
-                <TabsTrigger value="room-rates" className="master-tab-trigger">Room Rates</TabsTrigger>
-                <TabsTrigger value="contracting" className="master-tab-trigger">Contracting</TabsTrigger>
-                <TabsTrigger value="availability" className="master-tab-trigger">Availability</TabsTrigger>
-                <TabsTrigger value="images" className="master-tab-trigger">Images</TabsTrigger>
+                <TabsTrigger
+                  value="room-types"
+                  id={getTabTriggerId("room-types")}
+                  aria-controls={getTabContentId("room-types")}
+                  className="master-tab-trigger"
+                >
+                  Room Types
+                </TabsTrigger>
+                <TabsTrigger
+                  value="room-rates"
+                  id={getTabTriggerId("room-rates")}
+                  aria-controls={getTabContentId("room-rates")}
+                  className="master-tab-trigger"
+                >
+                  Room Rates
+                </TabsTrigger>
+                <TabsTrigger
+                  value="contracting"
+                  id={getTabTriggerId("contracting")}
+                  aria-controls={getTabContentId("contracting")}
+                  className="master-tab-trigger"
+                >
+                  Contracting
+                </TabsTrigger>
+                <TabsTrigger
+                  value="availability"
+                  id={getTabTriggerId("availability")}
+                  aria-controls={getTabContentId("availability")}
+                  className="master-tab-trigger"
+                >
+                  Availability
+                </TabsTrigger>
+                <TabsTrigger
+                  value="images"
+                  id={getTabTriggerId("images")}
+                  aria-controls={getTabContentId("images")}
+                  className="master-tab-trigger"
+                >
+                  Images
+                </TabsTrigger>
               </TabsList>
             </div>
 
-            <TabsContent value="room-types">
+            <TabsContent
+              value="room-types"
+              id={getTabContentId("room-types")}
+              aria-labelledby={getTabTriggerId("room-types")}
+            >
               <RoomTypesTab
                 loadingDetails={loadingDetails}
                 roomTypes={roomTypes}
@@ -130,7 +174,11 @@ function AccommodationHotelDetailCardComponent({
               />
             </TabsContent>
 
-            <TabsContent value="room-rates">
+            <TabsContent
+              value="room-rates"
+              id={getTabContentId("room-rates")}
+              aria-labelledby={getTabTriggerId("room-rates")}
+            >
               <AccommodationRoomRatesTab
                 hotelId={selectedHotel.id}
                 loadingDetails={loadingDetails}
@@ -140,7 +188,11 @@ function AccommodationHotelDetailCardComponent({
               />
             </TabsContent>
 
-            <TabsContent value="availability">
+            <TabsContent
+              value="availability"
+              id={getTabContentId("availability")}
+              aria-labelledby={getTabTriggerId("availability")}
+            >
               <AvailabilityTab
                 loadingDetails={loadingDetails}
                 availability={availability}
@@ -152,7 +204,11 @@ function AccommodationHotelDetailCardComponent({
               />
             </TabsContent>
 
-            <TabsContent value="contracting">
+            <TabsContent
+              value="contracting"
+              id={getTabContentId("contracting")}
+              aria-labelledby={getTabTriggerId("contracting")}
+            >
               <ContractingTab
                 hotelId={selectedHotel.id}
                 loadingDetails={loadingDetails}
@@ -162,7 +218,11 @@ function AccommodationHotelDetailCardComponent({
               />
             </TabsContent>
 
-            <TabsContent value="images">
+            <TabsContent
+              value="images"
+              id={getTabContentId("images")}
+              aria-labelledby={getTabTriggerId("images")}
+            >
               <ImagesTab
                 hotelId={selectedHotel.id}
                 isReadOnly={isReadOnly}

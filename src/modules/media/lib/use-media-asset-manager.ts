@@ -31,6 +31,11 @@ export type MediaFormState = {
   derivativesAllowed: boolean;
   reviewStatus: string;
   reviewNotes: string;
+  useInItinerary: boolean;
+  eligibleForItineraryHero: boolean;
+  eligibleForItineraryGallery: boolean;
+  itineraryPriority: number;
+  safeForCustomerShare: boolean;
   isActive: boolean;
 };
 
@@ -53,6 +58,11 @@ function getInitialForm(asset?: MediaAssetRecord | null): MediaFormState {
     derivativesAllowed: asset?.derivativesAllowed ?? true,
     reviewStatus: asset?.reviewStatus ?? "PENDING",
     reviewNotes: asset?.reviewNotes ?? "",
+    useInItinerary: asset?.useInItinerary ?? false,
+    eligibleForItineraryHero: asset?.eligibleForItineraryHero ?? false,
+    eligibleForItineraryGallery: asset?.eligibleForItineraryGallery ?? false,
+    itineraryPriority: asset?.itineraryPriority ?? 0,
+    safeForCustomerShare: asset?.safeForCustomerShare ?? false,
     isActive: asset?.isActive ?? true,
   };
 }
@@ -166,6 +176,11 @@ export function useMediaAssetManager(options: {
           derivativesAllowed: form.derivativesAllowed,
           reviewStatus: form.reviewStatus,
           reviewNotes: form.reviewNotes || null,
+          useInItinerary: form.useInItinerary,
+          eligibleForItineraryHero: form.eligibleForItineraryHero,
+          eligibleForItineraryGallery: form.eligibleForItineraryGallery,
+          itineraryPriority: form.itineraryPriority,
+          safeForCustomerShare: form.safeForCustomerShare,
           isActive: form.isActive,
         });
         notify.success("Media asset updated.");
@@ -209,6 +224,11 @@ export function useMediaAssetManager(options: {
             derivativesAllowed: form.derivativesAllowed,
             reviewStatus: form.reviewStatus,
             reviewNotes: form.reviewNotes || null,
+            useInItinerary: form.useInItinerary,
+            eligibleForItineraryHero: form.eligibleForItineraryHero,
+            eligibleForItineraryGallery: form.eligibleForItineraryGallery,
+            itineraryPriority: form.itineraryPriority,
+            safeForCustomerShare: form.safeForCustomerShare,
             isActive: form.isActive,
           });
         }
