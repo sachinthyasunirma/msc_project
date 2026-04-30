@@ -103,6 +103,10 @@ type ResolvedAccessContext = {
   allowedByCompany: Set<AppPrivilegeCode>;
 };
 
+function isScreenViewPrivilege(requiredPrivilege: AppPrivilegeCode) {
+  return requiredPrivilege.startsWith("SCREEN_");
+}
+
 const SYSTEM_ROLE_CODES: Record<LegacyRole, string> = {
   ADMIN: "SYS_ADMIN",
   MANAGER: "SYS_MANAGER",
@@ -588,6 +592,7 @@ function assertRequiredPrivilege(
   requiredPrivilege?: AppPrivilegeCode
 ) {
   if (!requiredPrivilege) return;
+  if (isScreenViewPrivilege(requiredPrivilege)) return;
 
   if (!context.allowedByPlan.has(requiredPrivilege)) {
     throw new AccessControlError(
@@ -676,7 +681,7 @@ async function loadBaseAccess(headers: Headers): Promise<ResolvedAccessContext> 
       const legacyRole = normalizeLegacyRole(currentRecord.role);
       const elevated = legacyRole === "ADMIN" || legacyRole === "MANAGER";
       const subscriptionStatus = currentRecord.companySubscriptionStatus ?? "PENDING";
-      const subscriptionLimited = !isSubscriptionActive({
+      const hasActiveSubscription = isSubscriptionActive({
         subscriptionStatus,
         subscriptionEndsAt: currentRecord.companySubscriptionEndsAt,
       });
@@ -693,20 +698,11 @@ async function loadBaseAccess(headers: Headers): Promise<ResolvedAccessContext> 
         });
       }
 
-      if (
-        subscriptionLimited &&
-        !elevated &&
-        (!storedReadOnly || storedCanWriteMasterData || storedCanWritePreTour)
-      ) {
-        scheduleLegacyFlagSync(currentRecord.id, {
-          readOnly: true,
-          canWriteMasterData: false,
-          canWritePreTour: false,
-        });
-      }
-
-      const effectiveReadOnly = subscriptionLimited ? true : elevated ? false : storedReadOnly;
-      const plan = currentRecord.companySubscriptionPlan ?? "STARTER";
+      const effectiveReadOnly = elevated ? false : storedReadOnly;
+      const plan = hasActiveSubscription
+        ? currentRecord.companySubscriptionPlan ?? "STARTER"
+        : "STARTER";
+      const subscriptionLimited = false;
       const allowedByPlan = new Set(getPrivilegesForPlan(plan));
       const adminCeiling = await getCompanyAdminPrivilegeCeiling(currentRecord.companyRecordId);
       const allowedByCompany = new Set(
@@ -733,11 +729,9 @@ async function loadBaseAccess(headers: Headers): Promise<ResolvedAccessContext> 
       );
       const privilegeSet = new Set(privileges);
       const canWriteMasterData =
-        !subscriptionLimited &&
         !effectiveReadOnly &&
         (storedCanWriteMasterData || elevated || privilegeSet.has("MASTER_DATA_WRITE"));
       const canWritePreTour =
-        !subscriptionLimited &&
         !effectiveReadOnly &&
         (storedCanWritePreTour || elevated || privilegeSet.has("PRE_TOUR_WRITE"));
 
@@ -782,19 +776,6 @@ export async function resolveAccess(
     }
 
     const context = await contextPromise;
-    const canActivateSubscription =
-      options.requiredPrivilege === "SUBSCRIPTION_MANAGE" && context.access.role === "ADMIN";
-    if (
-      context.access.subscriptionLimited &&
-      context.access.role === "ADMIN" &&
-      !canActivateSubscription
-    ) {
-      throw new AccessControlError(
-        403,
-        "SUBSCRIPTION_REQUIRED",
-        "Subscription is required to continue. Open Plans & Billing to activate a plan."
-      );
-    }
     assertRequiredPrivilege(context, options.requiredPrivilege);
     return context.access;
   } catch (error) {

@@ -10,6 +10,8 @@ type PreTourRouteMapDialogControllerProps = {
   selectedPlan: Row | null;
   routePathLabel: string;
   routeMapLocations: Array<{ id: string; name: string; coordinates: [number, number] }>;
+  routeDataLoading: boolean;
+  routeTransportLoaded: boolean;
 };
 
 export function PreTourRouteMapDialogController({
@@ -18,6 +20,8 @@ export function PreTourRouteMapDialogController({
   selectedPlan,
   routePathLabel,
   routeMapLocations,
+  routeDataLoading,
+  routeTransportLoaded,
 }: PreTourRouteMapDialogControllerProps) {
   const [useRoadRoute, setUseRoadRoute] = useState(true);
   const [routeMeta, setRouteMeta] = useState<{ distanceKm: number | null; durationMin: number | null }>({
@@ -26,10 +30,16 @@ export function PreTourRouteMapDialogController({
   });
 
   useEffect(() => {
-    if (routeMapLocations.length > 0) return;
-    setRouteMeta({ distanceKm: null, durationMin: null });
-    if (open) onOpenChange(false);
-  }, [onOpenChange, open, routeMapLocations.length]);
+    if (!open) {
+      setUseRoadRoute(true);
+      setRouteMeta({ distanceKm: null, durationMin: null });
+      return;
+    }
+
+    if (routeMapLocations.length === 0) {
+      setRouteMeta({ distanceKm: null, durationMin: null });
+    }
+  }, [open, routeMapLocations.length]);
 
   return (
     <PreTourRouteMapDialog
@@ -38,6 +48,8 @@ export function PreTourRouteMapDialogController({
       selectedPlan={selectedPlan}
       routePathLabel={routePathLabel}
       routeMapLocations={routeMapLocations}
+      routeDataLoading={routeDataLoading}
+      routeTransportLoaded={routeTransportLoaded}
       useRoadRoute={useRoadRoute}
       onUseRoadRouteChange={setUseRoadRoute}
       routeMeta={routeMeta}

@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import dynamic from "next/dynamic";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Plus, RefreshCw } from "lucide-react";
 import { notify } from "@/lib/notify";
 import { Button } from "@/components/ui/button";
@@ -68,6 +70,20 @@ const PreTourRecordDialog = dynamic(
     ),
   { ssr: false }
 );
+const ItineraryLauncherDialog = dynamic(
+  () =>
+    import("@/modules/itinerary/ui/components/itinerary-launcher-dialog").then(
+      (module) => module.ItineraryLauncherDialog
+    ),
+  { ssr: false }
+);
+const PreTourAIPlannerDialog = dynamic(
+  () =>
+    import("@/modules/pre-tour/ui/components/pre-tour-ai-planner-dialog").then(
+      (module) => module.PreTourAIPlannerDialog
+    ),
+  { ssr: false }
+);
 const TRANSPORT_CHARGE_METHODS = new Set([
   "PER_TRANSFER",
   "PER_VEHICLE",
@@ -112,6 +128,7 @@ export function PreTourPlansView({
   showBinOnly = false,
   initialMasters = null,
 }: PreTourPlansViewProps) {
+  const router = useRouter();
   const { isReadOnly, isAdmin, canViewRouteMap } = usePreTourAccess();
   const {
     locations,
@@ -143,12 +160,17 @@ export function PreTourPlansView({
   const [detailPreTourRouteLoading, setDetailPreTourRouteLoading] = useState(false);
   const [copyDialogOpen, setCopyDialogOpen] = useState(false);
   const [copySourcePlan, setCopySourcePlan] = useState<Row | null>(null);
+  const [aiPlannerOpen, setAiPlannerOpen] = useState(false);
   const [dialog, setDialog] = useState<{
     open: boolean;
     mode: "create" | "edit";
     resource: PreTourResourceKey;
     row: Row | null;
   }>({ open: false, mode: "create", resource: initialResource, row: null });
+  const [itineraryLauncher, setItineraryLauncher] = useState<{
+    open: boolean;
+    row: Row | null;
+  }>({ open: false, row: null });
   const activeCursor = cursorHistory[pageIndex] ?? null;
 
   useEffect(() => {
@@ -463,6 +485,10 @@ export function PreTourPlansView({
     setDetailSheet({ open: true, title, description, row, kind: "pre-tour" });
   }, []);
 
+  const openItineraryLauncher = useCallback((row: Row) => {
+    setItineraryLauncher({ open: true, row });
+  }, []);
+
   const onDelete = async (resource: PreTourResourceKey, row: Row) => {
     if (isReadOnly) {
       notify.warning("You are in read-only mode.");
@@ -527,6 +553,16 @@ export function PreTourPlansView({
               <RefreshCw className="mr-2 size-4" />
               Refresh
             </Button>
+            {!showBinOnly && isAdmin ? (
+              <Button variant="outline" asChild>
+                <Link href="/master-data/pre-tours/ai-evaluations">AI Dashboard</Link>
+              </Button>
+            ) : null}
+            {!showBinOnly ? (
+              <Button variant="outline" onClick={() => setAiPlannerOpen(true)} disabled={isReadOnly}>
+                AI Draft
+              </Button>
+            ) : null}
             {!showBinOnly ? (
               <Button
                 className="master-add-btn"
@@ -603,6 +639,7 @@ export function PreTourPlansView({
               setCopySourcePlan(row);
               setCopyDialogOpen(true);
             }}
+            onCreateItinerary={openItineraryLauncher}
             onView={(row) => openDetailSheet("Pre-Tour Details", "Selected pre-tour record details.", row)}
             onEdit={(row) => setDialog({ open: true, mode: "edit", resource: "pre-tours", row })}
             onDelete={(row) => void onDelete("pre-tours", row)}
@@ -657,6 +694,22 @@ export function PreTourPlansView({
         />
       ) : null}
 
+      {aiPlannerOpen ? (
+        <PreTourAIPlannerDialog
+          open={aiPlannerOpen}
+          onOpenChange={setAiPlannerOpen}
+          currencies={currencies}
+          organizations={organizations}
+          operatorMarketContracts={operatorMarketContracts}
+          tourCategories={tourCategories}
+          companyBaseCurrencyCode={companyBaseCurrencyCode}
+          onApplied={(applied) => {
+            void loadData();
+            router.push(`/master-data/pre-tours/${applied.planId}`);
+          }}
+        />
+      ) : null}
+
       {dialog.open ? (
         <PreTourRecordDialog
           open={dialog.open}
@@ -680,6 +733,17 @@ export function PreTourPlansView({
           onSubmit={(form) => void onSave(form)}
         />
       ) : null}
+
+      <ItineraryLauncherDialog
+        open={itineraryLauncher.open}
+        plan={itineraryLauncher.row}
+        onOpenChange={(open) =>
+          setItineraryLauncher((previous) => ({
+            open,
+            row: open ? previous.row : null,
+          }))
+        }
+      />
     </Card>
   );
 }

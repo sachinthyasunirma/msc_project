@@ -96,6 +96,54 @@ export function MediaRightsForm({ form, setForm, attributionPreview }: MediaRigh
         <Label>Review Notes</Label>
         <Textarea value={form.reviewNotes} onChange={(event) => setForm((prev) => ({ ...prev, reviewNotes: event.target.value }))} />
       </div>
+      <div className="space-y-2 md:col-span-2">
+        <Label>Itinerary Usage</Label>
+        <div className="grid gap-3 md:grid-cols-2">
+          <div className="flex items-center justify-between rounded-md border p-3">
+            <Label>Use in itinerary</Label>
+            <Switch
+              checked={form.useInItinerary}
+              onCheckedChange={(checked) => setForm((prev) => ({ ...prev, useInItinerary: checked }))}
+            />
+          </div>
+          <div className="flex items-center justify-between rounded-md border p-3">
+            <Label>Safe for customer share</Label>
+            <Switch
+              checked={form.safeForCustomerShare}
+              onCheckedChange={(checked) => setForm((prev) => ({ ...prev, safeForCustomerShare: checked }))}
+            />
+          </div>
+          <div className="flex items-center justify-between rounded-md border p-3">
+            <Label>Eligible for hero media</Label>
+            <Switch
+              checked={form.eligibleForItineraryHero}
+              onCheckedChange={(checked) => setForm((prev) => ({ ...prev, eligibleForItineraryHero: checked }))}
+            />
+          </div>
+          <div className="flex items-center justify-between rounded-md border p-3">
+            <Label>Eligible for gallery</Label>
+            <Switch
+              checked={form.eligibleForItineraryGallery}
+              onCheckedChange={(checked) => setForm((prev) => ({ ...prev, eligibleForItineraryGallery: checked }))}
+            />
+          </div>
+          <div className="space-y-2 md:col-span-2">
+            <Label>Itinerary Priority</Label>
+            <Input
+              type="number"
+              min={0}
+              max={100}
+              value={form.itineraryPriority}
+              onChange={(event) =>
+                setForm((prev) => ({
+                  ...prev,
+                  itineraryPriority: Math.max(0, Math.min(100, Number(event.target.value || 0))),
+                }))
+              }
+            />
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

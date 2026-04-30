@@ -126,6 +126,27 @@ async function ensureHotelOwned(companyId: string, hotelId: string) {
   }
 }
 
+async function ensureLocationInCompany(companyId: string, locationId: string) {
+  const [location] = await db
+    .select({ id: schema.transportLocation.id })
+    .from(schema.transportLocation)
+    .where(
+      and(
+        eq(schema.transportLocation.id, locationId),
+        eq(schema.transportLocation.companyId, companyId)
+      )
+    )
+    .limit(1);
+
+  if (!location) {
+    throw new AccommodationError(
+      400,
+      "LOCATION_NOT_FOUND",
+      "Selected system location was not found in this company."
+    );
+  }
+}
+
 async function ensureRoomTypeInHotel(hotelId: string, roomTypeId: string) {
   const [roomType] = await db
     .select({ id: schema.roomType.id })
@@ -250,6 +271,9 @@ export async function createHotel(payload: unknown, headers: Headers) {
   }
 
   const companyId = await getCompanyId(headers);
+  if (parsed.data.locationId) {
+    await ensureLocationInCompany(companyId, parsed.data.locationId);
+  }
   try {
     const [created] = await db
       .insert(schema.hotel)
@@ -272,6 +296,9 @@ export async function updateHotel(hotelId: string, payload: unknown, headers: He
   }
 
   const companyId = await getCompanyId(headers);
+  if (parsed.data.locationId) {
+    await ensureLocationInCompany(companyId, parsed.data.locationId);
+  }
   try {
     const [updated] = await db
       .update(schema.hotel)

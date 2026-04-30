@@ -48,6 +48,11 @@ const mediaBaseMetadataSchema = z.object({
   derivativesAllowed: z.boolean().optional().nullable(),
   reviewStatus: mediaReviewStatusSchema.default("PENDING"),
   reviewNotes: z.string().trim().max(1000).optional().nullable(),
+  useInItinerary: z.boolean().default(false),
+  eligibleForItineraryHero: z.boolean().default(false),
+  eligibleForItineraryGallery: z.boolean().default(false),
+  itineraryPriority: z.coerce.number().int().min(0).max(100).default(0),
+  safeForCustomerShare: z.boolean().default(false),
   isActive: z.boolean().default(true),
 });
 

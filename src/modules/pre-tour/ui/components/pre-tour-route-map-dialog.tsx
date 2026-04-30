@@ -1,6 +1,7 @@
 "use client";
 
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { LoadingState } from "@/components/ui/loading-state";
 import { Switch } from "@/components/ui/switch";
 import { PreTourRouteMap } from "@/modules/pre-tour/ui/components/pre-tour-route-map";
 import { formatDate } from "@/modules/pre-tour/lib/pre-tour-management-utils";
@@ -11,6 +12,8 @@ type PreTourRouteMapDialogProps = {
   selectedPlan: Record<string, unknown> | null;
   routePathLabel: string;
   routeMapLocations: Array<{ id: string; name: string; coordinates: [number, number] }>;
+  routeDataLoading: boolean;
+  routeTransportLoaded: boolean;
   useRoadRoute: boolean;
   onUseRoadRouteChange: (value: boolean) => void;
   routeMeta: { distanceKm: number | null; durationMin: number | null };
@@ -23,6 +26,8 @@ export function PreTourRouteMapDialog({
   selectedPlan,
   routePathLabel,
   routeMapLocations,
+  routeDataLoading,
+  routeTransportLoaded,
   useRoadRoute,
   onUseRoadRouteChange,
   routeMeta,
@@ -58,7 +63,11 @@ export function PreTourRouteMapDialog({
                   Toggle real-road routing or direct straight-line path.
                 </p>
               </div>
-              <Switch checked={useRoadRoute} onCheckedChange={onUseRoadRouteChange} />
+              <Switch
+                checked={useRoadRoute}
+                onCheckedChange={onUseRoadRouteChange}
+                disabled={routeDataLoading || !routeTransportLoaded || routeMapLocations.length === 0}
+              />
             </div>
             <div className="text-muted-foreground">
               Distance:{" "}
@@ -73,7 +82,15 @@ export function PreTourRouteMapDialog({
               </span>
             </div>
           </div>
-          {routeMapLocations.length > 0 ? (
+          {routeDataLoading || !routeTransportLoaded ? (
+            <div className="flex h-[52vh] min-h-[260px] max-h-[680px] items-center justify-center rounded-md border bg-muted/20 px-4 sm:h-[58vh] lg:h-[64vh]">
+              <LoadingState
+                compact
+                title="Loading route map"
+                description="Fetching transport stops and preparing the map preview."
+              />
+            </div>
+          ) : routeMapLocations.length > 0 ? (
             <PreTourRouteMap
               locations={routeMapLocations}
               useRoadRoute={useRoadRoute}

@@ -47,11 +47,7 @@ export function DashboardSidebarMain({
           <Collapsible
             key={item.title}
             asChild
-            defaultOpen={
-              pathname === item.url ||
-              Boolean(item.items?.some((subItem) => pathname === subItem.url)) ||
-              item.isActive
-            }
+            defaultOpen
           >
             <SidebarMenuItem>
               <SidebarMenuButton

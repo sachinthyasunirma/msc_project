@@ -155,6 +155,10 @@ function createInitialState(args: {
     roomRows.length > 0 && typeof roomRows[0] === "object" && roomRows[0] !== null
       ? (roomRows[0] as Record<string, unknown>)
       : null;
+  const snapshotBuy = snapshot?.buy;
+  const snapshotCommercial = snapshot?.commercial;
+  const snapshotOverride = snapshot?.override;
+  const snapshotSource = snapshot?.source;
 
   return {
     code: toStringValue(row?.code),
@@ -173,21 +177,21 @@ function createInitialState(args: {
         ? "INCLUSIVE"
         : "EXCLUSIVE",
     currencyCode:
-      toStringValue(row?.currencyCode || snapshot?.buy.currencyCode || selectedPlan?.currencyCode) ||
+      toStringValue(row?.currencyCode || snapshotBuy?.currencyCode || selectedPlan?.currencyCode) ||
       companyBaseCurrencyCode,
     pax: toNumberString(row?.pax, "1"),
     units: toNumberString(row?.units, "1"),
     nights: toNumberString(row?.nights, "1"),
-    buyBaseAmount: toNumberString(snapshot?.buy.baseAmount ?? row?.baseAmount, "0"),
-    buyTaxAmount: toNumberString(snapshot?.buy.taxAmount ?? row?.taxAmount, "0"),
-    overrideSourceRate: Boolean(snapshot?.override.applied),
-    overrideReason: toStringValue(snapshot?.override.reason),
+    buyBaseAmount: toNumberString(snapshotBuy?.baseAmount ?? row?.baseAmount, "0"),
+    buyTaxAmount: toNumberString(snapshotBuy?.taxAmount ?? row?.taxAmount, "0"),
+    overrideSourceRate: Boolean(snapshotOverride?.applied),
+    overrideReason: toStringValue(snapshotOverride?.reason),
     markupMode:
-      snapshot?.commercial.markupMode === "PERCENT" || snapshot?.commercial.markupMode === "FIXED"
-        ? snapshot.commercial.markupMode
+      snapshotCommercial?.markupMode === "PERCENT" || snapshotCommercial?.markupMode === "FIXED"
+        ? snapshotCommercial.markupMode
         : "NONE",
-    markupValue: toNumberString(snapshot?.commercial.markupValue, "0"),
-    selectedRateId: toStringValue(row?.rateId || snapshot?.source.sourceRateId),
+    markupValue: toNumberString(snapshotCommercial?.markupValue, "0"),
+    selectedRateId: toStringValue(row?.rateId || snapshotSource?.sourceRateId),
     accommodation: {
       hotelId: toStringValue(row?.serviceId || readDimension(snapshot, "hotelId")),
       stayDate: toDateInput(

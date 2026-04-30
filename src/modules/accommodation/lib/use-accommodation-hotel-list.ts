@@ -324,6 +324,7 @@ export function useAccommodationHotelList({
       code: hotelDialog.form.code,
       name: hotelDialog.form.name,
       description: hotelDialog.form.description || null,
+      locationId: hotelDialog.form.locationId || null,
       address:
         hotelDialog.form.address.trim() || selectedLocation?.address || hotelDialog.form.address,
       city: selectedLocation?.city || hotelDialog.form.city,

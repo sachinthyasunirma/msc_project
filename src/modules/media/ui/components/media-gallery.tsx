@@ -1,6 +1,6 @@
 "use client";
 
-import { Edit3, ImagePlus, Star, Trash2 } from "lucide-react";
+import { Edit3, ImagePlus, Images, Star, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { LoadingState } from "@/components/ui/loading-state";
@@ -81,6 +81,23 @@ export function MediaGallery({
                   <p className="text-xs text-muted-foreground">{asset.sourceType.replaceAll("_", " ")}</p>
                   {asset.attributionText ? (
                     <p className="text-xs text-muted-foreground">{asset.attributionText}</p>
+                  ) : null}
+                  {asset.useInItinerary ? (
+                    <div className="flex flex-wrap gap-2 pt-1 text-[11px] text-muted-foreground">
+                      <span className="inline-flex items-center gap-1 rounded-full border px-2 py-1">
+                        <Images className="size-3" />
+                        Itinerary
+                      </span>
+                      {asset.eligibleForItineraryHero ? (
+                        <span className="rounded-full border px-2 py-1">Hero</span>
+                      ) : null}
+                      {asset.eligibleForItineraryGallery ? (
+                        <span className="rounded-full border px-2 py-1">Gallery</span>
+                      ) : null}
+                      {asset.safeForCustomerShare ? (
+                        <span className="rounded-full border px-2 py-1">Share-safe</span>
+                      ) : null}
+                    </div>
                   ) : null}
                 </div>
                 <div className="flex flex-wrap gap-2">
